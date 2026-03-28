@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-gray-950 text-white antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
