@@ -7,7 +7,7 @@ interface CentsDisplayProps {
 
 export default function CentsDisplay({ cents, status }: CentsDisplayProps) {
   return (
-    <div className={`text-2xl font-mono font-semibold tabular-nums transition-colors duration-150 ${statusColor(status)}`}>
+    <div className={`text-4xl font-mono font-semibold tabular-nums transition-colors duration-150 ${statusColor(status)}`}>
       {formatCents(cents)}
     </div>
   )

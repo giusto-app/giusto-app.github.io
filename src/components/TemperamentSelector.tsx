@@ -20,7 +20,7 @@ export default function TemperamentSelector({ value, onChange }: TemperamentSele
               key={key}
               onClick={() => onChange(key)}
               className={[
-                'flex-1 py-2 px-1 rounded-lg text-xs font-semibold transition-all active:scale-95 touch-none',
+                'flex-1 py-2.5 px-1 rounded-lg text-sm font-semibold transition-all active:scale-95 touch-none',
                 isActive
                   ? 'bg-gray-700 text-white shadow'
                   : 'text-gray-400 hover:text-gray-200',
@@ -33,7 +33,7 @@ export default function TemperamentSelector({ value, onChange }: TemperamentSele
       </div>
 
       {/* Description */}
-      <p className="text-xs text-gray-400 text-center leading-snug px-2 h-[3.5rem] overflow-hidden">
+      <p className="text-sm text-gray-400 text-center leading-snug px-2 h-[4rem] overflow-hidden">
         {selected.description}
       </p>
     </div>

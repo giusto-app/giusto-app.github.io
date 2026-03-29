@@ -33,7 +33,7 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
     : null
 
   return (
-    <div className="min-h-full px-4 py-6 flex flex-col gap-5">
+    <div className="min-h-full px-4 md:px-8 py-6 flex flex-col gap-5">
       <header>
         <h1 className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-400">
           Progress
@@ -41,7 +41,7 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
       </header>
 
       {/* Summary stats */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 max-w-none">
         <StatCard label="Sessions" value={String(sessions.length)} />
         <StatCard label="Best" value={`${best}%`} />
         {trend !== null && (
@@ -54,17 +54,20 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
         <StatCard label="Latest" value={`${latest.percentInTune}%`} />
       </div>
 
-      {/* Chart */}
-      <div className="bg-gray-900 rounded-xl p-3">
-        <p className="text-xs text-gray-500 mb-2">% in tune per session (last 20)</p>
-        <SessionBarChart sessions={sessions} />
-      </div>
+      {/* Chart + history: side by side on tablet */}
+      <div className="flex flex-col md:flex-row gap-5 flex-1">
+        <div className="bg-gray-900 rounded-xl p-3 md:flex-1">
+          <p className="text-xs text-gray-500 mb-2">% in tune per session (last 20)</p>
+          <SessionBarChart sessions={sessions} />
+        </div>
 
-      {/* History list */}
-      <SessionHistoryList
-        sessions={sessions}
-        onClear={() => setSessions([])}
-      />
+        <div className="md:flex-1">
+          <SessionHistoryList
+            sessions={sessions}
+            onClear={() => setSessions([])}
+          />
+        </div>
+      </div>
     </div>
   )
 }

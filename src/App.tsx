@@ -39,12 +39,6 @@ export default function App() {
       </div>
 
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
-      <a
-        href="/?compare"
-        className="text-center text-xs text-gray-700 hover:text-gray-500 py-1 transition-colors"
-      >
-        Staff rendering comparison
-      </a>
     </div>
   )
 }

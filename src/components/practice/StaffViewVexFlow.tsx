@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Renderer, Stave, StaveNote, Voice, Formatter, Accidental } from 'vexflow'
 import { centsToHsl } from '../../utils/colorUtils'
+import { formatCents } from '../../utils/noteUtils'
 
 interface NoteData {
   midiNote: number
@@ -16,7 +17,6 @@ interface StaffViewVexFlowProps {
 }
 
 function toVFKey(noteName: string, octave: number): string {
-  // VexFlow key format: "c/4", "d#/5", "bb/3"
   return `${noteName.toLowerCase().replace('#', '#')}/${octave}`
 }
 
@@ -29,15 +29,14 @@ export default function StaffViewVexFlow({ noteEvents }: StaffViewVexFlowProps) 
     el.innerHTML = ''
 
     const staveX = 10
-    const staveY = 30
+    const staveY = 40
     const staveWidth = Math.max(300, 50 + noteEvents.length * 55)
-    const svgHeight = 170
+    const svgHeight = 140
 
     const renderer = new Renderer(el, Renderer.Backends.SVG)
     renderer.resize(staveWidth + 20, svgHeight)
 
     const context = renderer.getContext()
-    // Style staff lines and clef to be visible on dark background
     context.setFillStyle('#9ca3af')
     context.setStrokeStyle('#6b7280')
 
@@ -68,20 +67,59 @@ export default function StaffViewVexFlow({ noteEvents }: StaffViewVexFlowProps) 
     new Formatter().joinVoices([voice]).format([voice], staveWidth - 80)
     voice.draw(context, stave)
 
-    // Tint staff lines/clef for dark background; hide stems for cleaner look
     const svg = el.querySelector('svg')
     if (svg) {
       svg.style.background = 'transparent'
-      // Color non-note paths (staff lines, clef) to gray
       svg.querySelectorAll('path:not([style*="fill"])').forEach(p => {
         ;(p as SVGElement).style.stroke = '#4b5563'
         ;(p as SVGElement).style.fill = '#4b5563'
       })
-      // Tint stems to match their notehead color (already set via setStyle)
       svg.querySelectorAll('.vf-stem').forEach(s => {
         ;(s as SVGElement).style.stroke = '#9ca3af'
       })
     }
+
+    // ── Labels: separate SVG appended after VexFlow's SVG ────────────────────
+    // We must NOT modify VexFlow's SVG because it sets its own viewBox.
+    // Instead we create a sibling SVG sized to the same width, only tall enough
+    // for the two label rows.
+    const labelSvgH = 30
+    const ns = 'http://www.w3.org/2000/svg'
+    const labelSvg = document.createElementNS(ns, 'svg')
+    labelSvg.setAttribute('width', String(staveWidth + 20))
+    labelSvg.setAttribute('height', String(labelSvgH))
+    labelSvg.setAttribute('viewBox', `0 0 ${staveWidth + 20} ${labelSvgH}`)
+    labelSvg.style.display = 'block'
+    labelSvg.style.marginTop = '-4px'  // close the gap between the two SVGs
+
+    vfNotes.forEach((vfNote, i) => {
+      const event = noteEvents[i]!
+      const x = vfNote.getAbsoluteX()
+      const color = centsToHsl(event.absCentsAvg)
+
+      const nameEl = document.createElementNS(ns, 'text')
+      nameEl.setAttribute('x', String(x))
+      nameEl.setAttribute('y', '11')
+      nameEl.setAttribute('fill', '#9ca3af')
+      nameEl.setAttribute('font-size', '9')
+      nameEl.setAttribute('text-anchor', 'middle')
+      nameEl.setAttribute('font-family', 'sans-serif')
+      nameEl.textContent = `${event.noteName}${event.octave}`
+      labelSvg.appendChild(nameEl)
+
+      const centsEl = document.createElementNS(ns, 'text')
+      centsEl.setAttribute('x', String(x))
+      centsEl.setAttribute('y', '24')
+      centsEl.setAttribute('fill', color)
+      centsEl.setAttribute('font-size', '9')
+      centsEl.setAttribute('font-weight', '600')
+      centsEl.setAttribute('text-anchor', 'middle')
+      centsEl.setAttribute('font-family', 'monospace')
+      centsEl.textContent = formatCents(event.avgCents)
+      labelSvg.appendChild(centsEl)
+    })
+
+    el.appendChild(labelSvg)
   }, [noteEvents])
 
   return <div ref={containerRef} className="overflow-x-auto" />

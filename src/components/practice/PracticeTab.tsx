@@ -37,8 +37,6 @@ export default function PracticeTab({
 
   function handleTemperamentChange(key: TemperamentKey) {
     onTemperamentChange(key)
-    // temperament offsets are captured at startRecording() time, so changes
-    // between sessions are fine — no need to restart anything
   }
 
   function handleSave() {
@@ -50,11 +48,13 @@ export default function PracticeTab({
   if (recorderState === 'done' && session) {
     return (
       <div className="min-h-full overflow-y-auto px-4 py-6">
-        <SessionResults
-          session={session}
-          onSave={handleSave}
-          onDiscard={reset}
-        />
+        <div className="max-w-sm md:max-w-none mx-auto">
+          <SessionResults
+            session={session}
+            onSave={handleSave}
+            onDiscard={reset}
+          />
+        </div>
       </div>
     )
   }
@@ -62,14 +62,14 @@ export default function PracticeTab({
   // ── Pre-countdown ──────────────────────────────────────────────────────────
   if (recorderState === 'pre-countdown') {
     return (
-      <div className="min-h-full flex flex-col items-center justify-between py-6 px-4">
-        <header className="w-full max-w-sm text-center">
+      <div className="min-h-full flex flex-col items-center justify-between py-6 px-4 md:px-10">
+        <header className="w-full max-w-sm md:max-w-none text-center">
           <p className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-400">
             {SCALES[scaleKey].label}
           </p>
         </header>
 
-        <main className="w-full max-w-sm flex flex-col items-center gap-4 flex-1 justify-center">
+        <main className="w-full max-w-sm md:max-w-none flex flex-col items-center gap-4 flex-1 justify-center">
           <p className="text-sm text-gray-400 tracking-widest uppercase">Get ready…</p>
           <div className="w-28 h-28 flex items-center justify-center rounded-full border-2 border-amber-500/40 bg-amber-500/10">
             <span className="text-7xl font-bold text-amber-400 tabular-nums">{preCountdown}</span>
@@ -93,14 +93,14 @@ export default function PracticeTab({
   if (recorderState === 'recording') {
     const note = liveNote
     return (
-      <div className="min-h-full flex flex-col items-center justify-between py-6 px-4">
-        <header className="w-full max-w-sm text-center">
+      <div className="min-h-full flex flex-col items-center justify-between py-6 px-4 md:px-10">
+        <header className="w-full max-w-sm md:max-w-none text-center">
           <p className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-400">
             Recording · {SCALES[scaleKey].label}
           </p>
         </header>
 
-        <main className="w-full max-w-sm flex flex-col items-center gap-3 flex-1 justify-center">
+        <main className="w-full max-w-sm md:max-w-none flex flex-col items-center gap-3 flex-1 justify-center">
           <div className="h-28 flex items-center justify-center">
             {note
               ? <NoteDisplay noteName={note.noteName} octave={note.octave} status={note.status} />
@@ -141,14 +141,14 @@ export default function PracticeTab({
 
   // ── Idle ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-full flex flex-col items-center justify-between py-6 px-4">
-      <header className="w-full max-w-sm text-center">
+    <div className="min-h-full flex flex-col items-center justify-between py-6 px-4 md:px-10">
+      <header className="w-full max-w-sm md:max-w-none text-center">
         <h1 className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-400">
           Practice
         </h1>
       </header>
 
-      <main className="w-full max-w-sm flex flex-col gap-5 flex-1 justify-center">
+      <main className="w-full max-w-sm md:max-w-none flex flex-col gap-5 flex-1 justify-center">
         {/* Scale */}
         <section>
           <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">
