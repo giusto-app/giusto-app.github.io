@@ -8,13 +8,15 @@ import type { ScaleKey } from '../utils/scaleDefinitions'
 
 export type RecorderState = 'idle' | 'pre-countdown' | 'recording' | 'done'
 
+// 0 means "free" — record until the user taps Stop
+export type SessionDuration = 10 | 30 | 60 | 0
+
 const PRE_COUNTDOWN_SECS = 3
-const RECORDING_SECS = 10
 
 export function useSessionRecorder() {
   const [recorderState, setRecorderState] = useState<RecorderState>('idle')
   const [preCountdown, setPreCountdown] = useState(PRE_COUNTDOWN_SECS)
-  const [countdown, setCountdown] = useState(RECORDING_SECS)
+  const [countdown, setCountdown] = useState(10)
   const [liveNote, setLiveNote] = useState<NoteInfo | null>(null)
   const [session, setSession] = useState<PracticeSession | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -24,9 +26,13 @@ export function useSessionRecorder() {
   const rafRef = useRef<number | null>(null)
   const samplesRef = useRef<PitchSample[]>([])
   const startTimeRef = useRef(0)
-  const lastCountdownRef = useRef(RECORDING_SECS)
+  const lastCountdownRef = useRef(10)
   const lastPreCountdownRef = useRef(PRE_COUNTDOWN_SECS)
   const inRecordingPhaseRef = useRef(false)
+  // Store session params so stopRecording() can finish free-mode sessions
+  const scaleKeyRef = useRef<ScaleKey>('d-major')
+  const temperamentKeyRef = useRef<TemperamentKey>('equal')
+  const durationSecsRef = useRef<SessionDuration>(10)
 
   const cleanup = useCallback(() => {
     if (rafRef.current !== null) {
@@ -39,21 +45,48 @@ export function useSessionRecorder() {
     audioCtxRef.current = null
   }, [])
 
+  // Stop a free-mode session and build results
+  const stopRecording = useCallback(() => {
+    if (!inRecordingPhaseRef.current) return
+    const preDurationMs = PRE_COUNTDOWN_SECS * 1000
+    const recordElapsed = performance.now() - startTimeRef.current - preDurationMs
+    cleanup()
+    const notes = groupSamplesIntoNoteEvents(samplesRef.current)
+    const built = buildSession(
+      notes,
+      scaleKeyRef.current,
+      temperamentKeyRef.current,
+      Math.max(1000, recordElapsed),
+    )
+    setSession(built)
+    setLiveNote(null)
+    setRecorderState('done')
+  }, [cleanup])
+
   const startRecording = useCallback(async (
     scaleKey: ScaleKey,
     temperamentKey: TemperamentKey,
     temperamentOffsets: readonly number[],
+    durationSecs: SessionDuration = 10,
+    concertPitchHz = 440,
   ) => {
+    // Store params for free-mode stop
+    scaleKeyRef.current = scaleKey
+    temperamentKeyRef.current = temperamentKey
+    durationSecsRef.current = durationSecs
+
     setErrorMessage(null)
     setSession(null)
     setLiveNote(null)
     samplesRef.current = []
-    lastCountdownRef.current = RECORDING_SECS
     lastPreCountdownRef.current = PRE_COUNTDOWN_SECS
     inRecordingPhaseRef.current = false
-    setCountdown(RECORDING_SECS)
     setPreCountdown(PRE_COUNTDOWN_SECS)
     setRecorderState('pre-countdown')
+
+    const initialCountdown = durationSecs > 0 ? durationSecs : 0
+    lastCountdownRef.current = initialCountdown
+    setCountdown(initialCountdown)
 
     try {
       // getUserMedia must be the first await inside a user-gesture handler (iOS Safari)
@@ -76,7 +109,7 @@ export function useSessionRecorder() {
 
       startTimeRef.current = performance.now()
       const preDurationMs = PRE_COUNTDOWN_SECS * 1000
-      const recordDurationMs = RECORDING_SECS * 1000
+      const recordDurationMs = durationSecs > 0 ? durationSecs * 1000 : Infinity
 
       const detect = () => {
         const elapsed = performance.now() - startTimeRef.current
@@ -100,14 +133,16 @@ export function useSessionRecorder() {
 
         const recordElapsed = elapsed - preDurationMs
 
-        // Update recording countdown
-        const newCountdown = Math.max(0, Math.ceil((recordDurationMs - recordElapsed) / 1000))
-        if (newCountdown !== lastCountdownRef.current) {
-          lastCountdownRef.current = newCountdown
-          setCountdown(newCountdown)
+        // Update countdown display (fixed durations only)
+        if (durationSecs > 0) {
+          const newCountdown = Math.max(0, Math.ceil((recordDurationMs - recordElapsed) / 1000))
+          if (newCountdown !== lastCountdownRef.current) {
+            lastCountdownRef.current = newCountdown
+            setCountdown(newCountdown)
+          }
         }
 
-        // Stop when recording time is up
+        // Auto-stop when fixed recording time is up
         if (recordElapsed >= recordDurationMs) {
           cleanup()
           const notes = groupSamplesIntoNoteEvents(samplesRef.current)
@@ -123,7 +158,7 @@ export function useSessionRecorder() {
         const [frequency, clarity] = detector.findPitch(input, audioCtx.sampleRate)
 
         if (clarity > 0.9 && frequency > 60 && frequency < 4200) {
-          const noteInfo = frequencyToNote(frequency, temperamentOffsets)
+          const noteInfo = frequencyToNote(frequency, temperamentOffsets, concertPitchHz)
           setLiveNote(noteInfo)
 
           samplesRef.current.push({
@@ -154,7 +189,7 @@ export function useSessionRecorder() {
   const reset = useCallback(() => {
     cleanup()
     setRecorderState('idle')
-    setCountdown(RECORDING_SECS)
+    setCountdown(durationSecsRef.current > 0 ? durationSecsRef.current : 0)
     setPreCountdown(PRE_COUNTDOWN_SECS)
     setLiveNote(null)
     setSession(null)
@@ -170,6 +205,7 @@ export function useSessionRecorder() {
     session,
     errorMessage,
     startRecording,
+    stopRecording,
     reset,
     cleanup,
   }

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
 import TunerMeter from '../TunerMeter'
 import NoteDisplay from '../NoteDisplay'
@@ -6,19 +7,33 @@ import FrequencyDisplay from '../FrequencyDisplay'
 import StartButton from '../StartButton'
 import TemperamentSelector from '../TemperamentSelector'
 import WakeLockToggle from '../WakeLockToggle'
+import ConcertPitchSelector from '../ConcertPitchSelector'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
+import { type ConcertPitchHz } from '../../utils/concertPitch'
 
 interface TunerTabProps {
   temperamentKey: TemperamentKey
   onTemperamentChange: (key: TemperamentKey) => void
+  concertPitch: ConcertPitchHz
+  onConcertPitchChange: (hz: ConcertPitchHz) => void
 }
 
-export default function TunerTab({ temperamentKey, onTemperamentChange }: TunerTabProps) {
-  const { note, listeningState, errorMessage, start, stop, setTemperament } = usePitchDetection()
+export default function TunerTab({ temperamentKey, onTemperamentChange, concertPitch, onConcertPitchChange }: TunerTabProps) {
+  const { note, listeningState, errorMessage, start, stop, setTemperament, setConcertPitch } = usePitchDetection()
+
+  // Sync concert pitch into the detection hook whenever it changes
+  useEffect(() => {
+    setConcertPitch(concertPitch)
+  }, [concertPitch, setConcertPitch])
 
   function handleTemperamentChange(key: TemperamentKey) {
     onTemperamentChange(key)
     setTemperament(TEMPERAMENTS[key].offsets)
+  }
+
+  function handleConcertPitchChange(hz: ConcertPitchHz) {
+    onConcertPitchChange(hz)
+    setConcertPitch(hz)
   }
 
   return (
@@ -43,11 +58,12 @@ export default function TunerTab({ temperamentKey, onTemperamentChange }: TunerT
             : <span className="text-8xl font-bold text-gray-700">—</span>}
         </div>
 
-        {/* Frequency */}
-        <div className="h-7 flex items-center">
+        {/* Frequency + concert pitch indicator */}
+        <div className="h-7 flex items-center gap-3">
           {note
             ? <FrequencyDisplay frequency={note.frequency} />
             : <span className="text-lg font-mono text-gray-600">— Hz</span>}
+          <span className="text-xs font-mono text-gray-600">A = {concertPitch}</span>
         </div>
 
         {/* Meter */}
@@ -83,6 +99,14 @@ export default function TunerTab({ temperamentKey, onTemperamentChange }: TunerT
             Temperament
           </p>
           <TemperamentSelector value={temperamentKey} onChange={handleTemperamentChange} />
+        </div>
+
+        {/* Concert pitch */}
+        <div className="w-full">
+          <p className="text-sm font-semibold tracking-widest uppercase text-gray-500 text-center mb-2">
+            Concert Pitch
+          </p>
+          <ConcertPitchSelector value={concertPitch} onChange={handleConcertPitchChange} />
         </div>
       </main>
 

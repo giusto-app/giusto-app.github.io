@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSessionRecorder } from '../../hooks/useSessionRecorder'
+import { useSessionRecorder, type SessionDuration } from '../../hooks/useSessionRecorder'
 import TunerMeter from '../TunerMeter'
 import NoteDisplay from '../NoteDisplay'
 import CentsDisplay from '../CentsDisplay'
@@ -10,29 +10,36 @@ import RecordButton from './RecordButton'
 import SessionResults from './SessionResults'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
 import { SCALES, type ScaleKey } from '../../utils/scaleDefinitions'
+import { type ConcertPitchHz } from '../../utils/concertPitch'
 
 interface PracticeTabProps {
   temperamentKey: TemperamentKey
   onTemperamentChange: (key: TemperamentKey) => void
+  concertPitch: ConcertPitchHz
   onSessionSaved: () => void  // navigate to Progress tab after save
 }
 
 export default function PracticeTab({
   temperamentKey,
   onTemperamentChange,
+  concertPitch,
   onSessionSaved,
 }: PracticeTabProps) {
   const [scaleKey, setScaleKey] = useState<ScaleKey>('d-major')
+  const [duration, setDuration] = useState<SessionDuration>(30)
   const {
     recorderState, preCountdown, countdown, liveNote, session, errorMessage,
-    startRecording, reset, cleanup,
+    startRecording, stopRecording, reset, cleanup,
   } = useSessionRecorder()
 
   // Cleanup audio when tab unmounts
   useEffect(() => () => cleanup(), [cleanup])
 
   function handleStart() {
-    startRecording(scaleKey, temperamentKey, TEMPERAMENTS[temperamentKey].offsets)
+    // frequencyToNote needs concert pitch; pass it via the offsets-aware path
+    // by temporarily patching the offsets. Actually: pass concertPitch through
+    // the recorder so it's available during pitch detection.
+    startRecording(scaleKey, temperamentKey, TEMPERAMENTS[temperamentKey].offsets, duration, concertPitch)
   }
 
   function handleTemperamentChange(key: TemperamentKey) {
@@ -126,13 +133,15 @@ export default function PracticeTab({
           </div>
         </main>
 
-        <footer className="pb-2">
+        <footer className="pb-2 flex flex-col items-center gap-2">
           <RecordButton
             recorderState={recorderState}
             preCountdown={preCountdown}
             countdown={countdown}
+            duration={duration}
             onStart={handleStart}
             onReset={reset}
+            onStop={stopRecording}
           />
         </footer>
       </div>
@@ -165,9 +174,33 @@ export default function PracticeTab({
           <TemperamentSelector value={temperamentKey} onChange={handleTemperamentChange} />
         </section>
 
+        {/* Duration */}
+        <section>
+          <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">
+            Duration
+          </p>
+          <div className="flex gap-2">
+            {([10, 30, 60, 0] as SessionDuration[]).map(d => (
+              <button
+                key={d}
+                onClick={() => setDuration(d)}
+                className={[
+                  'flex-1 py-2 rounded-xl text-sm font-medium transition-colors',
+                  duration === d
+                    ? 'bg-gray-700 text-white'
+                    : 'bg-gray-900 text-gray-500 hover:bg-gray-800 hover:text-gray-300',
+                ].join(' ')}
+              >
+                {d === 0 ? 'Free' : `${d}s`}
+              </button>
+            ))}
+          </div>
+        </section>
+
         {/* Instructions */}
         <p className="text-xs text-gray-600 text-center">
-          Tap Record, then play your scale. The app will track your intonation for 10 seconds.
+          Tap Record, play your scale, then review your results.
+          {duration === 0 ? ' Tap Stop when you\'re done.' : ''}
         </p>
 
         {/* Error */}
@@ -183,8 +216,10 @@ export default function PracticeTab({
           recorderState={recorderState}
           preCountdown={preCountdown}
           countdown={countdown}
+          duration={duration}
           onStart={handleStart}
           onReset={reset}
+          onStop={stopRecording}
         />
       </footer>
     </div>

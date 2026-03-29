@@ -19,13 +19,17 @@ export interface NoteInfo {
  * e.g. Equal = all zeros; Pythagorean A = +5.865¢
  * The reported cents are deviation from the *temperament's* ideal pitch for
  * that note, so 0¢ always means perfectly in tune for the chosen system.
+ *
+ * concertPitchHz: the reference A4 frequency (default 440). Changing this
+ * shifts all note detection so that e.g. 442 Hz reads as A4 +0¢ when set to 442.
  */
 export function frequencyToNote(
   frequency: number,
   temperamentOffsets: readonly number[],
+  concertPitchHz = 440,
 ): NoteInfo {
-  // Cents above/below A4 (440 Hz) in equal temperament
-  const centsDiff = 1200 * Math.log2(frequency / 440)
+  // Cents above/below A4 (concert pitch) in equal temperament
+  const centsDiff = 1200 * Math.log2(frequency / concertPitchHz)
 
   // Nearest semitone from A4 (equal temperament grid)
   const noteIndex = Math.round(centsDiff / 100)

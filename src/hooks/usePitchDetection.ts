@@ -27,10 +27,16 @@ export function usePitchDetection() {
   const smoothedCentsRef = useRef<number>(0)
   // Ref so the rAF loop always reads the latest temperament without restarting
   const temperamentOffsetsRef = useRef<readonly number[]>(TEMPERAMENTS.equal.offsets)
+  const concertPitchRef = useRef<number>(440)
 
   const setTemperament = useCallback((offsets: readonly number[]) => {
     temperamentOffsetsRef.current = offsets
     smoothedCentsRef.current = 0  // reset smoothing on switch
+  }, [])
+
+  const setConcertPitch = useCallback((hz: number) => {
+    concertPitchRef.current = hz
+    smoothedCentsRef.current = 0
   }, [])
 
   const stop = useCallback(() => {
@@ -76,7 +82,7 @@ export function usePitchDetection() {
         const [frequency, clarity] = detector.findPitch(input, audioContext.sampleRate)
 
         if (clarity > 0.9 && frequency > 60 && frequency < 4200) {
-          const raw = frequencyToNote(frequency, temperamentOffsetsRef.current)
+          const raw = frequencyToNote(frequency, temperamentOffsetsRef.current, concertPitchRef.current)
 
           // Smooth the cents value to avoid jittery display
           smoothedCentsRef.current =
@@ -106,5 +112,5 @@ export function usePitchDetection() {
     }
   }, [])
 
-  return { ...state, start, stop, setTemperament }
+  return { ...state, start, stop, setTemperament, setConcertPitch, concertPitchRef }
 }

@@ -1,18 +1,21 @@
-import type { RecorderState } from '../../hooks/useSessionRecorder'
+import type { RecorderState, SessionDuration } from '../../hooks/useSessionRecorder'
 
 interface RecordButtonProps {
   recorderState: RecorderState
   preCountdown: number
   countdown: number
+  duration: SessionDuration
   onStart: () => void
   onReset: () => void
+  onStop: () => void
 }
 
-const TOTAL_SECS = 10
 const RADIUS = 30
 const CIRC = 2 * Math.PI * RADIUS
 
-export default function RecordButton({ recorderState, preCountdown, countdown, onStart, onReset }: RecordButtonProps) {
+export default function RecordButton({
+  recorderState, preCountdown, countdown, duration, onStart, onReset, onStop,
+}: RecordButtonProps) {
   if (recorderState === 'pre-countdown') {
     return (
       <div className="flex flex-col items-center gap-2">
@@ -30,7 +33,8 @@ export default function RecordButton({ recorderState, preCountdown, countdown, o
   }
 
   if (recorderState === 'recording') {
-    const progress = (TOTAL_SECS - countdown) / TOTAL_SECS
+    const isFree = duration === 0
+    const progress = isFree ? 0 : (duration - countdown) / duration
     const dashOffset = CIRC * (1 - progress)
     return (
       <div className="flex flex-col items-center gap-2">
@@ -38,26 +42,40 @@ export default function RecordButton({ recorderState, preCountdown, countdown, o
           {/* Background ring */}
           <svg className="absolute inset-0 -rotate-90" width={80} height={80}>
             <circle cx={40} cy={40} r={RADIUS} fill="none" stroke="#374151" strokeWidth={4} />
-            <circle
-              cx={40} cy={40} r={RADIUS}
-              fill="none"
-              stroke="#ef4444"
-              strokeWidth={4}
-              strokeLinecap="round"
-              strokeDasharray={CIRC}
-              strokeDashoffset={dashOffset}
-              style={{ transition: 'stroke-dashoffset 0.3s linear' }}
-            />
+            {!isFree && (
+              <circle
+                cx={40} cy={40} r={RADIUS}
+                fill="none"
+                stroke="#ef4444"
+                strokeWidth={4}
+                strokeLinecap="round"
+                strokeDasharray={CIRC}
+                strokeDashoffset={dashOffset}
+                style={{ transition: 'stroke-dashoffset 0.3s linear' }}
+              />
+            )}
           </svg>
-          {/* Countdown number */}
-          <span className="text-2xl font-bold text-red-400 tabular-nums">{countdown}</span>
+          {isFree ? (
+            <span className="w-4 h-4 rounded-full bg-red-500 animate-pulse" />
+          ) : (
+            <span className="text-2xl font-bold text-red-400 tabular-nums">{countdown}</span>
+          )}
         </div>
-        <button
-          onClick={onReset}
-          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-        >
-          Cancel
-        </button>
+        {isFree ? (
+          <button
+            onClick={onStop}
+            className="flex items-center gap-2 px-5 py-2 rounded-full bg-red-900/60 text-red-300 text-sm font-semibold active:scale-95 transition-transform touch-none"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={onReset}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            Cancel
+          </button>
+        )}
       </div>
     )
   }
@@ -74,14 +92,15 @@ export default function RecordButton({ recorderState, preCountdown, countdown, o
     )
   }
 
-  // idle
+  // idle — show duration in the button label
+  const label = duration === 0 ? 'Record' : `Record ${duration}s`
   return (
     <button
       onClick={onStart}
       className="flex items-center gap-3 px-8 py-4 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 text-white text-lg font-semibold transition-all touch-none shadow-lg shadow-red-900/40"
     >
       <RecordIcon />
-      Record 10s
+      {label}
     </button>
   )
 }

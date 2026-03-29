@@ -4,12 +4,19 @@ import TunerTab from './components/tuner/TunerTab'
 import PracticeTab from './components/practice/PracticeTab'
 import ProgressTab from './components/progress/ProgressTab'
 import { type TemperamentKey } from './utils/temperaments'
+import { loadConcertPitch, saveConcertPitch, type ConcertPitchHz } from './utils/concertPitch'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('tuner')
   const [temperamentKey, setTemperamentKey] = useState<TemperamentKey>('equal')
+  const [concertPitch, setConcertPitchState] = useState<ConcertPitchHz>(loadConcertPitch)
   // Bumped when a session is saved, so ProgressTab reloads
   const [progressRefreshKey, setProgressRefreshKey] = useState(0)
+
+  function handleConcertPitchChange(hz: ConcertPitchHz) {
+    saveConcertPitch(hz)
+    setConcertPitchState(hz)
+  }
 
   function handleSessionSaved() {
     setProgressRefreshKey(k => k + 1)
@@ -24,12 +31,15 @@ export default function App() {
           <TunerTab
             temperamentKey={temperamentKey}
             onTemperamentChange={setTemperamentKey}
+            concertPitch={concertPitch}
+            onConcertPitchChange={handleConcertPitchChange}
           />
         </div>
         <div className={activeTab === 'practice' ? 'block h-full' : 'hidden'}>
           <PracticeTab
             temperamentKey={temperamentKey}
             onTemperamentChange={setTemperamentKey}
+            concertPitch={concertPitch}
             onSessionSaved={handleSessionSaved}
           />
         </div>
