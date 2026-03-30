@@ -1,4 +1,4 @@
-export type AppTab = 'tuner' | 'practice' | 'progress'
+export type AppTab = 'tuner' | 'practice' | 'progress' | 'guide'
 
 interface TabBarProps {
   activeTab: AppTab
@@ -62,8 +62,21 @@ function ProgressIcon({ active }: { active: boolean }) {
   )
 }
 
+function GuideIcon({ active }: { active: boolean }) {
+  return (
+    <svg width={22} height={22} viewBox="0 0 24 24" fill="none"
+      stroke={active ? '#34d399' : 'currentColor'} strokeWidth={1.8}
+      strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" strokeWidth={2.5} />
+    </svg>
+  )
+}
+
 const TABS: { id: AppTab; label: string; Icon: React.FC<{ active: boolean }> }[] = [
   { id: 'tuner', label: 'Tuner', Icon: TunerIcon },
   { id: 'practice', label: 'Practice', Icon: PracticeIcon },
   { id: 'progress', label: 'Progress', Icon: ProgressIcon },
+  { id: 'guide', label: 'Guide', Icon: GuideIcon },
 ]

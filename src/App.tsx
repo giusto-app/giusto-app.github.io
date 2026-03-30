@@ -3,6 +3,7 @@ import TabBar, { type AppTab } from './components/TabBar'
 import TunerTab from './components/tuner/TunerTab'
 import PracticeTab from './components/practice/PracticeTab'
 import ProgressTab from './components/progress/ProgressTab'
+import GuideTab from './components/guide/GuideTab'
 import { type TemperamentKey } from './utils/temperaments'
 import { loadConcertPitch, saveConcertPitch, type ConcertPitchHz } from './utils/concertPitch'
 
@@ -45,6 +46,9 @@ export default function App() {
         </div>
         <div className={activeTab === 'progress' ? 'block h-full' : 'hidden'}>
           <ProgressTab refreshKey={progressRefreshKey} />
+        </div>
+        <div className={activeTab === 'guide' ? 'block h-full' : 'hidden'}>
+          <GuideTab />
         </div>
       </div>
 
