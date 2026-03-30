@@ -34,7 +34,7 @@ export default function TunerMeter({ cents, status }: TunerMeterProps) {
     <div className="w-full select-none">
 
       {/* ── Main track ── */}
-      <div className="relative w-full h-12 rounded-full bg-gray-900">
+      <div className="relative w-full h-12 rounded-full bg-blue-950/80">
 
         {/* Permanent dim zone tints */}
         <div className="absolute inset-0 rounded-full" style={{
@@ -68,7 +68,7 @@ export default function TunerMeter({ cents, status }: TunerMeterProps) {
         )}
 
         {/* Center pivot line */}
-        <div className="absolute top-0 bottom-0 left-1/2 w-0.5 -translate-x-1/2 bg-white/20 z-10" />
+        <div className="absolute top-0 bottom-0 left-1/2 w-0.5 -translate-x-1/2 bg-white/25 z-10" />
 
         {/* In-tune glow at center */}
         {inTune && hasSignal && (

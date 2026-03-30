@@ -35,7 +35,7 @@ export default function SessionHistoryList({ sessions, onClear }: SessionHistory
 
         return (
           <div key={s.id}
-            className="flex items-center justify-between bg-gray-900 rounded-xl px-3 py-2.5">
+            className="flex items-center justify-between bg-blue-950/80 rounded-xl px-3 py-2.5">
             <div>
               <p className="text-sm text-gray-200 font-medium">{scaleName}</p>
               <p className="text-xs text-gray-500">{date} · {tempName}</p>

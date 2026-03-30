@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
 import { useDrone } from '../../hooks/useDrone'
+import { useWakeLock } from '../../hooks/useWakeLock'
 import TunerMeter from '../TunerMeter'
 import NoteDisplay from '../NoteDisplay'
 import CentsDisplay from '../CentsDisplay'
@@ -24,6 +25,7 @@ interface TunerTabProps {
 export default function TunerTab({ temperamentKey, onTemperamentChange, concertPitch, onConcertPitchChange }: TunerTabProps) {
   const { note, listeningState, errorMessage, start, stop, setTemperament, setConcertPitch } = usePitchDetection()
   const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, stop: droneStop } = useDrone()
+  const { active: wakeLockActive, toggle: wakeLockToggle, supported: wakeLockSupported } = useWakeLock()
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Stop drone when tuner stops
@@ -65,10 +67,10 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
 
       {/* Settings panel */}
       {settingsOpen && (
-        <div className="w-full max-w-sm md:max-w-none mt-3 flex flex-col gap-4 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-4">
+        <div className="w-full max-w-sm md:max-w-none mt-3 flex flex-col gap-4 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md shadow-lg shadow-black/40 px-4 py-4">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold tracking-widest uppercase text-gray-500">Settings</p>
-            <WakeLockToggle />
+            {wakeLockSupported && <WakeLockToggle active={wakeLockActive} toggle={wakeLockToggle} />}
           </div>
           <div>
             <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">Temperament</p>
@@ -91,10 +93,10 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
               : <span className="text-8xl font-bold text-gray-700">—</span>}
         </div>
 
-        {/* Resonance indicator — only renders when ringing */}
-        {resonanceString && (
-          <ResonanceIndicator string={resonanceString} />
-        )}
+        {/* Resonance indicator — fixed height to avoid layout shift */}
+        <div className="h-7 flex items-center justify-center">
+          {resonanceString && <ResonanceIndicator string={resonanceString} />}
+        </div>
 
         {/* Frequency + concert pitch indicator */}
         <div className="h-7 flex items-center gap-3">
@@ -138,13 +140,15 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
           </button>
         )}
 
-        {/* Listening indicator */}
-        {listeningState === 'listening' && !note && (
-          <div className="flex items-center gap-2 text-gray-400 text-base">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            Listening…
-          </div>
-        )}
+        {/* Listening indicator — fixed height to avoid layout shift */}
+        <div className="h-7 flex items-center justify-center">
+          {listeningState === 'listening' && !note && (
+            <div className="flex items-center gap-2 text-gray-400 text-base">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+              Listening…
+            </div>
+          )}
+        </div>
 
         {/* Error */}
         {listeningState === 'error' && errorMessage && (

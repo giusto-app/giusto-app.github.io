@@ -5,19 +5,33 @@
 export default function GuideTab() {
   return (
     <div className="min-h-full overflow-y-auto px-4 md:px-10 py-6">
-      <header className="mb-6">
-        <h1 className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-300 mb-1">
-          Guide
-        </h1>
-        <p className="text-gray-400 text-sm">
-          How to improve your intonation — backed by research.
-        </p>
-      </header>
 
-      <div className="flex flex-col gap-6">
+      {/* Hero */}
+      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-5 mb-8 flex items-center gap-4 shadow-md shadow-black/30">
+        <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
+          <svg width={24} height={24} viewBox="0 0 24 24" fill="none"
+            stroke="#60a5fa" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-white tracking-tight">Giusto</h1>
+          <p className="text-sm text-gray-400">Intonation trainer for bowed string players</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-8">
 
         {/* Recommended workflow */}
-        <Section title="Recommended Practice Workflow">
+        <Section title="Recommended Practice Workflow" icon={
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 11 12 14 22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+        }>
           <p className="text-gray-300 text-sm mb-3">
             Violin pedagogy research (Galamian, Fischer, Zabanal 2019) points to a consistent sequence:
           </p>
@@ -46,8 +60,17 @@ export default function GuideTab() {
           </ol>
         </Section>
 
+        <Divider />
+
         {/* Temperament guide */}
-        <Section title="Which Temperament Should I Use?">
+        <Section title="Which Temperament Should I Use?" icon={
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+        }>
           <p className="text-gray-300 text-sm mb-3">
             No single temperament is correct for all situations. Great string players switch contextually.
           </p>
@@ -56,39 +79,54 @@ export default function GuideTab() {
               name="Pythagorean"
               badge="Melodic"
               badgeColor="bg-blue-900/50 text-blue-300"
+              borderColor="border-blue-500/60"
               description="Use for single-note scale work and melodic passages. Your open strings are already tuned in Pythagorean perfect fifths (3:2 ratio). This system raises leading tones slightly — the 'expressive' intonation you hear from great soloists."
             />
             <TemperamentCard
               name="Just"
               badge="Chords & Double Stops"
-              badgeColor="bg-emerald-900/50 text-emerald-300"
+              badgeColor="bg-teal-900/50 text-teal-300"
+              borderColor="border-teal-500/60"
               description="Use when practicing double stops and sustained chords in chamber music. Pure thirds (5:4 ratio) and fifths (3:2) produce zero acoustic beating — the 'ringing' sound string quartets aim for. Note: a just major third is 14¢ lower than equal temperament."
             />
             <TemperamentCard
               name="Equal"
               badge="With Piano / Ensemble"
-              badgeColor="bg-gray-700 text-gray-300"
+              badgeColor="bg-slate-700/80 text-gray-300"
+              borderColor="border-gray-500/60"
               description="Use when practicing alongside piano or fixed-pitch instruments. Gives you a consistent reference across all 12 keys but none of the intervals are acoustically pure."
             />
             <TemperamentCard
               name="Meantone"
               badge="Baroque"
               badgeColor="bg-amber-900/50 text-amber-300"
+              borderColor="border-amber-500/60"
               description="Use for Baroque repertoire (Bach, Telemann, Vivaldi). Quarter-comma meantone gives pure major thirds and was the standard keyboard tuning from ~1500–1800."
             />
           </div>
         </Section>
 
+        <Divider />
+
         {/* Sympathetic resonance */}
-        <Section title="Listen for the Ring">
+        <Section title="Listen for the Ring" icon={
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M6.3 6.3a8 8 0 0 0 0 11.4" />
+            <path d="M17.7 6.3a8 8 0 0 1 0 11.4" />
+            <path d="M3.5 3.5a14 14 0 0 0 0 17" />
+            <path d="M20.5 3.5a14 14 0 0 1 0 17" />
+          </svg>
+        }>
           <p className="text-gray-300 text-sm mb-3">
             The violin has a built-in feedback mechanism that no app can replace: <strong className="text-gray-200">sympathetic resonance</strong>. When a stopped note perfectly matches the pitch of an open string, that open string vibrates on its own, producing an audible bloom in the sound.
           </p>
           <p className="text-gray-300 text-sm mb-3">
             Teachers describe this resonant spot as "only the size of a pencil point" — training to find it consistently builds exceptional precision.
           </p>
-          <div className="bg-gray-900 rounded-xl p-4">
-            <p className="text-xs font-semibold tracking-widest uppercase text-gray-400 mb-3">Key resonance notes (violin)</p>
+          <div className="bg-amber-900/15 border border-amber-700/25 rounded-xl p-4">
+            <p className="text-xs font-semibold tracking-widest uppercase text-amber-400/70 mb-3">Key resonance notes (violin)</p>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { note: 'G3 / G4', rings: 'G string' },
@@ -97,7 +135,7 @@ export default function GuideTab() {
                 { note: 'E4 / E5', rings: 'E string' },
               ].map(({ note, rings }) => (
                 <div key={note} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400/60 shrink-0" />
                   <span className="text-sm text-gray-300 font-mono">{note}</span>
                   <span className="text-xs text-gray-500">→ {rings}</span>
                 </div>
@@ -109,8 +147,17 @@ export default function GuideTab() {
           </p>
         </Section>
 
+        <Divider />
+
         {/* Common problems */}
-        <Section title="Common Intonation Problems">
+        <Section title="Common Intonation Problems" icon={
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+        }>
           <div className="flex flex-col gap-2">
             <Problem
               title="The note is always in the same direction (always sharp or always flat)"
@@ -135,8 +182,17 @@ export default function GuideTab() {
           </div>
         </Section>
 
+        <Divider />
+
         {/* Reading the results */}
-        <Section title="Reading Your Practice Results">
+        <Section title="Reading Your Practice Results" icon={
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+          </svg>
+        }>
           <div className="flex flex-col gap-3">
             <InfoRow
               color="bg-emerald-500"
@@ -159,11 +215,29 @@ export default function GuideTab() {
           </p>
         </Section>
 
-        {/* Research credits */}
-        <div className="border-t border-gray-800 pt-4 mt-2">
-          <p className="text-xs text-gray-500 text-center">
-            Practice methodology based on research by Galamian, Flesch, Simon Fischer, Suzuki, and Paul Rolland, and peer-reviewed studies by Zabanal (2019) and Frontiers in Psychology (2019, 2021).
+        <Divider />
+
+        {/* About */}
+        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-5 shadow-md shadow-black/30 flex flex-col gap-2">
+          <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-1">About</p>
+          <p className="text-sm text-gray-300">
+            Real-time intonation trainer for violin and bowed string players, built on the Web Audio API and the McLeod pitch detection algorithm.
           </p>
+          <p className="text-sm text-gray-400">
+            Made by <span className="text-white font-medium">Marc Mouriès</span>
+          </p>
+          <div className="text-xs text-gray-600 mt-2 flex flex-col gap-1">
+            <p>Practice methodology based on:</p>
+            <ul className="flex flex-col gap-0.5 pl-2">
+              <li><RefLink href="https://en.wikipedia.org/wiki/Ivan_Galamian">Galamian — Principles of Violin Playing and Teaching</RefLink></li>
+              <li><RefLink href="https://en.wikipedia.org/wiki/Carl_Flesch">Flesch — The Art of Violin Playing / Scale System</RefLink></li>
+              <li><RefLink href="https://www.simonfischeronline.com/store/p3/BASICS.html">Simon Fischer — Basics (Peters Edition)</RefLink></li>
+              <li><RefLink href="https://en.wikipedia.org/wiki/Paul_Rolland">Paul Rolland — The Teaching of Action in String Playing</RefLink></li>
+              <li><RefLink href="https://journals.sagepub.com/doi/10.1177/1948499219851407">Zabanal (2019) — Effects of Drone Practice on Violin/Viola Intonation</RefLink></li>
+              <li><RefLink href="https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2019.00627/full">Pardue &amp; McPherson (2019) — Real-Time Feedback for Violin Intonation</RefLink></li>
+              <li><RefLink href="https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2021.684693/full">Blanco et al. (2021) — Visual and Auditory Feedback in Pitch Matching</RefLink></li>
+            </ul>
+          </div>
         </div>
 
       </div>
@@ -173,10 +247,19 @@ export default function GuideTab() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Divider() {
+  return <hr className="border-white/15" />
+}
+
+function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section>
-      <h2 className="text-sm font-semibold text-gray-200 mb-3">{title}</h2>
+      <div className="flex items-center gap-2 mb-4">
+        {icon && (
+          <span className="text-blue-400 shrink-0">{icon}</span>
+        )}
+        <h2 className="text-base font-bold text-white">{title}</h2>
+      </div>
       {children}
     </section>
   )
@@ -185,11 +268,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="w-6 h-6 rounded-full bg-gray-800 text-gray-300 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+      <span className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
         {n}
       </span>
       <div>
-        <p className="text-sm font-medium text-gray-200">{title}</p>
+        <p className="text-sm font-semibold text-white">{title}</p>
         <p className="text-xs text-gray-400 mt-0.5">{children}</p>
       </div>
     </li>
@@ -197,14 +280,14 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 function TemperamentCard({
-  name, badge, badgeColor, description,
+  name, badge, badgeColor, borderColor, description,
 }: {
-  name: string; badge: string; badgeColor: string; description: string
+  name: string; badge: string; badgeColor: string; borderColor: string; description: string
 }) {
   return (
-    <div className="bg-gray-900 rounded-xl p-3 flex flex-col gap-1.5">
+    <div className={`bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 pl-4 flex flex-col gap-1.5 border-l-2 shadow-md shadow-black/30 ${borderColor}`}>
       <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold text-gray-200">{name}</span>
+        <span className="text-sm font-semibold text-white">{name}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}>{badge}</span>
       </div>
       <p className="text-xs text-gray-400">{description}</p>
@@ -214,10 +297,19 @@ function TemperamentCard({
 
 function Problem({ title, fix }: { title: string; fix: string }) {
   return (
-    <div className="bg-gray-900 rounded-xl p-3">
+    <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 pl-4 border-l-2 border-red-500/40 shadow-md shadow-black/30">
       <p className="text-sm text-gray-300 mb-1">{title}</p>
-      <p className="text-xs text-gray-400"><span className="text-emerald-600 font-medium">Fix: </span>{fix}</p>
+      <p className="text-xs text-gray-400"><span className="text-blue-500 font-medium">Fix: </span>{fix}</p>
     </div>
+  )
+}
+
+function RefLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      className="text-blue-400/70 hover:text-blue-300 transition-colors underline underline-offset-2">
+      {children}
+    </a>
   )
 }
 

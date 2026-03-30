@@ -35,8 +35,8 @@ export default function DroneControl({
     <div className={[
       'rounded-xl border transition-colors',
       active
-        ? 'border-emerald-700/60 bg-emerald-950/30'
-        : 'border-gray-800 bg-gray-900/50',
+        ? 'border-white/30 bg-white/15 shadow-lg shadow-black/20'
+        : 'border-white/20 bg-white/10 shadow-lg shadow-black/30',
     ].join(' ')}>
 
       {/* Header row: always visible */}
@@ -47,7 +47,7 @@ export default function DroneControl({
             Drone
           </span>
           {active && (
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
           )}
         </div>
 
@@ -58,8 +58,8 @@ export default function DroneControl({
             className={[
               'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
               active
-                ? 'bg-emerald-600 text-white'
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200',
+                ? 'bg-blue-600 text-white'
+                : 'bg-blue-900/70 text-gray-400 hover:bg-blue-900/70 hover:text-gray-200',
             ].join(' ')}
           >
             {active ? 'ON' : 'OFF'}
@@ -82,7 +82,7 @@ export default function DroneControl({
 
       {/* Expanded controls */}
       {expanded && (
-        <div className="px-3 pb-3 flex flex-col gap-3 border-t border-gray-800/60 pt-3">
+        <div className="px-3 pb-3 flex flex-col gap-3 border-t border-white/15 pt-3">
           {/* Note selector */}
           <div className="flex gap-1 flex-wrap">
             {NOTE_NAMES.map((name, pc) => (
@@ -102,9 +102,9 @@ export default function DroneControl({
                   'flex-1 min-w-[2rem] py-1.5 rounded-lg text-xs font-medium transition-colors',
                   pitchClass === pc
                     ? active
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-gray-700 text-gray-200'
-                    : 'bg-gray-800 text-gray-500 hover:bg-gray-700 hover:text-gray-300',
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-blue-900/70 text-gray-200'
+                    : 'bg-blue-900/70 text-gray-500 hover:bg-blue-900/70 hover:text-gray-300',
                   name.includes('#') ? 'text-[10px]' : '',
                 ].join(' ')}
               >
@@ -124,8 +124,8 @@ export default function DroneControl({
                   className={[
                     'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors',
                     interval === value
-                      ? 'bg-gray-600 text-white'
-                      : 'bg-gray-800 text-gray-500 hover:bg-gray-700 hover:text-gray-300',
+                      ? 'bg-blue-800/80 text-white'
+                      : 'bg-blue-900/70 text-gray-500 hover:bg-blue-900/70 hover:text-gray-300',
                   ].join(' ')}
                 >
                   {label}
@@ -139,7 +139,7 @@ export default function DroneControl({
               min={0} max={1} step={0.05}
               value={volume}
               onChange={e => onVolume(parseFloat(e.target.value))}
-              className="flex-1 h-1 accent-emerald-500 cursor-pointer"
+              className="flex-1 h-1 accent-blue-500 cursor-pointer"
               aria-label="Drone volume"
             />
             <span className="text-xs text-gray-600 w-7 text-right tabular-nums">

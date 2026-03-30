@@ -35,13 +35,13 @@ interface OptionCardProps {
 
 function OptionCard({ label, tag, tagColor, meta, children }: OptionCardProps) {
   return (
-    <div className="bg-gray-900 rounded-2xl p-4 flex flex-col gap-3">
+    <div className="bg-blue-950/80 rounded-2xl p-4 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tagColor}`}>{tag}</span>
         <span className="text-sm font-semibold text-gray-200">{label}</span>
         <span className="text-xs text-gray-500 ml-auto">{meta}</span>
       </div>
-      <div className="bg-gray-950 rounded-xl p-3 overflow-x-auto">
+      <div className="bg-gray-900 rounded-xl p-3 overflow-x-auto">
         {children}
       </div>
     </div>
@@ -50,7 +50,7 @@ function OptionCard({ label, tag, tagColor, meta, children }: OptionCardProps) {
 
 export default function StaffComparison() {
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen bg-gray-900">
     <div className="max-w-5xl mx-auto px-4 py-6 text-white">
       <h1 className="text-lg font-bold text-gray-100 mb-1">Staff Rendering Comparison</h1>
       {/* Color legend */}

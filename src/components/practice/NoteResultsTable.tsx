@@ -10,10 +10,10 @@ export default function NoteResultsTable({ noteEvents }: NoteResultsTableProps) 
   if (noteEvents.length === 0) return null
 
   return (
-    <div className="w-full overflow-x-auto rounded-xl border border-gray-800">
+    <div className="w-full overflow-x-auto rounded-xl border border-gray-700">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wider">
+          <tr className="border-b border-gray-700 text-gray-500 text-xs uppercase tracking-wider">
             <th className="text-left px-3 py-2">Note</th>
             <th className="text-right px-3 py-2">Avg ¢</th>
             <th className="text-right px-3 py-2">Duration</th>
@@ -24,7 +24,7 @@ export default function NoteResultsTable({ noteEvents }: NoteResultsTableProps) 
           {noteEvents.map((event, idx) => {
             const color = centsToHsl(event.absCentsAvg)
             return (
-              <tr key={idx} className="border-b border-gray-800/60 last:border-0">
+              <tr key={idx} className="border-b border-gray-700/60 last:border-0">
                 <td className="px-3 py-2 font-semibold tabular-nums" style={{ color }}>
                   {event.noteName}{event.octave}
                 </td>
@@ -53,7 +53,7 @@ function IntonationBar({ absCents, color }: { absCents: number; color: string })
   const pct = Math.min((absCents / 50) * 100, 100)
   return (
     <div className="flex items-center justify-center gap-1">
-      <div className="w-16 h-2 bg-gray-800 rounded-full overflow-hidden">
+      <div className="w-16 h-2 bg-blue-900/70 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all"
           style={{ width: `${pct}%`, backgroundColor: color }}

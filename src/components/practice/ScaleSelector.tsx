@@ -38,16 +38,16 @@ function scaleButtonClass(key: ScaleKey, selected: boolean): string {
   const base = 'py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 touch-none w-full'
   if (!selected) {
     const dim = def.scaleType === 'minor' || def.scaleType === 'pentatonic-minor'
-      ? 'bg-gray-800/60 text-gray-500 hover:text-gray-300'
-      : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+      ? 'bg-blue-900/70/60 text-gray-500 hover:text-gray-300'
+      : 'bg-blue-900/70 text-gray-400 hover:text-gray-200'
     return `${base} ${dim}`
   }
   switch (def.scaleType) {
     case 'pentatonic-major': return `${base} bg-violet-700 text-white`
     case 'pentatonic-minor': return `${base} bg-violet-900 text-violet-200`
     case 'gypsy':            return `${base} bg-amber-700 text-white`
-    case 'minor':            return `${base} bg-emerald-900 text-emerald-200`
-    default:                 return `${base} bg-emerald-700 text-white`
+    case 'minor':            return `${base} bg-blue-900 text-blue-200`
+    default:                 return `${base} bg-blue-700 text-white`
   }
 }
 
@@ -171,12 +171,12 @@ export default function ScaleSelector({ value, onChange }: ScaleSelectorProps) {
   return (
     <div className="w-full flex flex-col gap-3">
       {/* Top toggle: Free Play vs Scales */}
-      <div className="flex rounded-xl bg-gray-900 p-1 gap-1">
+      <div className="flex rounded-xl bg-blue-950/80 p-1 gap-1">
         <button
           onClick={() => onChange('free')}
           className={[
             'flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all active:scale-95 touch-none',
-            isFree ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200',
+            isFree ? 'bg-blue-900/70 text-white shadow' : 'text-gray-400 hover:text-gray-200',
           ].join(' ')}
         >
           Free Play
@@ -185,7 +185,7 @@ export default function ScaleSelector({ value, onChange }: ScaleSelectorProps) {
           onClick={handleScalesClick}
           className={[
             'flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all active:scale-95 touch-none',
-            !isFree ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200',
+            !isFree ? 'bg-blue-900/70 text-white shadow' : 'text-gray-400 hover:text-gray-200',
           ].join(' ')}
         >
           Scales
@@ -195,14 +195,14 @@ export default function ScaleSelector({ value, onChange }: ScaleSelectorProps) {
       {/* Sub-tab bar + grid (only when Scales active) */}
       {!isFree && (
         <>
-          <div className="flex rounded-lg bg-gray-900/60 p-0.5 gap-0.5">
+          <div className="flex rounded-lg bg-blue-950/80/60 p-0.5 gap-0.5">
             {SUB_TABS.map(t => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 className={[
                   'flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all touch-none',
-                  tab === t.id ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300',
+                  tab === t.id ? 'bg-blue-900/70 text-white' : 'text-gray-500 hover:text-gray-300',
                 ].join(' ')}
               >
                 {t.label}

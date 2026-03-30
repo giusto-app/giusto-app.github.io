@@ -25,7 +25,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-950">
+    <div className="h-full flex flex-col bg-gray-900">
       {/* Tab content — keep all mounted so state is preserved across tab switches */}
       <div className="flex-1 overflow-y-auto relative">
         <div className={activeTab === 'tuner' ? 'block h-full' : 'hidden'}>

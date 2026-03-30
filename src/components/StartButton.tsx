@@ -11,7 +11,7 @@ export default function StartButton({ listeningState, onStart, onStop }: StartBu
     return (
       <button
         onClick={onStop}
-        className="flex items-center gap-2 px-8 py-4 rounded-full bg-gray-800 text-gray-300 text-lg font-semibold active:scale-95 transition-transform touch-none"
+        className="flex items-center gap-2 px-8 py-4 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white/80 text-lg font-semibold active:scale-95 transition-transform touch-none"
       >
         <span className="w-3 h-3 rounded-sm bg-gray-300" />
         Stop
@@ -22,7 +22,7 @@ export default function StartButton({ listeningState, onStart, onStop }: StartBu
   return (
     <button
       onClick={onStart}
-      className="flex items-center gap-3 px-8 py-4 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-lg font-semibold transition-all touch-none shadow-lg shadow-emerald-900/40"
+      className="flex items-center gap-3 px-8 py-4 rounded-full bg-white/15 backdrop-blur-md border border-white/30 hover:bg-white/22 active:scale-95 text-white text-lg font-semibold transition-all touch-none shadow-xl shadow-black/30"
     >
       <MicIcon />
       Start Listening
