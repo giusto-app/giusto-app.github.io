@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useSessionRecorder, type SessionDuration } from '../../hooks/useSessionRecorder'
+import { useDrone } from '../../hooks/useDrone'
 import TunerMeter from '../TunerMeter'
 import NoteDisplay from '../NoteDisplay'
 import CentsDisplay from '../CentsDisplay'
 import FrequencyDisplay from '../FrequencyDisplay'
 import TemperamentSelector from '../TemperamentSelector'
+import DroneControl from '../DroneControl'
 import ScaleSelector from './ScaleSelector'
 import RecordButton from './RecordButton'
 import SessionResults from './SessionResults'
@@ -27,13 +29,21 @@ export default function PracticeTab({
 }: PracticeTabProps) {
   const [scaleKey, setScaleKey] = useState<ScaleKey>('d-major')
   const [duration, setDuration] = useState<SessionDuration>(30)
+  const [temperamentOpen, setTemperamentOpen] = useState(false)
+  const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, stop: droneStop } = useDrone()
   const {
     recorderState, preCountdown, countdown, liveNote, session, errorMessage,
     startRecording, stopRecording, reset, cleanup,
   } = useSessionRecorder()
 
   // Cleanup audio when tab unmounts
-  useEffect(() => () => cleanup(), [cleanup])
+  useEffect(() => () => { cleanup(); droneStop() }, [cleanup, droneStop])
+
+  // Auto-set drone tonic to match the selected scale's root
+  useEffect(() => {
+    const notes = SCALES[scaleKey].midiNotes
+    if (notes.length > 0) dronePitchClass(notes[0] % 12, concertPitch)
+  }, [scaleKey, concertPitch, dronePitchClass])
 
   function handleStart() {
     // frequencyToNote needs concert pitch; pass it via the offsets-aware path
@@ -166,12 +176,25 @@ export default function PracticeTab({
           <ScaleSelector value={scaleKey} onChange={setScaleKey} />
         </section>
 
-        {/* Temperament */}
+        {/* Temperament — collapsible */}
         <section>
-          <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">
-            Temperament
-          </p>
-          <TemperamentSelector value={temperamentKey} onChange={handleTemperamentChange} />
+          <button
+            onClick={() => setTemperamentOpen(o => !o)}
+            className="w-full flex items-center justify-between text-xs font-semibold tracking-widest uppercase text-gray-500 hover:text-gray-300 transition-colors mb-2"
+          >
+            <span>Temperament</span>
+            <span className="flex items-center gap-1.5 normal-case tracking-normal font-normal text-gray-600">
+              {TEMPERAMENTS[temperamentKey].label}
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+                className={`transition-transform duration-150 ${temperamentOpen ? 'rotate-180' : ''}`}>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </span>
+          </button>
+          {temperamentOpen && (
+            <TemperamentSelector value={temperamentKey} onChange={handleTemperamentChange} />
+          )}
         </section>
 
         {/* Duration */}
@@ -197,11 +220,17 @@ export default function PracticeTab({
           </div>
         </section>
 
-        {/* Instructions */}
-        <p className="text-xs text-gray-600 text-center">
-          Tap Record, play your scale, then review your results.
-          {duration === 0 ? ' Tap Stop when you\'re done.' : ''}
-        </p>
+        {/* Drone */}
+        <section>
+          <DroneControl
+            droneState={droneState}
+            concertPitchHz={concertPitch}
+            onToggle={droneToggle}
+            onPitchClass={dronePitchClass}
+            onInterval={droneInterval}
+            onVolume={droneVolume}
+          />
+        </section>
 
         {/* Error */}
         {errorMessage && (

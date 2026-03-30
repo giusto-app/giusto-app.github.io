@@ -52,6 +52,27 @@ export function frequencyToNote(
   return { noteName, octave, cents, frequency, status, midiNote, pitchClass }
 }
 
+// Violin open strings by pitch class
+const OPEN_STRING_NAMES: Partial<Record<number, 'G' | 'D' | 'A' | 'E'>> = {
+  7: 'G', 2: 'D', 9: 'A', 4: 'E',
+}
+
+/**
+ * Returns the open string that sympathetically rings when this note is played
+ * perfectly in tune (within ±resonanceThresholdCents). Returns null otherwise.
+ *
+ * Resonance occurs at any octave of G, D, A, E — the pitch class alone determines
+ * whether an open string vibrates; octave doesn't matter.
+ */
+export function getResonanceString(
+  pitchClass: number,
+  cents: number,
+  resonanceThresholdCents = 5,
+): 'G' | 'D' | 'A' | 'E' | null {
+  if (Math.abs(cents) > resonanceThresholdCents) return null
+  return OPEN_STRING_NAMES[pitchClass] ?? null
+}
+
 export function formatCents(cents: number): string {
   const rounded = Math.round(cents)
   if (rounded === 0) return '0¢'

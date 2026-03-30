@@ -5,6 +5,10 @@
     height: 100%;
   }
 
+  html {
+    font-size: 125%; /* scale all rem-based text up ~2 Tailwind notches */
+  }
+
   body {
     @apply bg-gray-950 text-white antialiased;
     -webkit-tap-highlight-color: transparent;

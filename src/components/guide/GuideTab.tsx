@@ -4,12 +4,12 @@
 
 export default function GuideTab() {
   return (
-    <div className="min-h-full overflow-y-auto px-4 md:px-8 py-6 max-w-2xl mx-auto">
+    <div className="min-h-full overflow-y-auto px-4 md:px-10 py-6">
       <header className="mb-6">
-        <h1 className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-400 mb-1">
+        <h1 className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-300 mb-1">
           Guide
         </h1>
-        <p className="text-gray-500 text-sm">
+        <p className="text-gray-400 text-sm">
           How to improve your intonation — backed by research.
         </p>
       </header>
@@ -18,15 +18,21 @@ export default function GuideTab() {
 
         {/* Recommended workflow */}
         <Section title="Recommended Practice Workflow">
-          <p className="text-gray-400 text-sm mb-3">
+          <p className="text-gray-300 text-sm mb-3">
             Violin pedagogy research (Galamian, Fischer, Zabanal 2019) points to a consistent sequence:
           </p>
           <ol className="flex flex-col gap-2">
-            <Step n={1} title="Warm up — Tuner tab">
+            <Step n={1} title="Tune your instrument — Tuner tab">
               Play long tones on each open string. Watch the meter. This calibrates your ear before technical work begins.
             </Step>
-            <Step n={2} title="Drone practice — coming soon">
-              Set a drone on your scale's tonic and play scales above it, listening for acoustic beating. Peer-reviewed research (Zabanal 2019) showed measurable improvement from even short-term drone practice.
+            <Step n={2} title="Play a drone — Tuner or Practice tab">
+              <ol className="list-decimal list-inside flex flex-col gap-1 mt-1">
+                <li><strong className="text-gray-300">Start with open strings.</strong> Before touching the fingerboard, play each open string against the drone on the same pitch. Zero beating is your reference — memorize that sound.</li>
+                <li><strong className="text-gray-300">Choose the right interval.</strong> Use <span className="font-mono text-gray-300">5th</span> to drone two open strings at once (e.g. D+A), like a teacher's drone bow. Use <span className="font-mono text-gray-300">·</span> (unison) for single-note scale work.</li>
+                <li><strong className="text-gray-300">Hold each note until the beating stops.</strong> The faster the pulsing, the further you are from the pitch. Don't move on until it's steady.</li>
+                <li><strong className="text-gray-300">Trust the ear, not the meter.</strong> The goal is to internalize the sound of in-tune so you eventually don't need the app at all.</li>
+              </ol>
+              <p className="mt-1.5">In the Practice tab the drone tonic is set automatically when you select a scale.</p>
             </Step>
             <Step n={3} title="Record a scale — Practice tab">
               Select your scale, set a duration (30s or 60s for a full scale), and record. Play slowly — speed is the enemy of accurate intonation formation.
@@ -42,7 +48,7 @@ export default function GuideTab() {
 
         {/* Temperament guide */}
         <Section title="Which Temperament Should I Use?">
-          <p className="text-gray-400 text-sm mb-3">
+          <p className="text-gray-300 text-sm mb-3">
             No single temperament is correct for all situations. Great string players switch contextually.
           </p>
           <div className="flex flex-col gap-2">
@@ -75,14 +81,14 @@ export default function GuideTab() {
 
         {/* Sympathetic resonance */}
         <Section title="Listen for the Ring">
-          <p className="text-gray-400 text-sm mb-3">
+          <p className="text-gray-300 text-sm mb-3">
             The violin has a built-in feedback mechanism that no app can replace: <strong className="text-gray-200">sympathetic resonance</strong>. When a stopped note perfectly matches the pitch of an open string, that open string vibrates on its own, producing an audible bloom in the sound.
           </p>
-          <p className="text-gray-400 text-sm mb-3">
+          <p className="text-gray-300 text-sm mb-3">
             Teachers describe this resonant spot as "only the size of a pencil point" — training to find it consistently builds exceptional precision.
           </p>
           <div className="bg-gray-900 rounded-xl p-4">
-            <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-3">Key resonance notes (violin)</p>
+            <p className="text-xs font-semibold tracking-widest uppercase text-gray-400 mb-3">Key resonance notes (violin)</p>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { note: 'G3 / G4', rings: 'G string' },
@@ -93,12 +99,12 @@ export default function GuideTab() {
                 <div key={note} className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                   <span className="text-sm text-gray-300 font-mono">{note}</span>
-                  <span className="text-xs text-gray-600">→ {rings}</span>
+                  <span className="text-xs text-gray-500">→ {rings}</span>
                 </div>
               ))}
             </div>
           </div>
-          <p className="text-gray-600 text-xs mt-2">
+          <p className="text-gray-500 text-xs mt-2">
             When the Tuner shows 0¢ on one of these notes, stop and listen — you should hear the open string join in.
           </p>
         </Section>
@@ -148,14 +154,14 @@ export default function GuideTab() {
               desc="Out of tune. Audible to everyone. This note needs isolation and slow drill — don't practice it fast until it's green slowly."
             />
           </div>
-          <p className="text-gray-600 text-xs mt-3">
+          <p className="text-gray-500 text-xs mt-3">
             The cents value below each note head is your average deviation over the note's full duration. A −8¢ on F# means you're consistently playing it slightly flat — a hand-frame issue, not a random error.
           </p>
         </Section>
 
         {/* Research credits */}
         <div className="border-t border-gray-800 pt-4 mt-2">
-          <p className="text-xs text-gray-700 text-center">
+          <p className="text-xs text-gray-500 text-center">
             Practice methodology based on research by Galamian, Flesch, Simon Fischer, Suzuki, and Paul Rolland, and peer-reviewed studies by Zabanal (2019) and Frontiers in Psychology (2019, 2021).
           </p>
         </div>
@@ -179,12 +185,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="w-6 h-6 rounded-full bg-gray-800 text-gray-400 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+      <span className="w-6 h-6 rounded-full bg-gray-800 text-gray-300 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
         {n}
       </span>
       <div>
         <p className="text-sm font-medium text-gray-200">{title}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{children}</p>
+        <p className="text-xs text-gray-400 mt-0.5">{children}</p>
       </div>
     </li>
   )
@@ -201,7 +207,7 @@ function TemperamentCard({
         <span className="text-sm font-semibold text-gray-200">{name}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}>{badge}</span>
       </div>
-      <p className="text-xs text-gray-500">{description}</p>
+      <p className="text-xs text-gray-400">{description}</p>
     </div>
   )
 }
@@ -210,7 +216,7 @@ function Problem({ title, fix }: { title: string; fix: string }) {
   return (
     <div className="bg-gray-900 rounded-xl p-3">
       <p className="text-sm text-gray-300 mb-1">{title}</p>
-      <p className="text-xs text-gray-500"><span className="text-emerald-600 font-medium">Fix: </span>{fix}</p>
+      <p className="text-xs text-gray-400"><span className="text-emerald-600 font-medium">Fix: </span>{fix}</p>
     </div>
   )
 }
@@ -221,7 +227,7 @@ function InfoRow({ color, label, desc }: { color: string; label: string; desc: s
       <span className={`w-3 h-3 rounded-full ${color} shrink-0 mt-1`} />
       <div>
         <p className="text-sm font-medium text-gray-300">{label}</p>
-        <p className="text-xs text-gray-500">{desc}</p>
+        <p className="text-xs text-gray-400">{desc}</p>
       </div>
     </div>
   )
