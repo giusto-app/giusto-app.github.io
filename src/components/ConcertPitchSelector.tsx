@@ -15,7 +15,7 @@ export default function ConcertPitchSelector({ value, onChange }: ConcertPitchSe
           className={[
             'px-2.5 py-1 rounded-full text-xs font-mono transition-colors',
             value === hz
-              ? 'bg-blue-600 text-white'
+              ? 'bg-white/30 text-white border border-white/40'
               : 'bg-blue-900/70 text-gray-400 hover:bg-blue-900/70 hover:text-gray-200',
           ].join(' ')}
         >

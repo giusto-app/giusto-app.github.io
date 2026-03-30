@@ -67,7 +67,7 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
 
       {/* Settings panel */}
       {settingsOpen && (
-        <div className="w-full max-w-sm md:max-w-none mt-3 flex flex-col gap-4 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md shadow-lg shadow-black/40 px-4 py-4">
+        <div className="w-full max-w-sm md:max-w-none mt-3 flex flex-col gap-4 rounded-xl border border-white/28 bg-white/20 backdrop-blur-md shadow-lg shadow-black/40 px-4 py-4">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold tracking-widest uppercase text-gray-500">Settings</p>
             {wakeLockSupported && <WakeLockToggle active={wakeLockActive} toggle={wakeLockToggle} />}

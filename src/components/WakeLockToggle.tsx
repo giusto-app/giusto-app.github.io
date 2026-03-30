@@ -12,7 +12,7 @@ export default function WakeLockToggle({ active, toggle }: WakeLockToggleProps) 
         onClick={toggle}
         className={[
           'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none',
-          active ? 'bg-amber-500' : 'bg-blue-800/80',
+          active ? 'bg-white/40 border-white/60' : 'bg-white/15 border-white/20',
         ].join(' ')}
       >
         <span

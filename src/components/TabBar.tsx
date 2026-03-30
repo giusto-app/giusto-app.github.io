@@ -7,7 +7,7 @@ interface TabBarProps {
 
 export default function TabBar({ activeTab, onChange }: TabBarProps) {
   return (
-    <nav className="flex bg-white/8 backdrop-blur-xl border-t border-white/15 pb-[env(safe-area-inset-bottom)]">
+    <nav className="flex bg-white/12 backdrop-blur-xl border-t border-white/15 pb-[env(safe-area-inset-bottom)]">
       {TABS.map(({ id, label, Icon }) => {
         const active = id === activeTab
         return (

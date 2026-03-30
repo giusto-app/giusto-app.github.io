@@ -13,10 +13,13 @@
     @apply text-white antialiased;
     -webkit-tap-highlight-color: transparent;
     background-attachment: fixed;
-    background-color: #0f2a5c;
-    background-image:
-      linear-gradient(170deg, #1d56c8 0%, #1540aa 28%, #0e2d7a 58%, #080f2e 100%),
-      radial-gradient(ellipse 90% 50% at 15% 20%, #3b82f640 0%, transparent 55%),
-      radial-gradient(ellipse 60% 40% at 85% 80%, #1e3a8a50 0%, transparent 50%);
+    /* solid stops — no transparency → never looks dark gray */
+    background: linear-gradient(160deg,
+      #1e58c8 0%,
+      #1848b8 20%,
+      #1240a8 45%,
+      #0d3492 65%,
+      #092880 100%
+    );
   }
 }

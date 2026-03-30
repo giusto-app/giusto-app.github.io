@@ -11,7 +11,7 @@ export default function TemperamentSelector({ value, onChange }: TemperamentSele
   return (
     <div className="w-full flex flex-col items-center gap-2">
       {/* Pill row */}
-      <div className="flex rounded-xl bg-white/10 backdrop-blur-md border border-white/20 p-1 gap-1 w-full">
+      <div className="flex rounded-xl bg-white/20 backdrop-blur-md border border-white/28 p-1 gap-1 w-full">
         {TEMPERAMENT_KEYS.map(key => {
           const t = TEMPERAMENTS[key]
           const isActive = key === value

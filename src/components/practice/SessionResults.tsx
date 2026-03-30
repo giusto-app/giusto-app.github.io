@@ -79,7 +79,7 @@ export default function SessionResults({ session, onSave, onDiscard }: SessionRe
         <div className="flex gap-3 justify-center pt-2">
           <button
             onClick={handleSave}
-            className="flex-1 py-3 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-semibold transition-all touch-none"
+            className="flex-1 py-3 rounded-full bg-white/25 backdrop-blur-md border border-white/35 hover:bg-white/35 active:scale-95 text-white font-semibold transition-all touch-none"
           >
             Save
           </button>

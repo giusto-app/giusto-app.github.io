@@ -211,7 +211,7 @@ export default function PracticeTab({
                   'flex-1 py-2 rounded-xl text-sm font-medium transition-colors',
                   duration === d
                     ? 'bg-white/20 text-white shadow shadow-black/30'
-                    : 'bg-white/10 backdrop-blur-md border border-white/20 text-gray-400 hover:bg-white/15 hover:text-gray-200',
+                    : 'bg-white/20 backdrop-blur-md border border-white/28 text-gray-400 hover:bg-white/20 hover:text-gray-200',
                 ].join(' ')}
               >
                 {d === 0 ? 'Free' : `${d}s`}

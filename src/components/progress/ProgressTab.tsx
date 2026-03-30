@@ -61,7 +61,7 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
 
       {/* Chart + history: side by side on tablet */}
       <div className="flex flex-col md:flex-row gap-5 flex-1">
-        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 md:flex-1 shadow-md shadow-black/30">
+        <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-xl p-3 md:flex-1 shadow-md shadow-black/30">
           <p className="text-xs text-gray-500 mb-2">% in tune per session (last 20)</p>
           <SessionBarChart sessions={sessions} />
         </div>
@@ -82,7 +82,7 @@ function StatCard({ label, value, positive }: { label: string; value: string; po
     ? 'text-gray-200'
     : positive ? 'text-blue-400' : 'text-red-400'
   return (
-    <div className="flex-1 bg-white/10 backdrop-blur-md border border-white/20 rounded-xl py-3 px-2 text-center shadow-md shadow-black/30">
+    <div className="flex-1 bg-white/20 backdrop-blur-md border border-white/28 rounded-xl py-3 px-2 text-center shadow-md shadow-black/30">
       <p className="text-xs text-gray-500 mb-0.5">{label}</p>
       <p className={`text-lg font-bold tabular-nums ${color}`}>{value}</p>
     </div>

@@ -7,7 +7,7 @@ export default function GuideTab() {
     <div className="min-h-full overflow-y-auto px-4 md:px-10 py-6">
 
       {/* Hero */}
-      <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-5 mb-8 flex items-center gap-4 shadow-md shadow-black/30">
+      <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-2xl px-5 py-5 mb-8 flex items-center gap-4 shadow-md shadow-black/30">
         <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
           <svg width={24} height={24} viewBox="0 0 24 24" fill="none"
             stroke="#60a5fa" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
@@ -218,7 +218,7 @@ export default function GuideTab() {
         <Divider />
 
         {/* About */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-5 py-5 shadow-md shadow-black/30 flex flex-col gap-2">
+        <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-2xl px-5 py-5 shadow-md shadow-black/30 flex flex-col gap-2">
           <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-1">About</p>
           <p className="text-sm text-gray-300">
             Real-time intonation trainer for violin and bowed string players, built on the Web Audio API and the McLeod pitch detection algorithm.
@@ -285,7 +285,7 @@ function TemperamentCard({
   name: string; badge: string; badgeColor: string; borderColor: string; description: string
 }) {
   return (
-    <div className={`bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 pl-4 flex flex-col gap-1.5 border-l-2 shadow-md shadow-black/30 ${borderColor}`}>
+    <div className={`bg-white/20 backdrop-blur-md border border-white/28 rounded-xl p-3 pl-4 flex flex-col gap-1.5 border-l-2 shadow-md shadow-black/30 ${borderColor}`}>
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-white">{name}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}>{badge}</span>
@@ -297,7 +297,7 @@ function TemperamentCard({
 
 function Problem({ title, fix }: { title: string; fix: string }) {
   return (
-    <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-3 pl-4 border-l-2 border-red-500/40 shadow-md shadow-black/30">
+    <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-xl p-3 pl-4 border-l-2 border-red-500/40 shadow-md shadow-black/30">
       <p className="text-sm text-gray-300 mb-1">{title}</p>
       <p className="text-xs text-gray-400"><span className="text-blue-500 font-medium">Fix: </span>{fix}</p>
     </div>

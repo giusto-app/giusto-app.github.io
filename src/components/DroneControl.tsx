@@ -35,8 +35,8 @@ export default function DroneControl({
     <div className={[
       'rounded-xl border transition-colors',
       active
-        ? 'border-white/30 bg-white/15 shadow-lg shadow-black/20'
-        : 'border-white/20 bg-white/10 shadow-lg shadow-black/30',
+        ? 'border-white/30 bg-white/20 shadow-lg shadow-black/20'
+        : 'border-white/28 bg-white/20 shadow-lg shadow-black/30',
     ].join(' ')}>
 
       {/* Header row: always visible */}
@@ -58,7 +58,7 @@ export default function DroneControl({
             className={[
               'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
               active
-                ? 'bg-blue-600 text-white'
+                ? 'bg-white/30 text-white'
                 : 'bg-blue-900/70 text-gray-400 hover:bg-blue-900/70 hover:text-gray-200',
             ].join(' ')}
           >
@@ -102,7 +102,7 @@ export default function DroneControl({
                   'flex-1 min-w-[2rem] py-1.5 rounded-lg text-xs font-medium transition-colors',
                   pitchClass === pc
                     ? active
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-white/30 text-white'
                       : 'bg-blue-900/70 text-gray-200'
                     : 'bg-blue-900/70 text-gray-500 hover:bg-blue-900/70 hover:text-gray-300',
                   name.includes('#') ? 'text-[10px]' : '',

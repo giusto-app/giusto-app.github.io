@@ -84,7 +84,7 @@ export default function RecordButton({
     return (
       <button
         onClick={onReset}
-        className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white/80 font-semibold active:scale-95 transition-transform touch-none"
+        className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/20 backdrop-blur-md border border-white/28 text-white/80 font-semibold active:scale-95 transition-transform touch-none"
       >
         <RetryIcon />
         Try Again
