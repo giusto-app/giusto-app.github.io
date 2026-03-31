@@ -2,7 +2,7 @@ interface WakeLockToggleProps { active: boolean; toggle: () => void }
 
 export default function WakeLockToggle({ active, toggle }: WakeLockToggleProps) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer select-none">
+    <label className="flex items-center justify-between gap-3 cursor-pointer select-none w-full">
       <span className="text-sm text-gray-300">
         Don't lock the screen while I play
       </span>
@@ -11,15 +11,17 @@ export default function WakeLockToggle({ active, toggle }: WakeLockToggleProps) 
         aria-checked={active}
         onClick={toggle}
         className={[
-          'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none',
-          active ? 'bg-white/40 border-white/60' : 'bg-white/15 border-white/20',
+          'relative inline-flex h-7 w-12 shrink-0 rounded-full transition-all duration-200 focus:outline-none',
+          active ? '' : 'neu-btn',
         ].join(' ')}
+        style={active ? {
+          background: '#10b981',
+          boxShadow: 'inset -2px -2px 5px rgba(255,255,255,0.15), inset 2px 2px 5px rgba(0,0,0,0.30)',
+        } : undefined}
       >
         <span
-          className={[
-            'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200',
-            active ? 'translate-x-5' : 'translate-x-0',
-          ].join(' ')}
+          className="pointer-events-none absolute top-1 h-5 w-5 rounded-full bg-white shadow-md transition-all duration-200"
+          style={{ left: active ? 'calc(100% - 1.5rem)' : '0.25rem' }}
         />
       </button>
     </label>

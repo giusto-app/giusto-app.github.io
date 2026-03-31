@@ -7,7 +7,7 @@ export default function GuideTab() {
     <div className="min-h-full overflow-y-auto px-4 md:px-10 py-6">
 
       {/* Hero */}
-      <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-2xl px-5 py-5 mb-8 flex items-center gap-4 shadow-md shadow-black/30">
+      <div className="neu-surface rounded-2xl px-5 py-5 mb-8 flex items-center gap-4">
         <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/20 flex items-center justify-center shrink-0">
           <svg width={24} height={24} viewBox="0 0 24 24" fill="none"
             stroke="#60a5fa" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
@@ -78,28 +78,24 @@ export default function GuideTab() {
             <TemperamentCard
               name="Pythagorean"
               badge="Melodic"
-              badgeColor="bg-blue-900/50 text-blue-300"
               borderColor="border-blue-500/60"
               description="Use for single-note scale work and melodic passages. Your open strings are already tuned in Pythagorean perfect fifths (3:2 ratio). This system raises leading tones slightly — the 'expressive' intonation you hear from great soloists."
             />
             <TemperamentCard
               name="Just"
               badge="Chords & Double Stops"
-              badgeColor="bg-teal-900/50 text-teal-300"
               borderColor="border-teal-500/60"
               description="Use when practicing double stops and sustained chords in chamber music. Pure thirds (5:4 ratio) and fifths (3:2) produce zero acoustic beating — the 'ringing' sound string quartets aim for. Note: a just major third is 14¢ lower than equal temperament."
             />
             <TemperamentCard
               name="Equal"
               badge="With Piano / Ensemble"
-              badgeColor="bg-slate-700/80 text-gray-300"
               borderColor="border-gray-500/60"
               description="Use when practicing alongside piano or fixed-pitch instruments. Gives you a consistent reference across all 12 keys but none of the intervals are acoustically pure."
             />
             <TemperamentCard
               name="Meantone"
               badge="Baroque"
-              badgeColor="bg-amber-900/50 text-amber-300"
               borderColor="border-amber-500/60"
               description="Use for Baroque repertoire (Bach, Telemann, Vivaldi). Quarter-comma meantone gives pure major thirds and was the standard keyboard tuning from ~1500–1800."
             />
@@ -218,7 +214,7 @@ export default function GuideTab() {
         <Divider />
 
         {/* About */}
-        <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-2xl px-5 py-5 shadow-md shadow-black/30 flex flex-col gap-2">
+        <div className="neu-surface rounded-2xl px-5 py-5 flex flex-col gap-2">
           <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-1">About</p>
           <p className="text-sm text-gray-300">
             Real-time intonation trainer for violin and bowed string players, built on the Web Audio API and the McLeod pitch detection algorithm.
@@ -248,7 +244,7 @@ export default function GuideTab() {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function Divider() {
-  return <hr className="border-white/15" />
+  return <hr style={{ borderColor: 'var(--neu-sh)' }} />
 }
 
 function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
@@ -273,31 +269,31 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
       </span>
       <div>
         <p className="text-sm font-semibold text-white">{title}</p>
-        <p className="text-xs text-gray-400 mt-0.5">{children}</p>
+        <div className="text-xs text-gray-400 mt-0.5">{children}</div>
       </div>
     </li>
   )
 }
 
 function TemperamentCard({
-  name, badge, badgeColor, borderColor, description,
+  name, badge, borderColor, description,
 }: {
-  name: string; badge: string; badgeColor: string; borderColor: string; description: string
+  name: string; badge: string; borderColor: string; description: string
 }) {
   return (
-    <div className={`bg-white/20 backdrop-blur-md border border-white/28 rounded-xl p-3 pl-4 flex flex-col gap-1.5 border-l-2 shadow-md shadow-black/30 ${borderColor}`}>
+    <div className={`neu-surface rounded-xl p-3 pl-4 flex flex-col gap-1.5 border-l-2 ${borderColor}`}>
       <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold text-white">{name}</span>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}>{badge}</span>
+        <span className="text-sm font-semibold text-[color:var(--neu-fg)]">{name}</span>
+        <span className="neu-inset text-xs px-2 py-0.5 rounded-full font-medium text-[color:var(--neu-fg2)]">{badge}</span>
       </div>
-      <p className="text-xs text-gray-400">{description}</p>
+      <p className="text-xs text-[color:var(--neu-fg2)]">{description}</p>
     </div>
   )
 }
 
 function Problem({ title, fix }: { title: string; fix: string }) {
   return (
-    <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-xl p-3 pl-4 border-l-2 border-red-500/40 shadow-md shadow-black/30">
+    <div className="neu-surface rounded-xl p-3 pl-4 border-l-2 border-red-500/40">
       <p className="text-sm text-gray-300 mb-1">{title}</p>
       <p className="text-xs text-gray-400"><span className="text-blue-500 font-medium">Fix: </span>{fix}</p>
     </div>

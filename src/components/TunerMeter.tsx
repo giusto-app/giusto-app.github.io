@@ -34,7 +34,7 @@ export default function TunerMeter({ cents, status }: TunerMeterProps) {
     <div className="w-full select-none">
 
       {/* ── Main track ── */}
-      <div className="relative w-full h-12 rounded-full bg-blue-950/80">
+      <div className="relative w-full h-12 rounded-full neu-inset">
 
         {/* Permanent dim zone tints */}
         <div className="absolute inset-0 rounded-full" style={{

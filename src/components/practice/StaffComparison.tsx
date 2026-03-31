@@ -35,7 +35,7 @@ interface OptionCardProps {
 
 function OptionCard({ label, tag, tagColor, meta, children }: OptionCardProps) {
   return (
-    <div className="bg-blue-950/80 rounded-2xl p-4 flex flex-col gap-3">
+    <div className="neu-surface rounded-2xl p-4 flex flex-col gap-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tagColor}`}>{tag}</span>
         <span className="text-sm font-semibold text-gray-200">{label}</span>

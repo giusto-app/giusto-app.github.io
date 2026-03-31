@@ -28,7 +28,7 @@ export default function SessionResults({ session, onSave, onDiscard }: SessionRe
       {/* Left column: staff notation + note table */}
       <div className="flex flex-col gap-4 flex-1">
         {session.noteEvents.length > 0 && (
-          <div className="bg-blue-950/80 rounded-xl p-3">
+          <div className="neu-inset rounded-xl p-3">
             <StaffView noteEvents={session.noteEvents} />
           </div>
         )}
@@ -79,13 +79,13 @@ export default function SessionResults({ session, onSave, onDiscard }: SessionRe
         <div className="flex gap-3 justify-center pt-2">
           <button
             onClick={handleSave}
-            className="flex-1 py-3 rounded-full bg-white/25 backdrop-blur-md border border-white/35 hover:bg-white/35 active:scale-95 text-white font-semibold transition-all touch-none"
+            className="flex-1 py-3 rounded-full neu-btn text-[color:var(--neu-fg)] font-semibold active:scale-95 touch-none"
           >
             Save
           </button>
           <button
             onClick={onDiscard}
-            className="flex-1 py-3 rounded-full bg-blue-900/70 hover:bg-blue-900/70 active:scale-95 text-gray-300 font-semibold transition-all touch-none"
+            className="flex-1 py-3 rounded-full neu-btn text-[color:var(--neu-fg2)] font-semibold active:scale-95 touch-none"
           >
             Discard
           </button>
@@ -97,7 +97,7 @@ export default function SessionResults({ session, onSave, onDiscard }: SessionRe
 
 function StatChip({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="flex-1 bg-blue-950/80 rounded-lg py-2 px-1 flex flex-col items-center gap-0.5">
+    <div className="flex-1 neu-inset rounded-lg py-2 px-1 flex flex-col items-center gap-0.5">
       <span className="text-xs text-gray-500">{label}</span>
       <span className="text-sm font-bold tabular-nums" style={{ color }}>{value}</span>
     </div>

@@ -13,10 +13,10 @@ export default function ConcertPitchSelector({ value, onChange }: ConcertPitchSe
           key={hz}
           onClick={() => onChange(hz)}
           className={[
-            'px-2.5 py-1 rounded-full text-xs font-mono transition-colors',
+            'px-2.5 py-1 rounded-full text-xs font-mono transition-colors neu-btn',
             value === hz
-              ? 'bg-white/30 text-white border border-white/40'
-              : 'bg-blue-900/70 text-gray-400 hover:bg-blue-900/70 hover:text-gray-200',
+              ? 'neu-pill-active text-[color:var(--neu-fg)]'
+              : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
           ].join(' ')}
         >
           {hz}

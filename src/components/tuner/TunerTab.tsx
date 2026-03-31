@@ -1,52 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
-import { useDrone } from '../../hooks/useDrone'
 import { useWakeLock } from '../../hooks/useWakeLock'
 import TunerMeter from '../TunerMeter'
 import NoteDisplay from '../NoteDisplay'
 import CentsDisplay from '../CentsDisplay'
 import FrequencyDisplay from '../FrequencyDisplay'
 import StartButton from '../StartButton'
-import TemperamentSelector from '../TemperamentSelector'
-import WakeLockToggle from '../WakeLockToggle'
-import ConcertPitchSelector from '../ConcertPitchSelector'
-import DroneControl from '../DroneControl'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
 import { getResonanceString } from '../../utils/noteUtils'
 
 interface TunerTabProps {
   temperamentKey: TemperamentKey
-  onTemperamentChange: (key: TemperamentKey) => void
   concertPitch: ConcertPitchHz
-  onConcertPitchChange: (hz: ConcertPitchHz) => void
 }
 
-export default function TunerTab({ temperamentKey, onTemperamentChange, concertPitch, onConcertPitchChange }: TunerTabProps) {
+export default function TunerTab({ temperamentKey, concertPitch }: TunerTabProps) {
   const { note, listeningState, errorMessage, start, stop, setTemperament, setConcertPitch } = usePitchDetection()
-  const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, stop: droneStop } = useDrone()
-  const { active: wakeLockActive, toggle: wakeLockToggle, supported: wakeLockSupported } = useWakeLock()
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Keep wake lock alive even though settings UI is in SettingsTab
+  useWakeLock()
 
-  // Stop drone when tuner stops
+  // Sync temperament and concert pitch into the detection hook whenever they change
   useEffect(() => {
-    if (listeningState === 'idle') droneStop()
-  }, [listeningState, droneStop])
+    setTemperament(TEMPERAMENTS[temperamentKey].offsets)
+  }, [temperamentKey, setTemperament])
 
-  // Sync concert pitch into the detection hook whenever it changes
   useEffect(() => {
     setConcertPitch(concertPitch)
   }, [concertPitch, setConcertPitch])
-
-  function handleTemperamentChange(key: TemperamentKey) {
-    onTemperamentChange(key)
-    setTemperament(TEMPERAMENTS[key].offsets)
-  }
-
-  function handleConcertPitchChange(hz: ConcertPitchHz) {
-    onConcertPitchChange(hz)
-    setConcertPitch(hz)
-  }
 
   const resonanceString = note ? getResonanceString(note.pitchClass, note.cents) : null
 
@@ -56,32 +37,10 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
         <h1 className="text-sm font-semibold tracking-[0.2em] uppercase text-gray-400">
           Intonation Trainer
         </h1>
-        <button
-          onClick={() => setSettingsOpen(o => !o)}
-          className="p-1.5 text-gray-500 hover:text-gray-300 transition-colors"
-          aria-label="Settings"
-        >
-          <GearIcon />
-        </button>
+        <span className="text-xs text-gray-600 tabular-nums">
+          {TEMPERAMENTS[temperamentKey].label} · {concertPitch} Hz
+        </span>
       </header>
-
-      {/* Settings panel */}
-      {settingsOpen && (
-        <div className="w-full max-w-sm md:max-w-none mt-3 flex flex-col gap-4 rounded-xl border border-white/28 bg-white/20 backdrop-blur-md shadow-lg shadow-black/40 px-4 py-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold tracking-widest uppercase text-gray-500">Settings</p>
-            {wakeLockSupported && <WakeLockToggle active={wakeLockActive} toggle={wakeLockToggle} />}
-          </div>
-          <div>
-            <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">Temperament</p>
-            <TemperamentSelector value={temperamentKey} onChange={handleTemperamentChange} />
-          </div>
-          <div>
-            <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">Concert Pitch</p>
-            <ConcertPitchSelector value={concertPitch} onChange={handleConcertPitchChange} />
-          </div>
-        </div>
-      )}
 
       <main className="w-full max-w-sm md:max-w-none flex flex-col items-center gap-4 flex-1 justify-center">
         {/* Note name */}
@@ -118,28 +77,6 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
             : <span className="text-4xl font-mono text-gray-600">—</span>}
         </div>
 
-        {/* Drone */}
-        <div className="w-full">
-          <DroneControl
-            droneState={droneState}
-            concertPitchHz={concertPitch}
-            onToggle={droneToggle}
-            onPitchClass={dronePitchClass}
-            onInterval={droneInterval}
-            onVolume={droneVolume}
-          />
-        </div>
-
-        {/* Settings status badge — tappable shortcut when settings panel is closed */}
-        {!settingsOpen && (
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="text-xs text-gray-600 hover:text-gray-400 transition-colors tabular-nums"
-          >
-            {TEMPERAMENTS[temperamentKey].label} · {concertPitch} Hz
-          </button>
-        )}
-
         {/* Listening indicator — fixed height to avoid layout shift */}
         <div className="h-7 flex items-center justify-center">
           {listeningState === 'listening' && !note && (
@@ -162,16 +99,6 @@ export default function TunerTab({ temperamentKey, onTemperamentChange, concertP
         <StartButton listeningState={listeningState} onStart={start} onStop={stop} />
       </footer>
     </div>
-  )
-}
-
-function GearIcon() {
-  return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
   )
 }
 

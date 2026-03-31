@@ -11,7 +11,7 @@ export default function TemperamentSelector({ value, onChange }: TemperamentSele
   return (
     <div className="w-full flex flex-col items-center gap-2">
       {/* Pill row */}
-      <div className="flex rounded-xl bg-white/20 backdrop-blur-md border border-white/28 p-1 gap-1 w-full">
+      <div className="flex rounded-xl neu-inset p-1.5 gap-1 w-full">
         {TEMPERAMENT_KEYS.map(key => {
           const t = TEMPERAMENTS[key]
           const isActive = key === value
@@ -22,8 +22,8 @@ export default function TemperamentSelector({ value, onChange }: TemperamentSele
               className={[
                 'flex-1 py-2.5 px-1 rounded-lg text-sm font-semibold transition-all active:scale-95 touch-none',
                 isActive
-                  ? 'bg-white/20 text-white shadow shadow-black/30'
-                  : 'text-gray-400 hover:text-gray-200',
+                  ? 'neu-pill-active text-[color:var(--neu-fg)]'
+                  : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
               ].join(' ')}
             >
               {t.shortLabel}

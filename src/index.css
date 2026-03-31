@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* ── Neumorphism design tokens ───────────────────────────────────────────────
+   Dark mode  : deep blue-grey (#1e2535)
+   Light mode : soft grey-blue (#e0e5ec, like the reference calculator)
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --neu-bg:  #1e2535;
+  --neu-hl:  rgba(255, 255, 255, 0.12);   /* light shadow — top / left  */
+  --neu-sh:  rgba(0,   0,   0,   0.65);   /* dark  shadow — bottom / right */
+  --neu-fg:  #cdd5e0;                     /* primary text                */
+  --neu-fg2: #7a8899;                     /* muted / secondary text      */
+  --neu-accent: #3b82f6;                  /* blue accent                 */
+}
+
+body.light {
+  --neu-bg:  #e0e5ec;
+  --neu-hl:  rgba(255, 255, 255, 0.90);
+  --neu-sh:  rgba(163, 177, 198, 0.75);
+  --neu-fg:  #2d3748;
+  --neu-fg2: #718096;
+  --neu-accent: #2563eb;
+}
+
 @layer base {
   html, body, #root {
     height: 100%;
@@ -10,16 +33,93 @@
   }
 
   body {
-    @apply text-white antialiased;
+    background: var(--neu-bg);
+    color: var(--neu-fg);
     -webkit-tap-highlight-color: transparent;
-    background-attachment: fixed;
-    /* solid stops — no transparency → never looks dark gray */
-    background: linear-gradient(160deg,
-      #1e58c8 0%,
-      #1848b8 20%,
-      #1240a8 45%,
-      #0d3492 65%,
-      #092880 100%
-    );
+    @apply antialiased;
+    transition: background 0.25s ease, color 0.25s ease;
   }
 }
+
+/* ── Neumorphism utility classes ─────────────────────────────────────────────
+   .neu-surface   raised card / panel
+   .neu-inset     recessed display area / track background
+   .neu-btn       pressable raised button (active state goes inset)
+   .neu-pill-active  currently-selected option in a segmented control
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.neu-surface {
+  background: var(--neu-bg);
+  box-shadow:
+    -6px -6px 16px var(--neu-hl),
+     6px  6px 16px var(--neu-sh);
+}
+
+.neu-inset {
+  background: var(--neu-bg);
+  box-shadow:
+    inset -3px -3px 8px var(--neu-hl),
+    inset  3px  3px 8px var(--neu-sh);
+}
+
+.neu-btn {
+  background: var(--neu-bg);
+  box-shadow:
+    -3px -3px 8px var(--neu-hl),
+     3px  3px 8px var(--neu-sh);
+  transition: box-shadow 0.12s ease, color 0.12s ease;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.neu-btn:active,
+.neu-pill-active {
+  box-shadow:
+    inset -2px -2px 6px var(--neu-hl),
+    inset  2px  2px 6px var(--neu-sh);
+  background: rgba(0, 0, 0, 0.10);
+}
+
+body.light .neu-btn:active,
+body.light .neu-pill-active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ── Light-mode text overrides ───────────────────────────────────────────────
+   1. All text-white/* variants (including opacity like /40, /50, /60 etc.)
+   2. Light-shade colored text that's invisible on a light background
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Catch text-white, text-white/30, text-white/40, text-white/50, text-white/60, etc. */
+body.light [class*="text-white"]   { color: var(--neu-fg)  !important; }
+
+/* Standard gray text */
+body.light .text-gray-200 { color: var(--neu-fg)  !important; }
+body.light .text-gray-300 { color: var(--neu-fg)  !important; }
+body.light .text-gray-400 { color: var(--neu-fg2) !important; }
+body.light .text-gray-500 { color: var(--neu-fg2) !important; }
+body.light .text-gray-600 { color: var(--neu-fg2) !important; }
+body.light .text-gray-700 { color: var(--neu-fg2) !important; }
+
+/* Light-shade accents → darker equivalents for light bg */
+body.light [class*="text-blue-3"]   { color: #1d4ed8 !important; }  /* blue-300 */
+body.light [class*="text-teal-3"]   { color: #0f766e !important; }  /* teal-300 */
+body.light [class*="text-violet-3"] { color: #6d28d9 !important; }  /* violet-300 */
+body.light [class*="text-violet-4"] { color: #7c3aed !important; }  /* violet-400 */
+body.light [class*="text-blue-3"]   { color: #1d4ed8 !important; }
+
+/* All amber text → dark amber */
+body.light [class*="text-amber"]   { color: #92400e !important; }
+
+/* Keep semantic status colours */
+body.light .text-red-400     { color: #dc2626 !important; }
+body.light .text-blue-400    { color: #2563eb !important; }
+body.light .text-blue-500    { color: #2563eb !important; }
+body.light .text-emerald-400 { color: #059669 !important; }
+
+/* ── Light-mode badge background flips ───────────────────────────────────── */
+/* Guide temperament badge backgrounds: dark in dark-mode, light in light-mode */
+body.light .badge-blue   { background: rgba(219, 234, 254, 0.9) !important; }
+body.light .badge-teal   { background: rgba(204, 251, 241, 0.9) !important; }
+body.light .badge-amber  { background: rgba(254, 243, 199, 0.9) !important; }
+body.light .badge-slate  { background: rgba(241, 245, 249, 0.9) !important; }

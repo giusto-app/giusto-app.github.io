@@ -88,7 +88,7 @@ export default function PracticeTab({
 
         <main className="w-full max-w-sm md:max-w-none flex flex-col items-center gap-4 flex-1 justify-center">
           <p className="text-sm text-gray-400 tracking-widest uppercase">Get ready…</p>
-          <div className="w-28 h-28 flex items-center justify-center rounded-full border-2 border-amber-500/40 bg-amber-500/10">
+          <div className="w-28 h-28 flex items-center justify-center rounded-full neu-inset">
             <span className="text-7xl font-bold text-amber-400 tabular-nums">{preCountdown}</span>
           </div>
           <p className="text-xs text-gray-600">Recording starts when the countdown reaches zero</p>
@@ -210,8 +210,8 @@ export default function PracticeTab({
                 className={[
                   'flex-1 py-2 rounded-xl text-sm font-medium transition-colors',
                   duration === d
-                    ? 'bg-white/20 text-white shadow shadow-black/30'
-                    : 'bg-white/20 backdrop-blur-md border border-white/28 text-gray-400 hover:bg-white/20 hover:text-gray-200',
+                    ? 'neu-pill-active text-[color:var(--neu-fg)]'
+                    : 'neu-btn text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
                 ].join(' ')}
               >
                 {d === 0 ? 'Free' : `${d}s`}
@@ -229,6 +229,7 @@ export default function PracticeTab({
             onPitchClass={dronePitchClass}
             onInterval={droneInterval}
             onVolume={droneVolume}
+            alwaysExpanded
           />
         </section>
 

@@ -17,7 +17,7 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
   if (sessions.length === 0) {
     return (
       <div className="min-h-full flex flex-col items-center justify-center px-6 text-center gap-4">
-        <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+        <div className="w-16 h-16 rounded-2xl neu-inset flex items-center justify-center">
           <svg width={28} height={28} viewBox="0 0 24 24" fill="none"
             stroke="#60a5fa" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -61,7 +61,7 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
 
       {/* Chart + history: side by side on tablet */}
       <div className="flex flex-col md:flex-row gap-5 flex-1">
-        <div className="bg-white/20 backdrop-blur-md border border-white/28 rounded-xl p-3 md:flex-1 shadow-md shadow-black/30">
+        <div className="neu-surface rounded-2xl p-3 md:flex-1">
           <p className="text-xs text-gray-500 mb-2">% in tune per session (last 20)</p>
           <SessionBarChart sessions={sessions} />
         </div>
@@ -82,7 +82,7 @@ function StatCard({ label, value, positive }: { label: string; value: string; po
     ? 'text-gray-200'
     : positive ? 'text-blue-400' : 'text-red-400'
   return (
-    <div className="flex-1 bg-white/20 backdrop-blur-md border border-white/28 rounded-xl py-3 px-2 text-center shadow-md shadow-black/30">
+    <div className="flex-1 neu-surface rounded-2xl py-3 px-2 text-center">
       <p className="text-xs text-gray-500 mb-0.5">{label}</p>
       <p className={`text-lg font-bold tabular-nums ${color}`}>{value}</p>
     </div>
