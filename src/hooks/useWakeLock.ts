@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+const STORAGE_KEY = 'giusto-wakelock'
+
 export function useWakeLock() {
   const [active, setActive] = useState(false)
   const sentinelRef = useRef<WakeLockSentinel | null>(null)
@@ -12,7 +14,6 @@ export function useWakeLock() {
     try {
       sentinelRef.current = await navigator.wakeLock.request('screen')
       sentinelRef.current.addEventListener('release', () => {
-        // Re-acquire automatically if the user still wants it (page was hidden then shown)
         setActive(false)
       })
       setActive(true)
@@ -30,12 +31,22 @@ export function useWakeLock() {
   const toggle = useCallback(() => {
     if (wantedRef.current) {
       wantedRef.current = false
+      localStorage.setItem(STORAGE_KEY, '0')
       release()
     } else {
       wantedRef.current = true
+      localStorage.setItem(STORAGE_KEY, '1')
       acquire()
     }
   }, [acquire, release])
+
+  // On mount: restore the user's saved preference
+  useEffect(() => {
+    if (supported && localStorage.getItem(STORAGE_KEY) === '1') {
+      wantedRef.current = true
+      acquire()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-acquire when the page becomes visible again (browser releases lock on hide)
   useEffect(() => {

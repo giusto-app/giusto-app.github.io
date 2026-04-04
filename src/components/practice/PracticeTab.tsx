@@ -30,7 +30,7 @@ export default function PracticeTab({
   const [scaleKey, setScaleKey] = useState<ScaleKey>('d-major')
   const [duration, setDuration] = useState<SessionDuration>(30)
   const [temperamentOpen, setTemperamentOpen] = useState(false)
-  const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, stop: droneStop } = useDrone()
+  const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, shiftOctave: droneShiftOctave, stop: droneStop } = useDrone()
   const {
     recorderState, preCountdown, countdown, liveNote, session, errorMessage,
     startRecording, stopRecording, reset, cleanup,
@@ -229,6 +229,7 @@ export default function PracticeTab({
             onPitchClass={dronePitchClass}
             onInterval={droneInterval}
             onVolume={droneVolume}
+            onShiftOctave={droneShiftOctave}
             alwaysExpanded
           />
         </section>

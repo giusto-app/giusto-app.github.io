@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
-import { useWakeLock } from '../../hooks/useWakeLock'
 import TunerMeter from '../TunerMeter'
 import NoteDisplay from '../NoteDisplay'
 import CentsDisplay from '../CentsDisplay'
@@ -17,8 +16,6 @@ interface TunerTabProps {
 
 export default function TunerTab({ temperamentKey, concertPitch }: TunerTabProps) {
   const { note, listeningState, errorMessage, start, stop, setTemperament, setConcertPitch } = usePitchDetection()
-  // Keep wake lock alive even though settings UI is in SettingsTab
-  useWakeLock()
 
   // Sync temperament and concert pitch into the detection hook whenever they change
   useEffect(() => {

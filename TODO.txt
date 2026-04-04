@@ -1,0 +1,4 @@
+the goal of this app is to help violinist and other bowed string players to improve their intonation. 
+Do some research on articles and books that talk about the best methods to improve intonation on the violin. 
+Then create make a list of features or changes to make to the application. 
+Propose multiple features to improve the application. 

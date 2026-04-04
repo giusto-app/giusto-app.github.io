@@ -15,6 +15,7 @@ export interface DroneState {
   pitchClass: number    // 0–11, 0=C
   interval: DroneInterval
   volume: number        // 0–1
+  octaveOffset: number  // -2..+2, applied on top of base octave 4
 }
 
 export function useDrone() {
@@ -23,6 +24,7 @@ export function useDrone() {
     pitchClass: 9,       // A (matches default concert pitch reference)
     interval: 'unison',
     volume: 0.35,
+    octaveOffset: 0,
   })
 
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -44,6 +46,7 @@ export function useDrone() {
     interval: DroneInterval,
     volume: number,
     concertPitchHz: number,
+    octaveOffset: number,
   ) => {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
       audioCtxRef.current = new AudioContext()
@@ -60,8 +63,8 @@ export function useDrone() {
     // Determine which pitches to play
     const pitches: { pitchClass: number; octave: number; relVol: number }[] = []
 
-    // Root tone — place it in a comfortable central octave (octave 3 or 4)
-    const rootOctave = pitchClass <= 4 ? 4 : 3   // C–E → octave 4, F–B → octave 3
+    // Root tone — base octave 4 (C4–B4) plus user octave shift
+    const rootOctave = 4 + octaveOffset
     pitches.push({ pitchClass, octave: rootOctave, relVol: 1.0 })
 
     if (interval === 'octave') {
@@ -112,7 +115,7 @@ export function useDrone() {
         return { ...prev, active: false }
       } else {
         stopOscillators()
-        startOscillators(prev.pitchClass, prev.interval, prev.volume, concertPitchHz)
+        startOscillators(prev.pitchClass, prev.interval, prev.volume, concertPitchHz, prev.octaveOffset)
         return { ...prev, active: true }
       }
     })
@@ -123,7 +126,7 @@ export function useDrone() {
       const next = { ...prev, pitchClass }
       if (prev.active) {
         stopOscillators()
-        startOscillators(pitchClass, prev.interval, prev.volume, concertPitchHz)
+        startOscillators(pitchClass, prev.interval, prev.volume, concertPitchHz, prev.octaveOffset)
       }
       return next
     })
@@ -134,7 +137,7 @@ export function useDrone() {
       const next = { ...prev, interval }
       if (prev.active) {
         stopOscillators()
-        startOscillators(prev.pitchClass, interval, prev.volume, concertPitchHz)
+        startOscillators(prev.pitchClass, interval, prev.volume, concertPitchHz, prev.octaveOffset)
       }
       return next
     })
@@ -152,10 +155,21 @@ export function useDrone() {
     })
   }, [])
 
+  const shiftOctave = useCallback((delta: number, concertPitchHz = 440) => {
+    setState(prev => {
+      const next = { ...prev, octaveOffset: Math.max(-2, Math.min(2, prev.octaveOffset + delta)) }
+      if (prev.active) {
+        stopOscillators()
+        startOscillators(next.pitchClass, next.interval, next.volume, concertPitchHz, next.octaveOffset)
+      }
+      return next
+    })
+  }, [stopOscillators, startOscillators])
+
   const stop = useCallback(() => {
     stopOscillators()
     setState(prev => ({ ...prev, active: false }))
   }, [stopOscillators])
 
-  return { droneState: state, toggle, setPitchClass, setInterval, setVolume, stop }
+  return { droneState: state, toggle, setPitchClass, setInterval, setVolume, shiftOctave, stop }
 }

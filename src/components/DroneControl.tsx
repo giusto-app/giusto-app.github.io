@@ -16,16 +16,17 @@ interface DroneControlProps {
   onPitchClass: (pc: number, concertPitchHz?: number) => void
   onInterval: (interval: DroneInterval, concertPitchHz?: number) => void
   onVolume: (v: number) => void
+  onShiftOctave: (delta: number, concertPitchHz?: number) => void
   /** When true, controls are always shown and never auto-collapse */
   alwaysExpanded?: boolean
 }
 
 export default function DroneControl({
   droneState, concertPitchHz = 440,
-  onToggle, onPitchClass, onInterval, onVolume,
+  onToggle, onPitchClass, onInterval, onVolume, onShiftOctave,
   alwaysExpanded = false,
 }: DroneControlProps) {
-  const { active, pitchClass, interval, volume } = droneState
+  const { active, pitchClass, interval, volume, octaveOffset } = droneState
   const [expanded, setExpanded] = useState(alwaysExpanded)
 
   // When not alwaysExpanded: auto-expand when drone turns on, collapse when off
@@ -36,10 +37,10 @@ export default function DroneControl({
   }, [active, alwaysExpanded])
 
   return (
-    <div className="neu-surface rounded-2xl">
+    <div id="drone-control" className="neu-surface rounded-2xl">
 
       {/* Header row: always visible */}
-      <div className="flex items-center justify-between px-3 py-2.5">
+      <div id="drone-control-header" className="flex items-center justify-between px-3 py-2.5">
         <div className="flex items-center gap-2">
           <DroneIcon active={active} />
           <span className="text-xs font-semibold tracking-widest uppercase text-gray-400">
@@ -51,17 +52,20 @@ export default function DroneControl({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* ON/OFF */}
+          {/* Toggle switch */}
           <button
+            id="drone-toggle"
+            role="switch"
+            aria-checked={active}
             onClick={() => onToggle(concertPitchHz)}
-            className={[
-              'px-3 py-1 rounded-full text-xs font-semibold transition-colors neu-btn',
-              active
-                ? 'text-[color:var(--neu-fg)] neu-pill-active'
-                : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
-            ].join(' ')}
+            className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none"
+            style={{ backgroundColor: active ? '#34d399' : 'rgba(128,128,128,0.25)' }}
+            aria-label={active ? 'Turn drone off' : 'Turn drone on'}
           >
-            {active ? 'ON' : 'OFF'}
+            <span
+              className="inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
+              style={{ transform: active ? 'translateX(26px)' : 'translateX(4px)' }}
+            />
           </button>
 
           {/* Expand/collapse chevron — hidden when alwaysExpanded */}
@@ -83,41 +87,73 @@ export default function DroneControl({
 
       {/* Expanded controls */}
       {(alwaysExpanded || expanded) && (
-        <div className="px-3 pb-3 flex flex-col gap-3 border-t pt-3" style={{ borderColor: 'rgba(128,128,128,0.15)' }}>
-          {/* Note selector */}
-          <div className="flex gap-1 flex-wrap">
-            {NOTE_NAMES.map((name, pc) => (
-              <button
-                key={pc}
-                onClick={() => {
-                  if (!active) {
-                    onPitchClass(pc, concertPitchHz)
-                    onToggle(concertPitchHz)
-                  } else if (pitchClass === pc) {
-                    onToggle(concertPitchHz)
-                  } else {
-                    onPitchClass(pc, concertPitchHz)
-                  }
-                }}
-                className={[
-                  'flex-1 min-w-[2rem] py-1.5 rounded-lg text-xs font-medium transition-colors neu-btn',
-                  pitchClass === pc
-                    ? active
-                      ? 'neu-pill-active text-[color:var(--neu-fg)]'
-                      : 'neu-pill-active text-[color:var(--neu-fg2)]'
-                    : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
-                  name.includes('#') ? 'text-[10px]' : '',
-                ].join(' ')}
-              >
-                {name}
-              </button>
-            ))}
+        <div id="drone-control-body" className="px-3 pb-3 flex flex-col gap-3 border-t pt-3" style={{ borderColor: 'rgba(128,128,128,0.15)' }}>
+
+          {/* Note selector with octave shift arrows on each side */}
+          <div id="drone-note-selector-row" className="flex items-center gap-1">
+            {/* Octave down arrow */}
+            <button
+              id="drone-octave-down"
+              onClick={() => onShiftOctave(-1, concertPitchHz)}
+              disabled={octaveOffset <= -2}
+              className="p-1.5 rounded-lg transition-colors neu-btn text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)] disabled:opacity-25 shrink-0"
+              aria-label="Shift octave down"
+            >
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+
+            {/* Note buttons */}
+            <div id="drone-note-buttons" className="flex gap-1 flex-1 flex-wrap">
+              {NOTE_NAMES.map((name, pc) => (
+                <button
+                  key={pc}
+                  onClick={() => {
+                    if (!active) {
+                      onPitchClass(pc, concertPitchHz)
+                      onToggle(concertPitchHz)
+                    } else if (pitchClass === pc) {
+                      onToggle(concertPitchHz)
+                    } else {
+                      onPitchClass(pc, concertPitchHz)
+                    }
+                  }}
+                  className={[
+                    'flex-1 min-w-[2rem] py-1.5 rounded-lg text-xs font-medium transition-colors neu-btn',
+                    pitchClass === pc
+                      ? active
+                        ? 'neu-pill-active text-[color:var(--neu-fg)]'
+                        : 'neu-pill-active text-[color:var(--neu-fg2)]'
+                      : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
+                    name.includes('#') ? 'text-[10px]' : '',
+                  ].join(' ')}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+
+            {/* Octave up arrow */}
+            <button
+              id="drone-octave-up"
+              onClick={() => onShiftOctave(+1, concertPitchHz)}
+              disabled={octaveOffset >= 2}
+              className="p-1.5 rounded-lg transition-colors neu-btn text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)] disabled:opacity-25 shrink-0"
+              aria-label="Shift octave up"
+            >
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
           </div>
 
           {/* Interval + volume row */}
-          <div className="flex items-center gap-3">
+          <div id="drone-interval-volume-row" className="flex items-center gap-3">
             {/* Interval */}
-            <div className="flex gap-1 shrink-0">
+            <div id="drone-interval-buttons" className="flex gap-1 shrink-0">
               {INTERVALS.map(({ value, label }) => (
                 <button
                   key={value}

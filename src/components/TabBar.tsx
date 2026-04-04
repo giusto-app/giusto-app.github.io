@@ -1,4 +1,4 @@
-export type AppTab = 'tuner' | 'drone' | 'practice' | 'progress' | 'guide' | 'settings'
+export type AppTab = 'tuner' | 'drone' | 'practice' | 'learn' | 'progress' | 'guide' | 'settings'
 
 interface TabBarProps {
   activeTab: AppTab
@@ -64,6 +64,19 @@ function PracticeIcon({ active }: { active: boolean }) {
   )
 }
 
+function LearnIcon({ active }: { active: boolean }) {
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={1.8}
+      strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"
+        fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0} />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"
+        fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0} />
+    </svg>
+  )
+}
+
 function ProgressIcon({ active }: { active: boolean }) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" fill="none"
@@ -103,6 +116,7 @@ const TABS: { id: AppTab; label: string; Icon: React.FC<{ active: boolean }> }[]
   { id: 'tuner',    label: 'Tuner',    Icon: TunerIcon },
   { id: 'drone',    label: 'Drone',    Icon: DroneIcon },
   { id: 'practice', label: 'Practice', Icon: PracticeIcon },
+  { id: 'learn',    label: 'Learn',    Icon: LearnIcon },
   { id: 'progress', label: 'Progress', Icon: ProgressIcon },
   { id: 'guide',    label: 'Guide',    Icon: GuideIcon },
   { id: 'settings', label: 'Settings', Icon: SettingsIcon },

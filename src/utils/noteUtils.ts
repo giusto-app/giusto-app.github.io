@@ -1,4 +1,6 @@
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+const NOTE_NAMES_SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+const NOTE_NAMES_FLATS  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'] as const
+const NOTE_NAMES = NOTE_NAMES_SHARPS
 
 export type TuningStatus = 'in-tune' | 'close' | 'out-of-tune'
 
@@ -85,6 +87,21 @@ export function statusColor(status: TuningStatus): string {
     case 'close': return 'text-amber-400'
     case 'out-of-tune': return 'text-red-400'
   }
+}
+
+export function midiNoteToInfo(midiNote: number, sharps = 0): { noteName: string; octave: number; pitchClass: number } {
+  const pitchClass = ((midiNote % 12) + 12) % 12
+  const noteName = (sharps < 0 ? NOTE_NAMES_FLATS : NOTE_NAMES_SHARPS)[pitchClass]!
+  return { noteName, octave: Math.floor(midiNote / 12) - 1, pitchClass }
+}
+
+export function keyToSharps(key: string): number {
+  const map: Record<string, number> = {
+    'C': 0, 'G': 1, 'D': 2, 'A': 3, 'E': 4, 'B': 5, 'F#': 6,
+    'F': -1, 'Bb': -2, 'Eb': -3, 'Ab': -4,
+    'Am': 0, 'Em': 1, 'Bm': 2, 'Dm': -1, 'Gm': -2,
+  }
+  return map[key] ?? 0
 }
 
 export function statusStrokeColor(status: TuningStatus): string {

@@ -7,6 +7,7 @@ import PracticeTab from './components/practice/PracticeTab'
 import ProgressTab from './components/progress/ProgressTab'
 import GuideTab from './components/guide/GuideTab'
 import SettingsTab from './components/settings/SettingsTab'
+import LearnTab from './components/learn/LearnTab'
 import { type TemperamentKey } from './utils/temperaments'
 import { loadConcertPitch, saveConcertPitch, type ConcertPitchHz } from './utils/concertPitch'
 
@@ -15,7 +16,7 @@ export default function App() {
   const [temperamentKey, setTemperamentKey] = useState<TemperamentKey>('equal')
   const [concertPitch, setConcertPitchState]= useState<ConcertPitchHz>(loadConcertPitch)
   const [progressRefreshKey, setProgressRefreshKey] = useState(0)
-  const [isDark, setIsDark]                 = useState(true)
+  const [isDark, setIsDark]                 = useState(() => localStorage.getItem('giusto-theme') !== 'light')
 
   // Keep body class in sync for CSS overrides
   if (typeof document !== 'undefined') {
@@ -54,6 +55,9 @@ export default function App() {
             onSessionSaved={handleSessionSaved}
           />
         </div>
+        <div className={activeTab === 'learn'    ? 'block h-full' : 'hidden'}>
+          <LearnTab />
+        </div>
         <div className={activeTab === 'progress' ? 'block h-full' : 'hidden'}>
           <ProgressTab refreshKey={progressRefreshKey} />
         </div>
@@ -73,7 +77,11 @@ export default function App() {
       {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
       <TabBar activeTab={activeTab} onChange={setActiveTab} />
 
-      <ThemeToggle isDark={isDark} onToggle={() => setIsDark(d => !d)} />
+      <ThemeToggle isDark={isDark} onToggle={() => setIsDark(d => {
+        const next = !d
+        localStorage.setItem('giusto-theme', next ? 'dark' : 'light')
+        return next
+      })} />
     </div>
   )
 }

@@ -78,9 +78,12 @@ function ledgerLines(step: number): number[] {
 // ── Component ─────────────────────────────────────────────────────────────────
 interface StaffViewProps {
   noteEvents: NoteEvent[]
+  showCentsLabels?: boolean
+  showNoteLabels?: boolean
+  noteColor?: string
 }
 
-export default function StaffView({ noteEvents }: StaffViewProps) {
+export default function StaffView({ noteEvents, showCentsLabels = true, showNoteLabels = true, noteColor }: StaffViewProps) {
   // VexFlow injects Bravura as a data-URI font.  Poll until it's available,
   // then switch from fallback ellipses to the real Bravura glyphs.
   const [bravuraReady, setBravuraReady] = useState(() =>
@@ -107,6 +110,7 @@ export default function StaffView({ noteEvents }: StaffViewProps) {
 
   const noteCount  = noteEvents.length
   const svgWidth   = LEFT_MARGIN + noteCount * NOTE_SPACING + 20
+  const svgH       = showCentsLabels ? SVG_HEIGHT : showNoteLabels ? 112 : 96
   const staffLeft  = 8
   const staffRight = svgWidth - 8
   const staffLines = [0, 1, 2, 3, 4].map(i => STAFF_TOP + i * LINE_SPACING)
@@ -117,9 +121,9 @@ export default function StaffView({ noteEvents }: StaffViewProps) {
   return (
     <div className="overflow-x-auto w-full">
       <svg
-        viewBox={`0 0 ${svgWidth} ${SVG_HEIGHT}`}
+        viewBox={`0 0 ${svgWidth} ${svgH}`}
         width={svgWidth}
-        height={SVG_HEIGHT}
+        height={svgH}
         className="block"
         aria-label="Music staff showing played notes"
       >
@@ -165,7 +169,7 @@ export default function StaffView({ noteEvents }: StaffViewProps) {
           const step  = noteNameToStaffStep(event.noteName, event.octave)
           const noteY = staffStepToY(step)
           const noteX = LEFT_MARGIN + idx * NOTE_SPACING + NOTE_SPACING / 2
-          const color = centsToHsl(event.absCentsAvg)
+          const color = noteColor ?? centsToHsl(event.absCentsAvg)
 
           const isSharp = event.noteName.includes('#')
           const isFlat  = event.noteName.at(1) === 'b'
@@ -257,27 +261,30 @@ export default function StaffView({ noteEvents }: StaffViewProps) {
               )}
 
               {/* Note name label */}
-              <text
-                x={noteX} y={SVG_HEIGHT - 13}
-                fill="#9ca3af"
-                fontSize={9}
-                textAnchor="middle"
-                fontFamily="sans-serif"
-              >
-                {event.noteName}{event.octave}
-              </text>
-
+              {showNoteLabels && (
+                <text
+                  x={noteX} y={107}
+                  fill="#9ca3af"
+                  fontSize={9}
+                  textAnchor="middle"
+                  fontFamily="sans-serif"
+                >
+                  {event.noteName}{event.octave}
+                </text>
+              )}
               {/* Cents label */}
-              <text
-                x={noteX} y={SVG_HEIGHT - 2}
-                fill={color}
-                fontSize={9}
-                fontWeight="600"
-                textAnchor="middle"
-                fontFamily="monospace"
-              >
-                {formatCents(event.avgCents)}
-              </text>
+              {showCentsLabels && (
+                <text
+                  x={noteX} y={SVG_HEIGHT - 2}
+                  fill={color}
+                  fontSize={9}
+                  fontWeight="600"
+                  textAnchor="middle"
+                  fontFamily="monospace"
+                >
+                  {formatCents(event.avgCents)}
+                </text>
+              )}
             </g>
           )
         })}
