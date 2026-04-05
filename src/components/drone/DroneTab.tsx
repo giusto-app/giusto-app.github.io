@@ -8,7 +8,7 @@ interface DroneTabProps {
 }
 
 export default function DroneTab({ concertPitch }: DroneTabProps) {
-  const { droneState, toggle, setPitchClass, setInterval, setVolume, shiftOctave, stop } = useDrone()
+  const { droneState, toggle, setPitchClass, setInterval, setVolume, shiftOctave, setSoundType, stop } = useDrone()
 
   // Stop drone when tab unmounts
   useEffect(() => () => { stop() }, [stop])
@@ -59,6 +59,7 @@ export default function DroneTab({ concertPitch }: DroneTabProps) {
           onInterval={setInterval}
           onVolume={setVolume}
           onShiftOctave={shiftOctave}
+          onSoundType={setSoundType}
           alwaysExpanded
         />
 
