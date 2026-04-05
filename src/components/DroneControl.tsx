@@ -10,9 +10,10 @@ const INTERVALS: { value: DroneInterval; label: string }[] = [
 ]
 
 const SOUND_TYPES: { value: DroneSoundType; label: string; title: string }[] = [
-  { value: 'sawtooth', label: 'Drone',     title: 'Continuous synthesized drone' },
-  { value: 'shruti',   label: 'Shruti',    title: 'Shruti box — warm bellows-driven reed drone' },
-  { value: 'cello',    label: 'Cello',     title: 'Cello section sustain (VSCO2 CE, CC0)' },
+  { value: 'sawtooth', label: 'Drone',    title: 'Continuous synthesized drone' },
+  { value: 'shruti',   label: 'Shruti',   title: 'Shruti box — warm bellows-driven reed drone' },
+  { value: 'tanpura',  label: 'Tanpura',  title: 'Indian tanpura drone (Pa-Sa-Sa-Sa tuning)' },
+  { value: 'cello',    label: 'Cello',    title: 'Cello section sustain (VSCO2 CE, CC0)' },
 ]
 
 interface DroneControlProps {
@@ -36,7 +37,8 @@ export default function DroneControl({
   const { active, pitchClass, interval, volume, octaveOffset, soundType } = droneState
   const [expanded, setExpanded] = useState(alwaysExpanded)
   const isShruti = soundType === 'shruti'
-  const isSampleBased = soundType === 'cello' || soundType === 'shruti'
+  const isSampleBased = soundType === 'cello' || soundType === 'shruti' || soundType === 'tanpura'
+  const isOctaveFixed = soundType === 'tanpura'
 
   // When not alwaysExpanded: auto-expand when drone turns on, collapse when off
   useEffect(() => {
@@ -132,7 +134,7 @@ export default function DroneControl({
             <button
               id="drone-octave-down"
               onClick={() => onShiftOctave(-1, concertPitchHz)}
-              disabled={octaveOffset <= -2}
+              disabled={octaveOffset <= -2 || isOctaveFixed}
               className="flex flex-col items-center justify-center gap-0.5 w-9 py-1.5 rounded-lg transition-colors neu-btn text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)] disabled:opacity-25 shrink-0 border border-[rgba(128,128,128,0.2)]"
               aria-label="Shift octave down"
             >
@@ -176,7 +178,7 @@ export default function DroneControl({
             <button
               id="drone-octave-up"
               onClick={() => onShiftOctave(+1, concertPitchHz)}
-              disabled={octaveOffset >= 2}
+              disabled={octaveOffset >= 2 || isOctaveFixed}
               className="flex flex-col items-center justify-center gap-0.5 w-9 py-1.5 rounded-lg transition-colors neu-btn text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)] disabled:opacity-25 shrink-0 border border-[rgba(128,128,128,0.2)]"
               aria-label="Shift octave up"
             >

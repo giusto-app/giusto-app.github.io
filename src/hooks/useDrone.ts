@@ -9,7 +9,7 @@ function pitchClassOctaveToFreq(pitchClass: number, octave: number, concertPitch
 }
 
 export type DroneInterval = 'unison' | 'octave' | 'fifth'
-export type DroneSoundType = 'sawtooth' | 'shruti' | 'cello'
+export type DroneSoundType = 'sawtooth' | 'shruti' | 'cello' | 'tanpura'
 
 export interface DroneState {
   active: boolean
@@ -101,6 +101,43 @@ function nearestCelloSample(targetMidi: number): { midiNote: number; url: string
   return CELLO_SAMPLES.reduce((best, s) =>
     Math.abs(s.midiNote - targetMidi) < Math.abs(best.midiNote - targetMidi) ? s : best
   )
+}
+
+// ---------------------------------------------------------------------------
+// Tanpura sample engine
+//
+// Source: carnaticmusicexams.in (Pa-Sa-Sa-Sa tuning, all 12 chromatic notes)
+// Format: WAV 44.1kHz/16-bit stereo, ~4.5s per loop
+// NOTE: Temporary use pending permission from carnaticmusicexams.in
+// Each pitch has its own recording — no pitch-shifting needed.
+// ---------------------------------------------------------------------------
+
+// pitchClass 0=C … 11=B — male voice register, octave 3 (Sa = C3–B3, ~130–174 Hz)
+// Source: carnaticmusicexams.in, Pa-Sa-Sa-Sa tuning (temporary, permission pending)
+const TANPURA_SAMPLES: Record<number, string> = {
+  0:  '/sounds/tanpura/01_C3.wav',
+  1:  '/sounds/tanpura/02_Cs3.wav',
+  2:  '/sounds/tanpura/03_D3.wav',
+  3:  '/sounds/tanpura/04_Ds3.wav',
+  4:  '/sounds/tanpura/05_E3.wav',
+  5:  '/sounds/tanpura/06_F3.wav',
+  6:  '/sounds/tanpura/07_Fs3.wav',
+  7:  '/sounds/tanpura/08_G3.wav',
+  8:  '/sounds/tanpura/09_Gs3.wav',
+  9:  '/sounds/tanpura/10_A3.wav',
+  10: '/sounds/tanpura/11_As3.wav',
+  11: '/sounds/tanpura/12_B3.wav',
+}
+
+const tanpuraSampleCache = new Map<string, AudioBuffer>()
+
+async function fetchTanpuraSample(ctx: AudioContext, url: string): Promise<AudioBuffer> {
+  if (tanpuraSampleCache.has(url)) return tanpuraSampleCache.get(url)!
+  const response = await fetch(url)
+  const arrayBuffer = await response.arrayBuffer()
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+  tanpuraSampleCache.set(url, audioBuffer)
+  return audioBuffer
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +364,33 @@ export function useDrone() {
   }
 
   // -------------------------------------------------------------------------
+  // Start — tanpura sample mode
+  // -------------------------------------------------------------------------
+  async function startTanpura(
+    ctx: AudioContext,
+    masterGain: GainNode,
+    pitchClass: number,
+  ) {
+    const url = TANPURA_SAMPLES[pitchClass]
+    try {
+      const buffer = await fetchTanpuraSample(ctx, url)
+      if (!gainRef.current) return
+
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.loop = true
+      source.loopStart = 0
+      source.loopEnd = buffer.duration
+      source.connect(masterGain)
+      source.start()
+      oscillatorsRef.current.push(source as unknown as OscillatorNode)
+    } catch (err) {
+      console.warn('Tanpura sample load failed, falling back to sawtooth', err)
+      startSawtooth(ctx, masterGain, pitchClass, 'unison', 0, 440)
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Unified start dispatcher
   // -------------------------------------------------------------------------
   const startOscillators = useCallback((
@@ -355,6 +419,8 @@ export function useDrone() {
 
     if (soundType === 'cello') {
       startCello(ctx, masterGain, pitchClass, octaveOffset, concertPitchHz)
+    } else if (soundType === 'tanpura') {
+      startTanpura(ctx, masterGain, pitchClass)
     } else if (soundType === 'shruti') {
       startShruti(ctx, masterGain, pitchClass, octaveOffset, concertPitchHz)
     } else {
@@ -427,8 +493,8 @@ export function useDrone() {
 
   const setSoundType = useCallback((soundType: DroneSoundType, concertPitchHz = 440) => {
     setState(prev => {
-      // Cello samples are recorded in octave 2–5 range; snap to octave 2 when switching to cello
-      const octaveOffset = soundType === 'cello' ? -2 : prev.octaveOffset
+      // Cello: snap to octave 2. Tanpura: octave irrelevant (exact recordings), reset to 0.
+      const octaveOffset = soundType === 'cello' ? -2 : soundType === 'tanpura' ? 0 : prev.octaveOffset
       const next = { ...prev, soundType, octaveOffset }
       if (prev.active) {
         stopOscillators()
