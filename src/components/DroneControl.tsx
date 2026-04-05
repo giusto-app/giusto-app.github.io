@@ -10,8 +10,8 @@ const INTERVALS: { value: DroneInterval; label: string }[] = [
 ]
 
 const SOUND_TYPES: { value: DroneSoundType; label: string; title: string }[] = [
-  { value: 'sawtooth', label: 'Drone',    title: 'Continuous synthesized drone' },
-  { value: 'shruti',   label: 'Shruti',   title: 'Shruti box — warm bellows-driven reed drone' },
+  { value: 'sawtooth', label: 'Synth',    title: 'Continuous synthesized drone' },
+  { value: 'shruti',   label: 'Reed',     title: 'Synthesized reed drone (harmonium-like)' },
   { value: 'tanpura',  label: 'Tanpura',  title: 'Indian tanpura drone (Pa-Sa-Sa-Sa tuning)' },
   { value: 'cello',    label: 'Cello',    title: 'Cello section sustain (VSCO2 CE, CC0)' },
 ]
