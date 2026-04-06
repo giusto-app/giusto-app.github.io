@@ -13,9 +13,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      'lily-parser': r('./packages/lily-parser/src/index.ts'),
-      'lily-viewer/style.css': r('./packages/lily-viewer/src/style.css'),
-      'lily-viewer': r('./packages/lily-viewer/src/lib.ts'),
+      'lily-parser': r('./packages/lily-parser/index.js'),
+      'lily-viewer/style.css': r('./packages/lily-viewer/style.css'),
+      'lily-viewer': r('./packages/lily-viewer/dist/lily-viewer.js'),
     },
   },
   plugins: [
@@ -25,6 +25,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         clientsClaim: true,
         skipWaiting: true,
       },

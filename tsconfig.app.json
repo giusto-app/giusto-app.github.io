@@ -3,9 +3,8 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "baseUrl": ".",
     "paths": {
-      "lily-parser": ["./packages/lily-parser/src/index.ts"],
-      "lily-viewer": ["./packages/lily-viewer/src/lib.ts"],
-      "lily-viewer/*": ["./packages/lily-viewer/src/*"]
+      "lily-parser": ["./packages/lily-parser/index.d.ts"],
+      "lily-viewer": ["./packages/lily-viewer/dist/types/lib.d.ts"]
     },
     "target": "ES2022",
     "useDefineForClassFields": true,

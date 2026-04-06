@@ -80,3 +80,39 @@ bun run dev --host
 | PWA | vite-plugin-pwa + Workbox |
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for detailed functional specifications.
+
+---
+
+## Monorepo Structure
+
+`lily-parser` and `lily-viewer` are developed as sibling directories alongside this app and vendored into `packages/` so CI (GitHub Actions) has everything it needs in a single checkout.
+
+```
+giusto-app/
+└── packages/
+    ├── lily-parser/   # LilyPond parser (vendored copy)
+    └── lily-viewer/   # SVG notation renderer (vendored copy)
+```
+
+Vite and TypeScript resolve `lily-parser` and `lily-viewer` from their compiled dist files in `packages/`.
+
+### ⚠️ Keeping packages in sync
+
+The source of truth for `lily-parser` and `lily-viewer` is their sibling directories (`../lily-parser`, `../lily-viewer`). After making changes there, build and sync before committing:
+
+```bash
+# Build both packages
+cd ../lily-parser && bun run build:lib && cd -
+cd ../lily-viewer && bun run build:lib && cd -
+
+# Sync dist output into packages/
+rm -rf packages/lily-parser && mkdir packages/lily-parser
+cp ../lily-parser/dist/{index,parser,scanner,types}.{js,d.ts} packages/lily-parser/
+
+rm -rf packages/lily-viewer && mkdir -p packages/lily-viewer/dist
+cp ../lily-viewer/dist/lily-viewer.js packages/lily-viewer/dist/
+cp -r ../lily-viewer/dist/types packages/lily-viewer/dist/
+cp ../lily-viewer/src/style.css packages/lily-viewer/
+```
+
+**Longer term:** give `lily-parser` and `lily-viewer` their own GitHub repos so CI can clone them directly — eliminating the manual sync step.

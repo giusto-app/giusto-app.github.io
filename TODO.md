@@ -28,6 +28,30 @@ Structured scale/exercise routines the user can run with the drone playing under
 
 ---
 
+## ⚠️ Important Workflow Notes
+
+### Syncing lily-parser and lily-viewer before committing
+`lily-parser` and `lily-viewer` live as sibling directories locally but are vendored into `packages/` for CI (GitHub Actions only checks out this repo). After making changes to either package, sync before committing:
+
+```bash
+# Build both packages
+cd ../lily-parser && bun run build:lib && cd -
+cd ../lily-viewer && bun run build:lib && cd -
+
+# Sync dist output into packages/
+rm -rf packages/lily-parser && mkdir packages/lily-parser
+cp ../lily-parser/dist/{index,parser,scanner,types}.{js,d.ts} packages/lily-parser/
+
+rm -rf packages/lily-viewer && mkdir -p packages/lily-viewer/dist
+cp ../lily-viewer/dist/lily-viewer.js packages/lily-viewer/dist/
+cp -r ../lily-viewer/dist/types packages/lily-viewer/dist/
+cp ../lily-viewer/src/style.css packages/lily-viewer/
+```
+
+**Longer term:** give `lily-parser` and `lily-viewer` their own GitHub repos so CI can clone them directly — eliminating the manual sync step.
+
+---
+
 ## 🟡 In Progress / Pending
 
 ### Staff Rendering Comparison (`/?compare`)
