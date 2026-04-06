@@ -13,9 +13,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      'lily-parser': r('../lily-parser/src/index.ts'),
-      'lily-viewer/style.css': r('../lily-viewer/src/style.css'),
-      'lily-viewer': r('../lily-viewer/src/lib.ts'),
+      'lily-parser': r('./packages/lily-parser/src/index.ts'),
+      'lily-viewer/style.css': r('./packages/lily-viewer/src/style.css'),
+      'lily-viewer': r('./packages/lily-viewer/src/lib.ts'),
     },
   },
   plugins: [
