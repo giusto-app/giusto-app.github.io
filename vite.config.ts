@@ -2,8 +2,22 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { fileURLToPath, URL } from 'node:url'
+
+const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
 export default defineConfig({
+  server: {
+    port: 6666,
+    strictPort: true,
+  },
+  resolve: {
+    alias: {
+      'lily-parser': r('../lily-parser/src/index.ts'),
+      'lily-viewer/style.css': r('../lily-viewer/src/style.css'),
+      'lily-viewer': r('../lily-viewer/src/lib.ts'),
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

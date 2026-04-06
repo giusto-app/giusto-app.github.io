@@ -1,6 +1,18 @@
 import StaffView from './StaffView'
 import StaffViewVexFlow from './StaffViewVexFlow'
+import StaffViewLilyPond from './StaffViewLilyPond'
 import type { NoteEvent } from '../../utils/sessions'
+
+// G Melodic Minor scale in LilyPond (for Option C)
+// Ascending: G A Bb C D E♮ F# G  (melodic minor raised 6th+7th)
+// Descending: F♮ Eb D C Bb A G   (natural minor)
+const LILY_SOURCE = `\\relative g' {
+  \\key g \\minor
+  \\time 4/4
+  \\tempo "Andante" 4=80
+  g4 a bf c d e fs g
+  f ef d c bf a g2
+}`
 
 // G Melodic Minor scale fed to all three renderers:
 // Ascending: G – A – Bb – C – D – E♮ – F# – G
@@ -77,6 +89,15 @@ export default function StaffComparison() {
           meta="~450 KB gzip · Bravura engraving font"
         >
           <StaffViewVexFlow noteEvents={SAMPLE} />
+        </OptionCard>
+
+        <OptionCard
+          tag="Option C"
+          tagColor="bg-violet-900 text-violet-300"
+          label="lily-viewer (LilyPond parser)"
+          meta="local library · Bravura SMuFL font"
+        >
+          <StaffViewLilyPond source={LILY_SOURCE} noteEvents={SAMPLE} />
         </OptionCard>
 
       </div>
