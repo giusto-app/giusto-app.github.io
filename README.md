@@ -1,4 +1,4 @@
-# Giusto — Intonation Trainer for Bowed String Players
+# Giusto — Practice & Intonation trainer for bowed string players
 
 A web app that helps violinists, violists, cellists, and double bassists improve their pitch accuracy in real time. Play your instrument — the app listens, detects the pitch, and tells you how close you are to being in tune.
 

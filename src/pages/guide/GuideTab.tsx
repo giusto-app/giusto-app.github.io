@@ -18,7 +18,7 @@ export default function GuideTab() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-white tracking-tight">Giusto</h1>
-          <p className="text-sm text-gray-400">Intonation trainer for bowed string players</p>
+          <p className="text-sm text-gray-400">Practice & Intonation trainer for bowed string players</p>
         </div>
       </div>
 

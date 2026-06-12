@@ -1,5 +1,24 @@
+import { useEffect, useState } from 'react'
 import { type TuneCatalogEntry, svgUrl } from '../../hooks/useTuneCatalog'
 import { type LearnCard } from '../../utils/spaceRepetition'
+
+// The tune SVGs draw their ink with fill/stroke="currentColor". Loaded via
+// <img> that resolves to the image's own (black) colour, so notes are invisible
+// on the dark theme. Inlining the markup lets the SVG inherit the themed `color`
+// from .sheet-music instead. See the .sheet-music rules in index.css.
+function useInlineSvg(url: string): string | null {
+  const [markup, setMarkup] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    setMarkup(null)
+    fetch(url)
+      .then(r => (r.ok ? r.text() : Promise.reject(new Error(`${r.status}`))))
+      .then(text => { if (active) setMarkup(text) })
+      .catch(() => { if (active) setMarkup(null) })
+    return () => { active = false }
+  }, [url])
+  return markup
+}
 
 interface TuneDetailProps {
   tune: TuneCatalogEntry
@@ -12,6 +31,7 @@ interface TuneDetailProps {
 }
 
 export default function TuneDetail({ tune, isAdded, existingCard: _existingCard, onBack, onAdd, onPractice, onRemove }: TuneDetailProps) {
+  const svgMarkup = useInlineSvg(svgUrl(tune))
   return (
     <div className="min-h-full flex flex-col px-4 py-6 gap-5">
       <header className="flex items-center gap-3">
@@ -27,14 +47,18 @@ export default function TuneDetail({ tune, isAdded, existingCard: _existingCard,
         <DifficultyBadge difficulty={tune.difficulty} />
       </header>
 
-      {/* Sheet music */}
+      {/* Sheet music — inlined so its currentColor ink follows the theme. */}
       <div className="neu-inset rounded-2xl p-2 overflow-hidden">
-        <img
-          src={svgUrl(tune)}
-          alt={`Sheet music for ${tune.title}`}
-          className="w-full rounded-xl"
-          loading="lazy"
-        />
+        {svgMarkup ? (
+          <div
+            className="sheet-music w-full rounded-xl"
+            role="img"
+            aria-label={`Sheet music for ${tune.title}`}
+            dangerouslySetInnerHTML={{ __html: svgMarkup }}
+          />
+        ) : (
+          <div className="w-full aspect-[3/4] rounded-xl animate-pulse bg-[color:var(--neu-bg)]" />
+        )}
       </div>
 
       {/* Metadata row */}

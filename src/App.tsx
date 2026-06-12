@@ -1,18 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import TabBar, { type AppTab } from './components/TabBar'
 import ThemeToggle from './components/ThemeToggle'
-import TunerTab from './components/tuner/TunerTab'
-import DroneTab from './components/drone/DroneTab'
-import PracticeTab from './components/practice/PracticeTab'
-import ProgressTab from './components/progress/ProgressTab'
-import GuideTab from './components/guide/GuideTab'
-import SettingsTab from './components/settings/SettingsTab'
-import LearnTab from './components/learn/LearnTab'
+import TunerTab from './pages/tuner/TunerTab'
+import DroneTab from './pages/drone/DroneTab'
+import PracticeTab from './pages/practice/PracticeTab'
+import ProgressTab from './pages/progress/ProgressTab'
+import GuideTab from './pages/guide/GuideTab'
+import SettingsTab from './pages/settings/SettingsTab'
+import LearnTab from './pages/learn/LearnTab'
 import { type TemperamentKey } from './utils/temperaments'
 import { loadConcertPitch, saveConcertPitch, type ConcertPitchHz } from './utils/concertPitch'
 
+const TABS: AppTab[] = ['tuner', 'drone', 'practice', 'learn', 'progress', 'guide', 'settings']
+
+// The URL hash drives the active tab: #learn, #practice, etc. The Learn tab's
+// tune deep links (#tune/<genre>/<folder>, owned by LearnTab) also imply Learn.
+function tabFromHash(hash: string): AppTab | null {
+  const slug = (hash.startsWith('#') ? hash.slice(1) : hash).split('/')[0]
+  if (slug === 'tune') return 'learn'
+  return (TABS as string[]).includes(slug) ? (slug as AppTab) : null
+}
+
 export default function App() {
-  const [activeTab, setActiveTab]           = useState<AppTab>('tuner')
+  const [activeTab, setActiveTab]           = useState<AppTab>(() => tabFromHash(window.location.hash) ?? 'tuner')
   const [temperamentKey, setTemperamentKey] = useState<TemperamentKey>('equal')
   const [concertPitch, setConcertPitchState]= useState<ConcertPitchHz>(loadConcertPitch)
   const [progressRefreshKey, setProgressRefreshKey] = useState(0)
@@ -23,6 +33,23 @@ export default function App() {
     document.body.classList.toggle('light', !isDark)
   }
 
+  // Keep the active tab in sync with the URL hash (deep links, back button).
+  useEffect(() => {
+    function syncFromHash() {
+      const tab = tabFromHash(window.location.hash)
+      if (tab) setActiveTab(tab)
+    }
+    window.addEventListener('hashchange', syncFromHash)
+    return () => window.removeEventListener('hashchange', syncFromHash)
+  }, [])
+
+  function selectTab(tab: AppTab) {
+    setActiveTab(tab)
+    // Don't stomp a Learn tune deep link (#tune/...) when re-selecting Learn.
+    if (tab === 'learn' && window.location.hash.startsWith('#tune/')) return
+    if (window.location.hash !== `#${tab}`) window.location.hash = tab
+  }
+
   function handleConcertPitchChange(hz: ConcertPitchHz) {
     saveConcertPitch(hz)
     setConcertPitchState(hz)
@@ -30,7 +57,7 @@ export default function App() {
 
   function handleSessionSaved() {
     setProgressRefreshKey(k => k + 1)
-    setActiveTab('progress')
+    selectTab('progress')
   }
 
   return (
@@ -75,7 +102,7 @@ export default function App() {
       </div>
 
       {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
-      <TabBar activeTab={activeTab} onChange={setActiveTab} />
+      <TabBar activeTab={activeTab} onChange={selectTab} />
 
       <ThemeToggle isDark={isDark} onToggle={() => setIsDark(d => {
         const next = !d

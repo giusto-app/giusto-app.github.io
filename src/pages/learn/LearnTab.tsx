@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLearnQueue } from '../../hooks/useLearnQueue'
 import { useTuneCatalog, type TuneCatalogEntry, notesUrl, type TuneNote } from '../../hooks/useTuneCatalog'
 import { type LearnCard, daysUntilReview } from '../../utils/spaceRepetition'
@@ -9,6 +9,20 @@ import PracticeView from './PracticeView'
 
 type LearnView = 'queue' | 'browse' | 'detail' | 'practice'
 
+// URL hash for a tune detail view — mirrors the lilyJS music-viewer:
+//   #tune/{genre_folder}/{tune_folder}   e.g. #tune/Classical/bach_violin_sonata_1_Presto
+function tuneHash(tune: TuneCatalogEntry): string {
+  return `#tune/${tune.genre_folder}/${tune.tune_folder}`
+}
+
+function tuneFromHash(hash: string, tunes: TuneCatalogEntry[]): TuneCatalogEntry | null {
+  const raw = (hash.startsWith('#') ? hash.slice(1) : hash).replace(/^tune\//, '')
+  if (!raw || raw === hash) return null // no leading "tune/" → not ours
+  const [genre, folder] = decodeURIComponent(raw).split('/')
+  if (!genre || !folder) return null
+  return tunes.find(t => t.genre_folder === genre && t.tune_folder === folder) ?? null
+}
+
 export default function LearnTab() {
   const { dueCards, allCards, addTune, removeCard, submitGrade, isAdded } = useLearnQueue()
   const { tunes } = useTuneCatalog()
@@ -17,6 +31,41 @@ export default function LearnTab() {
   const [selectedCard, setSelectedCard] = useState<LearnCard | null>(null)
   const [tuneNotes, setTuneNotes] = useState<TuneNote[]>([])
   const [loadingNotes, setLoadingNotes] = useState(false)
+
+  // ── URL hash ↔ detail view ─────────────────────────────────────────────────
+  // Opening a tune sets #tune/<genre>/<folder>; reacting to hash changes lets
+  // deep links and the browser back button drive the detail view.
+  useEffect(() => {
+    function syncFromHash() {
+      const tune = tuneFromHash(window.location.hash, tunes)
+      if (tune) {
+        setSelectedTune(tune)
+        setView('detail')
+      } else if (window.location.hash.startsWith('#tune/')) {
+        // Hash points at a tune we don't have (yet) — leave the view as-is.
+      } else {
+        // Hash cleared (e.g. back button) — leave the detail view.
+        setView(v => (v === 'detail' ? 'browse' : v))
+      }
+    }
+    syncFromHash() // run once tunes are available for deep-link restore
+    window.addEventListener('hashchange', syncFromHash)
+    return () => window.removeEventListener('hashchange', syncFromHash)
+  }, [tunes])
+
+  function openDetail(tune: TuneCatalogEntry) {
+    setSelectedTune(tune)
+    setView('detail')
+    if (window.location.hash !== tuneHash(tune)) window.location.hash = tuneHash(tune)
+  }
+
+  function clearTuneHash() {
+    // Leaving a tune detail returns to the Learn tab's own hash (#learn),
+    // not a bare URL — App.tsx routes the top-level tab off the hash.
+    if (window.location.hash.startsWith('#tune/')) {
+      history.replaceState(null, '', `${window.location.pathname}${window.location.search}#learn`)
+    }
+  }
 
   async function handleStartPractice(tune: TuneCatalogEntry, card: LearnCard) {
     setSelectedTune(tune)
@@ -47,7 +96,7 @@ export default function LearnTab() {
     return (
       <TuneBrowser
         isAdded={isAdded}
-        onSelect={tune => { setSelectedTune(tune); setView('detail') }}
+        onSelect={openDetail}
         onBack={() => setView('queue')}
       />
     )
@@ -61,13 +110,14 @@ export default function LearnTab() {
         tune={selectedTune}
         isAdded={isAdded(selectedTune.tune_folder)}
         existingCard={existingCard}
-        onBack={() => setView('browse')}
+        onBack={() => { clearTuneHash(); setView('browse') }}
         onAdd={() => addTune(selectedTune)}
         onPractice={() => {
-          if (existingCard) handleStartPractice(selectedTune, existingCard)
+          if (existingCard) { clearTuneHash(); handleStartPractice(selectedTune, existingCard) }
         }}
         onRemove={() => {
           if (existingCard) removeCard(existingCard.id)
+          clearTuneHash()
           setView('browse')
           setSelectedTune(null)
         }}

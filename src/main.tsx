@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import StaffComparison from './components/practice/StaffComparison.tsx'
+import StaffComparison from './pages/practice/StaffComparison.tsx'
 
 const isCompare = new URLSearchParams(window.location.search).has('compare')
 

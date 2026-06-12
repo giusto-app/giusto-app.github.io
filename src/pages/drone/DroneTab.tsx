@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useDrone } from '../../hooks/useDrone'
-import DroneControl from '../DroneControl'
+import DroneControl from '../../components/DroneControl'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
 
 interface DroneTabProps {

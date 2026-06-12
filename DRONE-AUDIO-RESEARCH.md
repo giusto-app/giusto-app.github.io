@@ -1,7 +1,7 @@
 # Drone Audio Research
 
 ## Context
-The giusto app (intonation trainer for bowed string players) has a drone feature.
+The giusto app (Practice & Intonation trainer for bowed string players) has a drone feature.
 We tried Web Audio API synthesis for a tanpura/shruti box sound — all attempts sounded
 bad. Research confirmed: **every serious tanpura web app uses pre-recorded samples, not synthesis.**
 

@@ -117,6 +117,23 @@ body.light .text-blue-400    { color: #2563eb !important; }
 body.light .text-blue-500    { color: #2563eb !important; }
 body.light .text-emerald-400 { color: #059669 !important; }
 
+/* ── Sheet music ─────────────────────────────────────────────────────────────
+   Tune SVGs draw every notehead, stem, staff line and text with
+   fill/stroke="currentColor" (same idea as the music-viewer's var(--lily-note),
+   just via currentColor). Inlined into the DOM, the SVG inherits the `color`
+   we set here, so the ink follows the active theme — light on the dark theme,
+   dark in light mode — instead of staying baked black. */
+.sheet-music {
+  color: var(--neu-fg);
+  transition: color 0.25s ease;
+}
+
+.sheet-music svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* ── Light-mode badge background flips ───────────────────────────────────── */
 /* Guide temperament badge backgrounds: dark in dark-mode, light in light-mode */
 body.light .badge-blue   { background: rgba(219, 234, 254, 0.9) !important; }
