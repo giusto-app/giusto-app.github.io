@@ -4,7 +4,8 @@
     "baseUrl": ".",
     "paths": {
       "lily-parser": ["./packages/lily-parser/index.d.ts"],
-      "lily-viewer": ["./packages/lily-viewer/dist/types/lib.d.ts"]
+      "lily-viewer": ["./packages/lily-viewer/dist/types/lib.d.ts"],
+      "lilyjs": ["./packages/lilyjs/index.d.ts"]
     },
     "target": "ES2022",
     "useDefineForClassFields": true,

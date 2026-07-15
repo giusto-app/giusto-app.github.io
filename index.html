@@ -10,6 +10,12 @@
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Giusto - Intonation Trainer</title>
+    <script>
+      // Font base for the vendored lilyjs bundle: it resolves ./fonts/*.woff2
+      // relative to this URL (→ public/lilyjs/fonts/). Must be set before the
+      // app modules evaluate.
+      window.__LILYJS_BUNDLE_URL__ = new URL('/lilyjs/lilyjs.esm.js', location.href).href
+    </script>
   </head>
   <body>
     <div id="root"></div>

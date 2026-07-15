@@ -16,6 +16,9 @@ export default defineConfig({
       'lily-parser': r('./packages/lily-parser/index.js'),
       'lily-viewer/style.css': r('./packages/lily-viewer/style.css'),
       'lily-viewer': r('./packages/lily-viewer/dist/lily-viewer.js'),
+      // Modern lilyJS bundle (parseSource → music-model, renderLily).
+      // Synced from ../lilyJS via scripts/sync-lilyjs.sh.
+      'lilyjs': r('./packages/lilyjs/lilyjs.esm.js'),
     },
   },
   plugins: [
