@@ -17,6 +17,9 @@ Sustained reference tone in any of the 12 chromatic pitches. Choose unison, octa
 **Practice**
 Record a 10s/30s/60s/Free session while playing a scale. After recording, review your results on a music staff and note table showing average deviation per note.
 
+**Play-Along** (Practice tab)
+Open a LilyPond exercise (e.g. Practice Arpeggios), rendered live with the lilyJS engine, and press Play: a synthesized woodblock metronome clicks every beat (accented downbeats, optional 1-bar count-in) while a drone sounds each chord's root + fifth and crossfades gaplessly on every chord change — all scheduled sample-accurately on one Web Audio clock. Tempo 40–208 BPM live, loop mode, per-voice volumes, three drone sounds (synth/shruti/cello). Key files: `src/audio/{playbackClock,woodblock,chordDrone,chordSchedule,droneVoices,audioContext}.ts`, `src/pages/practice/{PracticePlayback,LilyScore}.tsx`, exercise in `public/exercises/`.
+
 **Scales**
 40+ scales organized by Common (open-string keys), Full Circle of Fifths, and Gypsy & Pentatonic. Drone tonic auto-follows the selected scale.
 
@@ -98,21 +101,22 @@ Vite and TypeScript resolve `lily-parser` and `lily-viewer` from their compiled 
 
 ### ⚠️ Keeping packages in sync
 
-The source of truth for `lily-parser` and `lily-viewer` is their sibling directories (`../lily-parser`, `../lily-viewer`). After making changes there, build and sync before committing:
+The source of truth for `lily-parser` **and** `lilyjs` is the **lilyJS repo** (`../lilyJS`,
+parser source in `src/music-input/lilypond/`). After changing lilyJS, rebuild and re-vendor:
 
 ```bash
-# Build both packages
-cd ../lily-parser && bun run build:lib && cd -
-cd ../lily-viewer && bun run build:lib && cd -
+# Modern bundle (parseSource → music-model, renderLily — used by Play-Along):
+bash scripts/sync-lilyjs.sh   # builds lilyJS, copies packages/lilyjs + public/lilyjs/fonts
+# packages/lilyjs/index.d.ts is hand-maintained — extend it if you use more of the API.
 
-# Sync dist output into packages/
-rm -rf packages/lily-parser && mkdir packages/lily-parser
-cp ../lily-parser/dist/{index,parser,scanner,types}.{js,d.ts} packages/lily-parser/
-
-rm -rf packages/lily-viewer && mkdir -p packages/lily-viewer/dist
-cp ../lily-viewer/dist/lily-viewer.js packages/lily-viewer/dist/
-cp -r ../lily-viewer/dist/types packages/lily-viewer/dist/
-cp ../lily-viewer/src/style.css packages/lily-viewer/
+# Legacy ParsedTune bundle (used by StaffViewLilyPond):
+cd ../lilyJS && bun run build:lily-parser && cd -
+rm -rf packages/lily-parser
+cp -r ../lilyJS/dist/lily-parser packages/lily-parser
 ```
 
-**Longer term:** give `lily-parser` and `lily-viewer` their own GitHub repos so CI can clone them directly — eliminating the manual sync step.
+`lily-viewer` is still a frozen vendored build (its original sibling source directory no
+longer exists); its `StaffView` consumes the `ParsedTune` produced by `lily-parser`.
+Longer term it should also be rebuilt from lilyJS's renderer.
+
+**Longer term:** publish `lily-parser`/`lily-viewer` from lilyJS CI so the manual re-vendor step disappears.

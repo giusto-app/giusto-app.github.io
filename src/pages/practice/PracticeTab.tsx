@@ -10,6 +10,7 @@ import DroneControl from '../../components/DroneControl'
 import ScaleSelector from './ScaleSelector'
 import RecordButton from './RecordButton'
 import SessionResults from './SessionResults'
+import PracticePlayback from './PracticePlayback'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
 import { SCALES, type ScaleKey } from '../../utils/scaleDefinitions'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
@@ -30,6 +31,7 @@ export default function PracticeTab({
   const [scaleKey, setScaleKey] = useState<ScaleKey>('d-major')
   const [duration, setDuration] = useState<SessionDuration>(30)
   const [temperamentOpen, setTemperamentOpen] = useState(false)
+  const [playAlongOpen, setPlayAlongOpen] = useState(false)
   const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, shiftOctave: droneShiftOctave, setSoundType: droneSoundType, stop: droneStop } = useDrone()
   const {
     recorderState, preCountdown, countdown, liveNote, session, errorMessage,
@@ -233,6 +235,25 @@ export default function PracticeTab({
             onSoundType={droneSoundType}
             alwaysExpanded
           />
+        </section>
+
+        {/* Play-Along: score + metronome + chord-change drones — collapsible */}
+        <section>
+          <button
+            onClick={() => setPlayAlongOpen(o => !o)}
+            className="w-full flex items-center justify-between text-xs font-semibold tracking-widest uppercase text-gray-500 hover:text-gray-300 transition-colors mb-2"
+          >
+            <span>Play-Along</span>
+            <span className="flex items-center gap-1.5 normal-case tracking-normal font-normal text-gray-600">
+              Practice Arpeggios
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+                className={`transition-transform duration-150 ${playAlongOpen ? 'rotate-180' : ''}`}>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </span>
+          </button>
+          {playAlongOpen && <PracticePlayback concertPitch={concertPitch} />}
         </section>
 
         {/* Error */}

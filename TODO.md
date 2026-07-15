@@ -4,6 +4,20 @@ Goal: Help violinists and bowed string players improve their intonation.
 
 ---
 
+## ✅ Recently shipped
+
+### Play-Along: score + metronome + chord-change drones (2026-07-15)
+LilyPond exercise rendered live with the modern `lilyjs` bundle; woodblock metronome +
+gapless chord-following drone on one sample-accurate Web Audio clock. Plan and milestone
+log: `../lilyJS/PLAN_GIUSTO_PRACTICE_PLAYBACK.md`. Remaining QA (needs a human ear /
+devices):
+- [ ] Listen: chord changes land on measures 1/3/5/7 of Practice Arpeggios, no clicks/gaps
+- [ ] Drone tab manual regression after the `droneVoices` extraction (4 sounds × interval × octave)
+- [ ] iOS Safari / Android Chrome (gesture-gated audio, wake lock, backgrounding)
+- [ ] Follow-up: beat cursor on the score (expose `onSystemBeatX` via the vendored `lilyjs` surface)
+
+---
+
 ## 🔴 Next Up
 
 ### Practice Programs
@@ -30,25 +44,16 @@ Structured scale/exercise routines the user can run with the drone playing under
 
 ## ⚠️ Important Workflow Notes
 
-### Syncing lily-parser and lily-viewer before committing
-`lily-parser` and `lily-viewer` live as sibling directories locally but are vendored into `packages/` for CI (GitHub Actions only checks out this repo). After making changes to either package, sync before committing:
+### Syncing lily-parser before committing
+`lily-parser` is vendored into `packages/` for CI (GitHub Actions only checks out this repo). Its source of truth is the **lilyJS repo** (`../lilyJS/src/music-input/lilypond/`). After changing the parser there, rebuild and re-vendor:
 
 ```bash
-# Build both packages
-cd ../lily-parser && bun run build:lib && cd -
-cd ../lily-viewer && bun run build:lib && cd -
-
-# Sync dist output into packages/
-rm -rf packages/lily-parser && mkdir packages/lily-parser
-cp ../lily-parser/dist/{index,parser,scanner,types}.{js,d.ts} packages/lily-parser/
-
-rm -rf packages/lily-viewer && mkdir -p packages/lily-viewer/dist
-cp ../lily-viewer/dist/lily-viewer.js packages/lily-viewer/dist/
-cp -r ../lily-viewer/dist/types packages/lily-viewer/dist/
-cp ../lily-viewer/src/style.css packages/lily-viewer/
+cd ../lilyJS && bun run build:lily-parser && cd -
+rm -rf packages/lily-parser
+cp -r ../lilyJS/dist/lily-parser packages/lily-parser
 ```
 
-**Longer term:** give `lily-parser` and `lily-viewer` their own GitHub repos so CI can clone them directly — eliminating the manual sync step.
+`lily-viewer` is a frozen vendored build (its original sibling source no longer exists); longer term rebuild it from lilyJS's renderer, or publish both packages from lilyJS CI to eliminate the manual step.
 
 ---
 
