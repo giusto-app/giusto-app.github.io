@@ -80,9 +80,12 @@ export class FakeBufferSourceNode extends FakeAudioNode {
   loopEnd = 0
   playbackRate = new FakeAudioParam(1)
   startedAt: number | null = null
+  /** Playback offset into the buffer passed to start(when, offset). */
+  startOffset = 0
   stoppedAt: number | null = null
-  start(at?: number): void {
+  start(at?: number, offset?: number): void {
     this.startedAt = at ?? 0
+    this.startOffset = offset ?? 0
   }
   stop(at?: number): void {
     this.stoppedAt = at ?? 0
@@ -127,6 +130,10 @@ export class FakeAudioContext {
   resume(): Promise<void> {
     this.state = 'running'
     return Promise.resolve()
+  }
+  /** Fake decode: any bytes become a 2.5 s buffer (enough for loop math). */
+  decodeAudioData(_data: ArrayBuffer): Promise<{ duration: number }> {
+    return Promise.resolve({ duration: 2.5 })
   }
 }
 

@@ -32,13 +32,17 @@ simple_Arpeggios = \\relative c'' {
 }
 `
 
-function witnessScore(): ScoreLike {
-  const result = parseSource(WITNESS)
+function parseWitness(src: string): ScoreLike {
+  const result = parseSource(src)
   const block = result.document?.blocks.find((b: { type: string }) => b.type === 'score') as
     | { score: ScoreLike }
     | undefined
   if (!block) throw new Error('witness did not parse to a score')
   return block.score
+}
+
+function witnessScore(): ScoreLike {
+  return parseWitness(WITNESS)
 }
 
 describe('parseChordLabel', () => {
@@ -87,7 +91,8 @@ describe('buildChordSchedule (synthetic edge cases)', () => {
     chordSymbols: chords.map(c => ({
       text: c.text,
       eventId: null,
-      offset: { num: (c.offsetQN ?? 0) * 256, den: 256 },
+      // Parser convention: offset is a fraction of a WHOLE note (2 QN = 1/2).
+      offset: { num: (c.offsetQN ?? 0) * 64, den: 256 },
     })),
   })
 
@@ -99,6 +104,48 @@ describe('buildChordSchedule (synthetic edge cases)', () => {
     expect(events.map(e => [e.label, e.startBeat, e.durationBeats])).toEqual([
       ['C', 0, 2],
       ['G7', 2, 2],
+    ])
+  })
+
+  test('compound meter: 6/8 pulses on the dotted quarter and converts eighth-note tempo', () => {
+    // Jig-style witness: \tempo 8 = 120 means QN bpm 60, and the metronome
+    // pulse is the dotted quarter (1.5 QN), not three quarter clicks per bar.
+    const src = `\\version "2.26.0"
+\\score { <<
+  \\new ChordNames { \\chordmode { d2. | d2. } }
+  \\new Staff { \\time 6/8 \\tempo 8 = 120 \\relative c'' { d8 e f g a b | d, e f g a b } }
+>> }
+`
+    const schedule = buildChordSchedule(parseWitness(src))
+    expect(schedule.beatsPerBar).toBe(3)
+    expect(schedule.pulseBeats).toBe(1.5)
+    expect(schedule.bpm).toBe(60) // 120 eighths/min = 60 quarters/min
+    expect(schedule.totalBeats).toBe(6)
+  })
+
+  test('dotted tempo units: \\tempo 4. = 84 (standard jig marking) → ♩ = 126', () => {
+    const src = `\\version "2.26.0"
+\\score {
+  \\new Staff { \\time 6/8 \\tempo 4. = 84 \\relative c'' { d8 e f g a b } }
+}
+`
+    expect(buildChordSchedule(parseWitness(src)).bpm).toBe(126)
+  })
+
+  test('REGRESSION: parser-produced mid-bar offsets are whole-note fractions', () => {
+    // Real \chordmode source (not a synthetic fixture): d1 then a2 d2 must put
+    // the final D on beat 6 (bar 2, beat 3), not beat 4.5.
+    const src = `\\version "2.26.0"
+\\score { <<
+  \\new ChordNames { \\chordmode { d1 a2 d2 } }
+  \\new Staff { \\relative c'' { d4 d d d | d d d d } }
+>> }
+`
+    const { events } = buildChordSchedule(parseWitness(src))
+    expect(events.map(e => [e.label, e.startBeat])).toEqual([
+      ['D', 0],
+      ['A', 4],
+      ['D', 6],
     ])
   })
 

@@ -7,7 +7,8 @@
 // BPM is quarter = N, which matches simple meters (4/4, 3/4, 2/4). Compound
 // meters (6/8 dotted-quarter beats) are out of scope for now.
 
-import type { MeasureLike, ScoreLike } from 'lilyjs'
+import type { MeasureLike, ScoreLike, TempoMarkLike } from 'lilyjs'
+import { pulseFromTimeSignature } from './meter'
 
 export type ChordQuality = 'maj' | 'min' | 'dom7' | 'other'
 
@@ -69,8 +70,25 @@ export interface ChordScheduleResult {
   totalBeats: number
   /** Quarter-note beats per bar of the first measure (for the metronome accent). */
   beatsPerBar: number
-  /** First explicit \tempo bpm found in the score, if any. */
+  /** Metronome pulse in quarter-note beats: 1.5 for compound meters (6/8 jigs
+   *  pulse on the dotted quarter), 2 for half-note meters, else 1. */
+  pulseBeats: number
+  /** First explicit \tempo of the score, converted to QUARTER-NOTE bpm
+   *  (\tempo 8 = 120 → 60), if any. */
   bpm?: number
+}
+
+// \tempo beat units in quarter notes; dots stretch the unit (n dots → ×(2−2⁻ⁿ)),
+// so \tempo 4. = 84 (the standard jig marking) converts to ♩ = 126.
+const TEMPO_UNIT_QN: Record<string, number> = {
+  whole: 4, half: 2, quarter: 1, eighth: 0.5, '16th': 0.25, '32nd': 0.125, '64th': 0.0625,
+}
+
+function tempoMarkToQuarterBpm(mark: TempoMarkLike): number | undefined {
+  if (typeof mark.bpm !== 'number') return undefined
+  const unitQN = TEMPO_UNIT_QN[mark.beatUnit ?? 'quarter'] ?? 1
+  const dotFactor = 2 - Math.pow(2, -(mark.beatUnitDots ?? 0))
+  return Math.round(mark.bpm * unitQN * dotFactor)
 }
 
 /**
@@ -84,14 +102,17 @@ export function buildChordSchedule(score: ScoreLike): ChordScheduleResult {
   let cursorQN = 0
   let bpm: number | undefined
   let beatsPerBar = 4
+  let pulseBeats = 1
 
   measures.forEach((measure, index) => {
     if (index === 0) {
       const ts = measure.timeSignature
       if (ts && ts.beatUnit > 0) beatsPerBar = (ts.beats * 4) / ts.beatUnit
+      pulseBeats = pulseFromTimeSignature(measure.timeSignature)
     }
     if (bpm === undefined) {
-      bpm = measure.tempoMarks?.find(t => typeof t.bpm === 'number')?.bpm
+      const mark = measure.tempoMarks?.find(t => typeof t.bpm === 'number')
+      if (mark) bpm = tempoMarkToQuarterBpm(mark)
     }
     for (const symbol of measure.chordSymbols) {
       // \chordmode-derived names have eventId === null; note-attached ^"..."
@@ -99,7 +120,9 @@ export function buildChordSchedule(score: ScoreLike): ChordScheduleResult {
       if (symbol.eventId !== null) continue
       const parsed = parseChordLabel(symbol.text)
       if (!parsed) continue
-      const offsetQN = symbol.offset ? symbol.offset.num / symbol.offset.den : 0
+      // symbol.offset is a fraction of a WHOLE note (like duration.sounding):
+      // a chord on beat 3 of 4/4 arrives as 1/2. Convert to quarter beats.
+      const offsetQN = symbol.offset ? (symbol.offset.num / symbol.offset.den) * 4 : 0
       raw.push({
         startBeat: cursorQN + offsetQN,
         rootPc: parsed.rootPc,
@@ -125,7 +148,7 @@ export function buildChordSchedule(score: ScoreLike): ChordScheduleResult {
   const last = events[events.length - 1]
   if (last) last.durationBeats = totalBeats - last.startBeat
 
-  return { events, totalBeats, beatsPerBar, bpm }
+  return { events, totalBeats, beatsPerBar, pulseBeats, bpm }
 }
 
 /** The chord event starting exactly at `beat`, if any (for scheduler wiring). */

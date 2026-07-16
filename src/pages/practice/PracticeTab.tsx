@@ -11,6 +11,11 @@ import ScaleSelector from './ScaleSelector'
 import RecordButton from './RecordButton'
 import SessionResults from './SessionResults'
 import PracticePlayback from './PracticePlayback'
+import {
+  readStoredExercise,
+  storeExercise,
+  type ExerciseCatalogEntry,
+} from '../../hooks/useExerciseCatalog'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
 import { SCALES, type ScaleKey } from '../../utils/scaleDefinitions'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
@@ -32,6 +37,11 @@ export default function PracticeTab({
   const [duration, setDuration] = useState<SessionDuration>(30)
   const [temperamentOpen, setTemperamentOpen] = useState(false)
   const [playAlongOpen, setPlayAlongOpen] = useState(false)
+  const [playAlongExercise, setPlayAlongExercise] = useState<ExerciseCatalogEntry>(readStoredExercise)
+  const handleSelectExercise = (entry: ExerciseCatalogEntry) => {
+    setPlayAlongExercise(entry)
+    storeExercise(entry)
+  }
   const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, shiftOctave: droneShiftOctave, setSoundType: droneSoundType, stop: droneStop } = useDrone()
   const {
     recorderState, preCountdown, countdown, liveNote, session, errorMessage,
@@ -245,7 +255,7 @@ export default function PracticeTab({
           >
             <span>Play-Along</span>
             <span className="flex items-center gap-1.5 normal-case tracking-normal font-normal text-gray-600">
-              Practice Arpeggios
+              {playAlongExercise.title}
               <svg width={12} height={12} viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
                 className={`transition-transform duration-150 ${playAlongOpen ? 'rotate-180' : ''}`}>
@@ -253,7 +263,13 @@ export default function PracticeTab({
               </svg>
             </span>
           </button>
-          {playAlongOpen && <PracticePlayback concertPitch={concertPitch} />}
+          {playAlongOpen && (
+            <PracticePlayback
+              exercise={playAlongExercise}
+              onSelectExercise={handleSelectExercise}
+              concertPitch={concertPitch}
+            />
+          )}
         </section>
 
         {/* Error */}

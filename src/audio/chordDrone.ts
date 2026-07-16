@@ -89,12 +89,18 @@ export class ChordDrone {
     const fadeStart = Math.max(now, center - CROSSFADE_S / 2)
     const fadeEnd = fadeStart + CROSSFADE_S
 
-    // Build the next chord's branch, silent until the fade.
+    // Build the next chord's branch, silent from creation. A GainNode is born
+    // at gain 1, and setValueAtTime(0, fadeStart) only takes effect AT
+    // fadeStart — without the explicit zero below, the voices (started
+    // immediately) would blast at full gain until fadeStart and then snap to
+    // silence: a loud thump on every chord change.
     const gain = this.ctx.createGain()
+    gain.gain.value = 0
+    gain.gain.setValueAtTime(0, now)
     gain.gain.setValueAtTime(0, fadeStart)
     gain.gain.linearRampToValueAtTime(this.volume, fadeEnd)
     gain.connect(this.ctx.destination)
-    const sources = this.buildVoices(gain, rootPc)
+    const sources = this.buildVoices(gain, rootPc, fadeStart)
     const next: ChordBranch = { gain, sources }
 
     // Fade the old branch out across the same window, then release it.
@@ -142,21 +148,22 @@ export class ChordDrone {
 
   // ── voice construction ─────────────────────────────────────────────────────
 
-  private buildVoices(destination: GainNode, rootPc: number): DroneSource[] {
+  private buildVoices(destination: GainNode, rootPc: number, startAt: number): DroneSource[] {
     const fifthPc = (rootPc + 7) % 12
     const fifthOctave = rootPc + 7 >= 12 ? ROOT_OCTAVE + 1 : ROOT_OCTAVE
 
     switch (this.soundType) {
       case 'shruti':
         // Shruti boxes are root drones (the voice already includes a
-        // sub-octave reed); a second full shruti voice on the fifth would
-        // double the tremolo LFOs on one gain node.
+        // sub-octave reed); a fifth would double every reed oscillator.
         return startShrutiVoice(this.ctx, destination, rootPc, ROOT_OCTAVE - 4, this.concertPitchHz)
 
       case 'cello': {
+        // Start at the fade window, past the sample's bow attack (default
+        // offset) — a chord change must never re-articulate the bow.
         const sources: DroneSource[] = []
-        const root = startCelloVoiceFromCache(this.ctx, destination, rootMidi(rootPc), this.concertPitchHz)
-        const fifth = startCelloVoiceFromCache(this.ctx, destination, rootMidi(rootPc) + 7, this.concertPitchHz)
+        const root = startCelloVoiceFromCache(this.ctx, destination, rootMidi(rootPc), this.concertPitchHz, startAt)
+        const fifth = startCelloVoiceFromCache(this.ctx, destination, rootMidi(rootPc) + 7, this.concertPitchHz, startAt)
         if (root) sources.push(...root)
         if (fifth) sources.push(...fifth)
         if (sources.length > 0) return sources

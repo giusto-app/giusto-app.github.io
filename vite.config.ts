@@ -21,6 +21,15 @@ export default defineConfig({
       'lilyjs': r('./packages/lilyjs/lilyjs.esm.js'),
     },
   },
+  build: {
+    rollupOptions: {
+      // The vendored lilyjs.esm.js keeps its non-default SMuFL fonts as
+      // EXTERNAL dynamic imports (lilyJS's own build declares them external
+      // the same way). They are never executed here — Giusto renders with the
+      // bundled Bravura only — so Rollup must not try to resolve them.
+      external: (id) => id.includes('/generated/smufl/'),
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

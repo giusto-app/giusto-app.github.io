@@ -20,6 +20,22 @@ devices):
 
 ## 🔴 Next Up
 
+### Tempo Trainer · Exercise Library · Tune Memorization (planned 2026-07-15)
+Full decisions + phases: `PLAN_PRACTICE_FEATURES.md`.
+- [x] Phase 1: exercises-catalog.json pipeline (violin-music_private → violin-music.github.io) + Play-Along exercise picker (2026-07-15 — public-site push pending Marc's review)
+- [x] Phase 1b: curated existing Practice/*.ly + authored 6 new standards — Major/Minor Arpeggios & Major Scales (circle of fifths), Dominant 7ths (circle of fourths), Minuet in G (Petzold), Ode to Joy; catalog now 33 entries (2026-07-15 — public-site push pending Marc's review)
+- [x] Phase 2: Tempo Trainer — step-per-loop AND timed ramp, stepped-bars progress viz (2026-07-15)
+- [ ] Phase 3: Anki-style tune memorization in Learn tab — segment cards (4-bar + chained), self-graded, publish tune .ly in catalog
+- [ ] Follow-up: mic-assisted review grading — record the attempt, score vs notes.json with pitch detection + DTW, pre-select the suggested grade
+- [ ] Follow-up: Tempo Trainer saved sessions (named presets with last-practiced dates, like the reference metronome app)
+- [x] Push violin-music.github.io exercise assets (or just push violin-music_private and let CI regenerate) so the catalog goes live (2026-07-15)
+- [ ] ExercisePicker: search box across titles/tags (plan promised "searchable list"; v1 has category pills only) + show subtitle/key badges
+- [ ] Exercise curation leftovers: Violin-Harmonics.ly (nine 1-bar score blocks — needs per-entry titles), Gypsy-scales.ly (WIP placeholders), Practice_All.ly (include-based aggregator); give Jig-Pulse/Practice_Shifts explicit per-score titles instead of auto "Part N"
+- [x] Compound meter: metronome now clicks the meter's felt pulse via `src/audio/meter.ts` — dotted quarters for 6/8–12/8 (2 per jig bar, count-in included), halves for 2/2; also fixed \tempo unit conversion (\tempo 8 = 120 → ♩ = 60) in chordSchedule AND the catalog generator (2026-07-15)
+- [ ] lilyJS parser: dotted tempo units lose their dot (\tempo 4. = 120 parses as quarter = 120, \tempo 1. = 84 as whole → Jig-Pulse part 4 shows bpm 336) — fix in ../lilyJS emit phase, re-vendor, then drop the workaround notes in chordSchedule.ts / generate-exercises-catalog.mjs
+- [ ] ChordDrone.setVolume during an in-progress crossfade appends a ramp that can bend the fade curve — harden (re-anchor or cancel-and-hold)
+- [ ] QA (human ear): new circle-of-fifths exercises in flat keys (Gb/Db/Ab), Minuet 3/4 downbeat accent, Ode to Joy mid-bar A→D drone change lands on beat 3
+
 ### Practice Programs
 Structured scale/exercise routines the user can run with the drone playing underneath.
 
@@ -64,11 +80,7 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
 
 ---
 
-### Drone Audio — Permission Emails
-- [ ] Send permission request to **carnaticmusicexams.in** for tanpura WAV files
-      → Draft ready in `PERMISSION-EMAILS.md`
-- [ ] Send permission request to **mynoise.net** (Stéphane Pigeon) for Shruti Box + Tanpura + Indian Drone samples
-      → Draft ready in `PERMISSION-EMAILS.md`
+
 
 ### Drone Audio — mynoise Tanpura (local testing)
 - [ ] Download mynoise tanpura files for local dev/testing (not for production until permission granted)

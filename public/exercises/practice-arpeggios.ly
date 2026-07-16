@@ -1,12 +1,19 @@
 \version "2.26.0"
 \language "english"
+
+% Auto-height page: the rendered SVG hugs the music instead of filling a
+% full letter page (Giusto scales it to the panel width).
+\paper {
+  page-breaking = #ly:one-page-breaking
+}
 chordNames = \chordmode {
   g1:m | g1:m | c1:m | c1:m |
   f1   | f1   | bf1  | bf1  |
 }
 
-\header { 
+\header {
   title = "Practice Arpeggios"
+  tagline = ##f
 }
 
 simple_Arpeggios = \relative c'' {

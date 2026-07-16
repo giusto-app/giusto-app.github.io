@@ -18,7 +18,7 @@ Sustained reference tone in any of the 12 chromatic pitches. Choose unison, octa
 Record a 10s/30s/60s/Free session while playing a scale. After recording, review your results on a music staff and note table showing average deviation per note.
 
 **Play-Along** (Practice tab)
-Open a LilyPond exercise (e.g. Practice Arpeggios), rendered live with the lilyJS engine, and press Play: a synthesized woodblock metronome clicks every beat (accented downbeats, optional 1-bar count-in) while a drone sounds each chord's root + fifth and crossfades gaplessly on every chord change — all scheduled sample-accurately on one Web Audio clock. Tempo 40–208 BPM live, loop mode, per-voice volumes, three drone sounds (synth/shruti/cello). Key files: `src/audio/{playbackClock,woodblock,chordDrone,chordSchedule,droneVoices,audioContext}.ts`, `src/pages/practice/{PracticePlayback,LilyScore}.tsx`, exercise in `public/exercises/`.
+Pick an exercise from the published library (scales, arpeggios, licks, rhythm, technique, tunes — fetched from violin-music.github.io, with Recents/Favorites and a bundled offline fallback), rendered live with the lilyJS engine, and press Play: a synthesized woodblock metronome clicks every beat (accented downbeats, optional 1-bar count-in) while a drone sounds each chord's root + fifth and crossfades gaplessly on every chord change — all scheduled sample-accurately on one Web Audio clock. The currently-sounding note and chord highlight in the score. Tempo 40–208 BPM live, loop mode, per-voice volumes, three drone sounds (synth/shruti/cello). A **Tempo Trainer** ramps the tempo per loop repetition (+N BPM each pass) or linearly over N minutes, with a stepped progress bar. Key files: `src/audio/{playbackClock,woodblock,chordDrone,chordSchedule,noteSchedule,tempoPlan,droneVoices,audioContext}.ts`, `src/pages/practice/{PracticePlayback,LilyScore,ExercisePicker}.tsx`, `src/hooks/useExerciseCatalog.ts`; exercises published by `violin-music_private/scripts/generate-exercises-catalog.mjs`.
 
 **Scales**
 40+ scales organized by Common (open-string keys), Full Circle of Fifths, and Gypsy & Pentatonic. Drone tonic auto-follows the selected scale.
@@ -60,11 +60,55 @@ bun install
 bun run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). For mobile testing:
+Open [http://localhost:5151](http://localhost:5151). For mobile testing:
 
 ```bash
 bun run dev --host
 ```
+
+---
+
+## How to Test
+
+### Automated
+
+All three must be green before any commit:
+
+```bash
+bunx tsc -b       # typecheck
+bun test          # unit tests (71 tests / 9 files)
+bun run build     # production build
+```
+
+- Audio logic is tested against a recording fake AudioContext
+  (`src/audio/testing/fakeAudioContext.ts`) — add tests there for any audio change.
+- `src/vendoredPackages.test.ts` guards both vendored lilyJS bundles by parsing the
+  shipped exercise; it fails if a re-vendor is bad.
+
+### Manual — Play-Along
+
+```bash
+bun run dev
+```
+
+Open [http://localhost:5151](http://localhost:5151) → **Practice** tab → expand **Play-Along** → tap ▶. Expect:
+
+- 4 count-in clicks, then clicks with a higher accent on each downbeat
+- Drone enters on G+D and changes at bar 3 (C+G), bar 5 (F+C), bar 7 (B♭+F)
+  with **no click, gap, or silence** at the changes
+- Score chord symbols and the chord chips highlight in sync with the audio
+- The sounding note is highlighted in the score (amber) and advances with the beat
+- Tempo slider works mid-playback; Stop is immediate
+- Loop restarts bar 1 seamlessly
+- All 3 drone sounds (Synth / Shruti / Cello) work
+- Exercise picker ("Change ▾"): categories load from the published catalog, picking
+  a multi-score entry (e.g. Major 7th Arpeggios) renders just that score; exercises
+  without a chord track play metronome-only; selection survives a reload
+- Tempo Trainer: enable, pick "Per loop" (loops with +N BPM each pass) or "Timed"
+  (from→to over N minutes); ♩ = N ticks up and the stepped bars fill amber
+- Compound meter: pick a 6/8 exercise (Rhythm → Jig Rhythm) — the metronome clicks
+  twice per bar (dotted-quarter pulse, accent on beat 1), including the count-in,
+  and ♩ = 100 reflects the converted \tempo 4=100 mark
 
 ---
 

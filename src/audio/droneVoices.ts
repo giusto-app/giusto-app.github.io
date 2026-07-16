@@ -20,12 +20,18 @@ export function pitchClassOctaveToFreq(pitchClass: number, octave: number, conce
 const SHRUTI_IMAG_TEMPLATE = [0, 1.0, 0.6, 0.35, 0.2, 0.12, 0.08]
 const SHRUTI_DETUNE = [0, +10, -10] as const
 const SHRUTI_TREMOLO_RATE = 6.0
-const SHRUTI_TREMOLO_DEPTH = 0.12
+// Relative to the voice's unity tremolo stage. (The recipe originally
+// modulated the caller's ~0.35 master gain by an absolute 0.12 — same ±34%.)
+const SHRUTI_TREMOLO_DEPTH = 0.34
 const SHRUTI_CHORUS_RATE = 0.8
 const SHRUTI_CHORUS_BASE_MS = 8.0
 const SHRUTI_CHORUS_DEPTH_MS = 4.0
 
 // ── Cello sample set (VSCO2 Community Edition, CC0) ─────────────────────────
+
+/** The sustain samples open with a forte bow attack; loops — and crossfaded
+ *  chord changes — start past it. */
+const CELLO_ATTACK_S = 0.2
 const CELLO_SAMPLES: { midiNote: number; url: string }[] = [
   { midiNote: 36, url: '/sounds/cello/01_C2_forte.wav' },
   { midiNote: 40, url: '/sounds/cello/02_E2_forte.wav' },
@@ -123,11 +129,14 @@ export function startSawtoothVoices(
 
 /**
  * Additive free-reed shruti-box voice ("Synth Wavy").
- * `destinationGain` must be a GainNode — the tremolo LFO modulates its gain param.
+ * The tremolo LFO modulates a gain stage INSIDE the voice — modulating the
+ * caller's gain param would ADD to whatever automation runs on it (crossfades,
+ * volume ramps) and leak ±depth of signal through "silent" anchors: an audible
+ * pump/click around chord changes and after stop().
  */
 export function startShrutiVoice(
   ctx: AudioContext,
-  destinationGain: GainNode,
+  destination: AudioNode,
   pitchClass: number,
   octaveOffset: number,
   concertPitchHz: number,
@@ -143,23 +152,26 @@ export function startShrutiVoice(
   const real = new Float32Array(SHRUTI_IMAG_TEMPLATE.length)
   const reedWave = ctx.createPeriodicWave(real, imag, { disableNormalization: false })
 
-  // Tremolo LFO — the characteristic harmonium shimmer.
+  // Tremolo LFO — the characteristic harmonium shimmer (see doc comment).
+  const tremolo = ctx.createGain()
+  tremolo.gain.value = 1
+  tremolo.connect(destination)
   const tremoloLFO = ctx.createOscillator()
   tremoloLFO.type = 'sine'
   tremoloLFO.frequency.value = SHRUTI_TREMOLO_RATE
-  const tremoloGain = ctx.createGain()
-  tremoloGain.gain.value = SHRUTI_TREMOLO_DEPTH
-  tremoloLFO.connect(tremoloGain)
-  tremoloGain.connect(destinationGain.gain)
+  const tremoloDepth = ctx.createGain()
+  tremoloDepth.gain.value = SHRUTI_TREMOLO_DEPTH
+  tremoloLFO.connect(tremoloDepth)
+  tremoloDepth.connect(tremolo.gain)
   tremoloLFO.start()
   sources.push(tremoloLFO)
 
-  // Filter chain: warmth EQ → reed formant → gentle lowpass → destination.
+  // Filter chain: warmth EQ → reed formant → gentle lowpass → tremolo stage.
   const lowpass = ctx.createBiquadFilter()
   lowpass.type = 'lowpass'
   lowpass.frequency.value = 5000
   lowpass.Q.value = 0.5
-  lowpass.connect(destinationGain)
+  lowpass.connect(tremolo)
 
   const reedFormant = ctx.createBiquadFilter()
   reedFormant.type = 'peaking'
@@ -260,8 +272,9 @@ export async function startCelloVoice(
     source.buffer = buffer
     source.playbackRate.value = playbackRate
     source.loop = true
-    // Skip the first 200 ms (bow attack) for tighter loops.
-    source.loopStart = 0.2
+    // Loop past the bow attack for tighter loops (the attack itself still
+    // plays once — natural for a manually started drone).
+    source.loopStart = CELLO_ATTACK_S
     source.loopEnd = buffer.duration
     source.connect(destination)
     source.start()
@@ -282,6 +295,9 @@ export async function startCelloVoice(
  * Build a looping cello voice synchronously from an already-decoded sample
  * (see preloadCelloSamples). Returns null when the sample isn't cached yet —
  * the caller decides its own fallback.
+ *
+ * Playback begins at `offsetS` into the sample — past the bow attack by
+ * default, so a crossfaded chord change never re-articulates the bow.
  */
 export function startCelloVoiceFromCache(
   ctx: AudioContext,
@@ -289,6 +305,7 @@ export function startCelloVoiceFromCache(
   targetMidi: number,
   concertPitchHz: number,
   startAt?: number,
+  offsetS: number = CELLO_ATTACK_S,
 ): DroneSource[] | null {
   const nearest = nearestCelloSample(targetMidi)
   const buffer = sampleCache.get(nearest.url)
@@ -298,10 +315,10 @@ export function startCelloVoiceFromCache(
   source.buffer = buffer
   source.playbackRate.value = Math.pow(2, (targetMidi - nearest.midiNote) / 12) * (concertPitchHz / 440)
   source.loop = true
-  source.loopStart = 0.2
+  source.loopStart = CELLO_ATTACK_S
   source.loopEnd = buffer.duration
   source.connect(destination)
-  source.start(startAt ?? ctx.currentTime)
+  source.start(startAt ?? ctx.currentTime, offsetS)
   return [source]
 }
 
