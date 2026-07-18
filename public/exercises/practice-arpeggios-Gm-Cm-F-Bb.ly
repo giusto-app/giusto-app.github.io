@@ -17,8 +17,8 @@ chordNames = \chordmode {
 }
 
 simple_Arpeggios = \relative c'' {
- | g 4  bf  d  g  bf   g  d  bf 
- | c 4  ef  g  c  ef   c  g  ef 
+ | g 4  bf  d  g  bf   g  d  bf
+ | c 4  ef  g  c  ef   c  g  ef
  \break
  | f,4  a   c  f  a    f  c  a
  | bf4  d   f  bf  d    bf  f  d

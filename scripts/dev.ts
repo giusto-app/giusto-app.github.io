@@ -53,6 +53,12 @@ const server = Bun.serve({
       return new Response(publicFile)
     }
 
+    // Only browser navigations receive the SPA shell. Returning index.html for
+    // a missing hashed module produces a misleading strict-MIME-type error.
+    if (req.mode !== 'navigate') {
+      return new Response('Not found', { status: 404 })
+    }
+
     return new Response(Bun.file(new URL('index.html', devRoot)), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     })

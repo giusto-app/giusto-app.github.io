@@ -7,7 +7,7 @@ import { parseSource } from 'lilyjs'
 import type { ScoreLike } from 'lilyjs'
 
 const exercise = readFileSync(
-  new URL('../public/exercises/practice-arpeggios.ly', import.meta.url),
+  new URL('../public/exercises/practice-arpeggios-Gm-Cm-F-Bb.ly', import.meta.url),
   'utf8',
 )
 

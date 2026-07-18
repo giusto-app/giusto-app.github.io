@@ -82952,6 +82952,7 @@ function createDocumentFlowRules(input) {
     visualYOffset,
     deepestBaseline,
     visualBottom,
+    bottomInkBoxes,
     trailingLineGapPx
   }) => {
     const mixedInlineScoreHandoff = isScoreLikeBlock(nextBlock) && endsWithMixedInlineMarkupLine(block);
@@ -82959,6 +82960,7 @@ function createDocumentFlowRules(input) {
       baselineY: visualYOffset + deepestBaseline,
       staffTopGapPx: pageBreaking === "one-page" ? documentSpacingPaddingPx("markup-system-spacing", documentInfo) : Math.max(0, documentSpacingDistancePx("markup-system-spacing", documentInfo) - LINE_SPACING * 2),
       bottomY: visualYOffset + visualBottom,
+      ...bottomInkBoxes ? { bottomInkBoxes } : {},
       clearScoreTopInk: true,
       topInkClearancePx: documentSpacingPaddingPx("markup-system-spacing", documentInfo),
       ...mixedInlineScoreHandoff ? { flowReserveAfterScorePx: trailingLineGapPx + mixedInlineScoreHandoffVisualTrim } : {}
@@ -83006,6 +83008,164 @@ function createDocumentFlowRules(input) {
     contentEndY: contentEndRules.contentEndY,
     taglineBottomOffsetForPage: contentEndRules.taglineBottomOffsetForPage
   };
+}
+
+// src/music-rendering/renderer/document/skylineDistance.ts
+function textContent2(node) {
+  if (typeof node === "string")
+    return node;
+  if (!node || typeof node !== "object")
+    return "";
+  const children = node.children;
+  if (!Array.isArray(children))
+    return "";
+  return children.map(textContent2).join("");
+}
+var TEXT_DESCENT_RATIO = 0.28;
+var TEXT_ASCENT_RATIO = 0.75;
+function collectTextSkylineBoxes(nodes, edge, ty, out) {
+  for (const node of nodes) {
+    if (!node || typeof node !== "object")
+      continue;
+    if (node.type === "fragment") {
+      collectTextSkylineBoxes(node.children, edge, ty, out);
+      continue;
+    }
+    const element = node;
+    let ny = ty;
+    const transform2 = typeof element.props?.transform === "string" ? element.props.transform : "";
+    const match2 = /translate\(([^,]+),\s*([^)]+)\)/.exec(transform2);
+    if (match2)
+      ny += Number(match2[2]);
+    if (element.type === "text" && element.props?.y !== undefined) {
+      const fontSize = Number(element.props.fontSize ?? 16);
+      const text = textContent2(element);
+      const width = estimateMarkupAdvanceWidthPx(text, fontSize);
+      const x = Number(element.props.x ?? 0);
+      const anchor = element.props.textAnchor;
+      const x1 = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+      const baseline = ny + Number(element.props.y);
+      const y = edge === "bottom" ? baseline + fontSize * TEXT_DESCENT_RATIO : baseline - fontSize * TEXT_ASCENT_RATIO;
+      out.push({ x1, x2: x1 + width, y });
+      continue;
+    }
+    if (Array.isArray(element.children)) {
+      collectTextSkylineBoxes(element.children.filter((c) => typeof c === "object" && c !== null), edge, ny, out);
+    }
+  }
+  return out;
+}
+function textBottomSkylineBoxes(nodes, ty = 0, out = []) {
+  return collectTextSkylineBoxes(nodes, "bottom", ty, out);
+}
+function firstSystemTopSkylineBoxes(signature, scoreY, scoreScale, firstStaffTopScoreY) {
+  const out = [];
+  if (firstStaffTopScoreY === undefined)
+    return out;
+  const cutoffScoreY = firstStaffTopScoreY + 0.5;
+  for (const grob of signature?.grobs ?? []) {
+    if (grob.type === "documentBand")
+      continue;
+    const bbox = grob.bbox;
+    if (!bbox)
+      continue;
+    const { x, y, width } = bbox;
+    if (typeof y !== "number" || !Number.isFinite(y))
+      continue;
+    if (y > cutoffScoreY)
+      continue;
+    const gx = typeof x === "number" && Number.isFinite(x) ? x : 0;
+    const gw = typeof width === "number" && Number.isFinite(width) ? width : 0;
+    out.push({
+      x1: gx * scoreScale,
+      x2: (gx + gw) * scoreScale,
+      y: scoreY + y * scoreScale
+    });
+  }
+  return out;
+}
+
+// src/music-rendering/renderer/document/pageSpring.ts
+function updateBlockingForce(s) {
+  if (s.minDistance > s.idealDistance) {
+    s.blockingForce = s.inverseStretchStrength > 0 ? (s.minDistance - s.idealDistance) / s.inverseStretchStrength : 0;
+  } else if (s.inverseCompressStrength > 0) {
+    s.blockingForce = (s.minDistance - s.idealDistance) / s.inverseCompressStrength;
+  } else {
+    s.blockingForce = 0;
+  }
+}
+function setDefaultStrength(s) {
+  s.inverseCompressStrength = s.idealDistance >= s.minDistance ? s.idealDistance - s.minDistance : 0;
+  s.inverseStretchStrength = s.idealDistance;
+  updateBlockingForce(s);
+}
+function makeSpring2(ideal, min = 0) {
+  const s = {
+    idealDistance: ideal,
+    minDistance: min,
+    inverseStretchStrength: 0,
+    inverseCompressStrength: 0,
+    blockingForce: 0
+  };
+  setDefaultStrength(s);
+  return s;
+}
+function springLength2(s, f) {
+  const force = Math.max(f, s.blockingForce);
+  const invK = force < 0 ? s.inverseCompressStrength : s.inverseStretchStrength;
+  return Math.max(s.minDistance, s.idealDistance + force * invK);
+}
+function setMinDistance(s, d) {
+  if (d < 0 || !Number.isFinite(d))
+    return;
+  s.minDistance = d;
+  updateBlockingForce(s);
+}
+function ensureMinDistance(s, d) {
+  setMinDistance(s, Math.max(d, s.minDistance));
+}
+
+// src/music-rendering/renderer/document/documentVerticalLayout.ts
+function refpointRodDistance(upper, lower, padding) {
+  let maxOverlap = -Infinity;
+  for (const u of upper.bottomInk) {
+    for (const l of lower.topInk) {
+      if (u.x2 <= l.x1 || u.x1 >= l.x2)
+        continue;
+      maxOverlap = Math.max(maxOverlap, u.y - l.y);
+    }
+  }
+  return Number.isFinite(maxOverlap) ? padding + maxOverlap : padding;
+}
+function seamSpring(upper, lower, spec) {
+  const ideal = Math.max(spec.basicDistance, spec.minimumDistance ?? -Infinity);
+  const spring = makeSpring2(ideal, spec.minimumDistance ?? 0);
+  if (spec.stretchability !== undefined)
+    spring.inverseStretchStrength = spec.stretchability;
+  ensureMinDistance(spring, refpointRodDistance(upper, lower, spec.padding));
+  return spring;
+}
+function markupSystemStaffTopY(params) {
+  const midlineOffset = 2 * params.staffSpacePx;
+  const provisionalMidlineY = params.provisionalStaffTopY + midlineOffset;
+  const markup = {
+    kind: "markup",
+    topInk: [],
+    bottomInk: params.markupBottomInk.map((b) => ({ ...b, y: b.y - params.markupBaselineY }))
+  };
+  const score2 = {
+    kind: "system",
+    topInk: params.scoreTopInk.map((b) => ({ ...b, y: b.y - provisionalMidlineY })),
+    bottomInk: []
+  };
+  const spec = {
+    basicDistance: params.basicDistanceSs * params.staffSpacePx,
+    minimumDistance: params.minimumDistanceSs === undefined ? undefined : params.minimumDistanceSs * params.staffSpacePx,
+    padding: params.paddingSs * params.staffSpacePx
+  };
+  const refpointGap = springLength2(seamSpring(markup, score2, spec), 0);
+  return params.markupBaselineY + refpointGap - midlineOffset;
 }
 
 // src/music-rendering/renderer/document/scoreSizing.ts
@@ -83598,6 +83758,7 @@ function renderDocumentToSvgModel(opts) {
         visualYOffset,
         deepestBaseline,
         visualBottom: markupDoc.visualBottom,
+        bottomInkBoxes: textBottomSkylineBoxes(markupDoc.elements, visualYOffset),
         trailingLineGapPx: markupDoc.trailingLineGapPx
       });
       pageAwarePush(el("g", {
@@ -83792,7 +83953,16 @@ function renderDocumentToSvgModel(opts) {
       const scoreDocViewBoxWidth = Number(scoreDoc.viewBox.split(" ")[2]);
       recordContentWidth(scoreDocViewBoxWidth * scoreScale);
       const firstStaffTop = firstStaffLineY(scoreDoc.elements);
-      const preScoreGap = preScoreGapFromHandoff(pendingMarkupToScoreHandoff, yOffset, firstStaffTop, scoreScale, pendingMarkupToScoreHandoff?.bottomXRange ? topSignatureInkYInXRange(scoreDoc.signature, pendingMarkupToScoreHandoff.bottomXRange[0] / scoreScale, pendingMarkupToScoreHandoff.bottomXRange[1] / scoreScale) : topSignatureInkY(scoreDoc.signature));
+      const springStaffTopY = pageBreaking === "one-page" && pendingMarkupToScoreHandoff?.bottomInkBoxes && firstStaffTop !== undefined ? markupSystemStaffTopY({
+        markupBaselineY: pendingMarkupToScoreHandoff.baselineY,
+        markupBottomInk: pendingMarkupToScoreHandoff.bottomInkBoxes,
+        scoreTopInk: firstSystemTopSkylineBoxes(scoreDoc.signature, yOffset, scoreScale, firstStaffTop),
+        provisionalStaffTopY: yOffset + firstStaffTop * scoreScale,
+        staffSpacePx: LINE_SPACING * scoreScale,
+        basicDistanceSs: documentSpacingDistancePx("markup-system-spacing", documentInfo) / LINE_SPACING,
+        paddingSs: documentSpacingPaddingPx("markup-system-spacing", documentInfo) / LINE_SPACING
+      }) : undefined;
+      const preScoreGap = springStaffTopY !== undefined ? Math.max(0, springStaffTopY - (yOffset + firstStaffTop * scoreScale)) : preScoreGapFromHandoff(pendingMarkupToScoreHandoff, yOffset, firstStaffTop, scoreScale, pendingMarkupToScoreHandoff?.bottomXRange ? topSignatureInkYInXRange(scoreDoc.signature, pendingMarkupToScoreHandoff.bottomXRange[0] / scoreScale, pendingMarkupToScoreHandoff.bottomXRange[1] / scoreScale) : topSignatureInkY(scoreDoc.signature));
       const gap = !nextBlock || nextBlock.type === "error" || nextBlock.type === "warning" ? 0 : nextBlock.type === "markup" ? scoreToMarkupGapFor(nextBlock, scoreIdx) : scoreToScoreGap;
       const scorePaginated = Boolean(scoreDoc.pagination && scoreDoc.pagination.pageCount > 1);
       const placementHeight = scorePaginated ? (scoreDoc.pagination.pageHeights[0] ?? 0) * scoreScale : scaledScoreHeight;

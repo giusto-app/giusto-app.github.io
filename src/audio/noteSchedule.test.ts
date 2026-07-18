@@ -54,7 +54,7 @@ describe('buildNoteSchedule', () => {
 describe('shipped Play-Along exercise', () => {
   test('yields 32 sounding notes covering all 8 bars', () => {
     const exercise = readFileSync(
-      new URL('../../public/exercises/practice-arpeggios.ly', import.meta.url),
+      new URL('../../public/exercises/practice-arpeggios-Gm-Cm-F-Bb.ly', import.meta.url),
       'utf8',
     )
     const events = buildNoteSchedule(parseScore(exercise))

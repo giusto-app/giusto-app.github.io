@@ -415,11 +415,35 @@ export default function PracticePlayback({
             <button
               type="button"
               onClick={() => void copyShareLink()}
-              aria-live="polite"
-              className="h-9 min-w-24 flex-1 rounded-md bg-amber-400 px-3 text-xs font-semibold text-gray-950 hover:bg-amber-300 transition-colors sm:flex-none"
+              aria-label={shareStatus ? 'Share link copied' : 'Copy share link'}
+              title={shareStatus || 'Share'}
+              className="h-9 w-9 shrink-0 rounded-md bg-amber-400 text-gray-950 hover:bg-amber-300 transition-colors flex items-center justify-center"
             >
-              {shareStatus || 'Copy link'}
+              {shareStatus ? (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                  <path
+                    d="m5 12.5 4.25 4.25L19 7"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                  <path
+                    d="M12 3v12m0-12L8 7m4-4 4 4M6 11v8h12v-8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
             </button>
+            <span className="sr-only" aria-live="polite">{shareStatus}</span>
           </div>
         </div>
         {showPicker && (

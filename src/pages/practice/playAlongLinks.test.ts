@@ -13,6 +13,12 @@ describe('Play-Along deep links', () => {
     expect(playAlongExerciseIdFromHash('#practice/%E0%A4%A')).toBeNull()
   })
 
+  test('maps the original bundled exercise link to its canonical id', () => {
+    expect(playAlongExerciseIdFromHash('#practice/bundled-practice-arpeggios')).toBe(
+      'practice-arpeggios-Gm-Cm-F-Bb',
+    )
+  })
+
   test('keeps the deployment path and query string in a shared URL', () => {
     expect(playAlongUrl('exercise-42', 'https://example.com/giusto/?theme=dark#practice')).toBe(
       'https://example.com/giusto/?theme=dark#practice/exercise-42',

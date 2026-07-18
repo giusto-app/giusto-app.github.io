@@ -29,9 +29,16 @@ export interface ExerciseCatalogEntry {
 }
 
 /** Ships with the app (public/exercises/) — always playable offline. */
+const BUNDLED_EXERCISE_FILE = '/exercises/practice-arpeggios-Gm-Cm-F-Bb.ly'
+
+export function exerciseIdFromFile(file: string): string {
+  const filename = file.split('/').pop() ?? file
+  return filename.replace(/\.ly$/i, '')
+}
+
 export const BUNDLED_EXERCISE: ExerciseCatalogEntry = {
-  id: 'bundled-practice-arpeggios',
-  file: '/exercises/practice-arpeggios.ly',
+  id: exerciseIdFromFile(BUNDLED_EXERCISE_FILE),
+  file: BUNDLED_EXERCISE_FILE,
   scoreIndex: 0,
   title: 'Practice Arpeggios',
   category: 'Arpeggios',
@@ -53,7 +60,11 @@ const SELECTED_KEY = 'giusto-playalong-exercise-v1'
 export function readStoredExercise(): ExerciseCatalogEntry {
   try {
     const raw = localStorage.getItem(SELECTED_KEY)
-    return raw ? (JSON.parse(raw) as ExerciseCatalogEntry) : BUNDLED_EXERCISE
+    if (!raw) return BUNDLED_EXERCISE
+    const stored = JSON.parse(raw) as ExerciseCatalogEntry
+    // Migrate the original bundled ID so existing installations immediately
+    // generate and display the new canonical share URL.
+    return stored.id === 'bundled-practice-arpeggios' ? BUNDLED_EXERCISE : stored
   } catch {
     return BUNDLED_EXERCISE
   }

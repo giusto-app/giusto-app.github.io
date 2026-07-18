@@ -13,6 +13,10 @@ Bun.serve({
       return new Response(file)
     }
 
+    if (req.mode !== 'navigate') {
+      return new Response('Not found', { status: 404 })
+    }
+
     return new Response(Bun.file(new URL('index.html', dist)), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     })
