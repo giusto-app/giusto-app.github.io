@@ -117,14 +117,14 @@ Open [http://localhost:5151](http://localhost:5151) → **Practice** tab → exp
 | Layer | Technology |
 |---|---|
 | Runtime | Bun |
-| Build | Vite 6 |
+| Build | Bun bundler |
 | UI | React 18 + TypeScript |
 | Styling | Tailwind CSS 4 |
 | Pitch Detection | Pitchy 4 (McLeod Pitch Method) |
 | Audio | Web Audio API |
 | Persistence | localStorage |
 | Staff / Charts | Custom SVG |
-| PWA | vite-plugin-pwa + Workbox |
+| PWA | Static web manifest + service worker |
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for detailed functional specifications.
 
@@ -141,7 +141,7 @@ giusto-app/
     └── lily-viewer/   # SVG notation renderer (vendored copy)
 ```
 
-Vite and TypeScript resolve `lily-parser` and `lily-viewer` from their compiled dist files in `packages/`.
+Bun and TypeScript resolve `lily-parser` and `lily-viewer` from their compiled dist files in `packages/`.
 
 ### ⚠️ Keeping packages in sync
 
