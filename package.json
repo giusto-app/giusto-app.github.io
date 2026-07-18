@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "bun run scripts/dev.ts",
     "build": "tsc -b && bun run scripts/build.ts",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
     "preview": "bun run scripts/preview.ts",
+    "sync:lilyjs": "bash scripts/sync-lilyjs-release.sh",
     "test": "bun test"
   },
   "dependencies": {

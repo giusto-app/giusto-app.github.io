@@ -146,11 +146,15 @@ Bun and TypeScript resolve `lily-parser` and `lily-viewer` from their compiled d
 ### ⚠️ Keeping packages in sync
 
 The source of truth for `lily-parser` **and** `lilyjs` is the **lilyJS repo** (`../lilyJS`,
-parser source in `src/music-input/lilypond/`). After changing lilyJS, rebuild and re-vendor:
+parser source in `src/music-input/lilypond/`). Install the committed pre-push check once per
+clone, then sync the latest local lilyJS release when the check requests it:
 
 ```bash
+# One-time setup:
+bun run hooks:install
+
 # Modern bundle (parseSource → music-model, renderLily — used by Play-Along):
-bash scripts/sync-lilyjs.sh   # builds lilyJS, copies packages/lilyjs + public/lilyjs/fonts
+bun run sync:lilyjs   # builds an isolated checkout of the latest local v* tag
 # packages/lilyjs/index.d.ts is hand-maintained — extend it if you use more of the API.
 
 # Legacy ParsedTune bundle (used by StaffViewLilyPond):

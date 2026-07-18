@@ -5,7 +5,8 @@
 # vendored because CI only checks out this repo. Longer term: publish lilyjs
 # to npm and replace packages/lilyjs with a normal dependency.
 #
-# Usage: bash scripts/sync-lilyjs.sh
+# Low-level copier used by sync-lilyjs-release.sh. For normal local updates,
+# run `bun run sync:lilyjs` so the build comes from an isolated release tag.
 set -euo pipefail
 
 GIUSTO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,13 +27,10 @@ cp "$LILYJS_DIR/dist/lilyjs.esm.js" "$GIUSTO_DIR/packages/lilyjs/lilyjs.esm.js"
 
 LILYJS_COMMIT="$(git -C "$LILYJS_DIR" rev-parse HEAD)"
 LILYJS_TAG="${LILYJS_TAG:-$(git -C "$LILYJS_DIR" describe --tags --exact-match 2>/dev/null || true)}"
-LILYJS_RELEASED_AT="${LILYJS_RELEASED_AT:-}"
 TAG_JSON=null
-RELEASED_AT_JSON=null
 if [ -n "$LILYJS_TAG" ]; then TAG_JSON="\"$LILYJS_TAG\""; fi
-if [ -n "$LILYJS_RELEASED_AT" ]; then RELEASED_AT_JSON="\"$LILYJS_RELEASED_AT\""; fi
-printf '{\n  "repository": "%s",\n  "tag": %s,\n  "commit": "%s",\n  "releasedAt": %s\n}\n' \
-  "$LILYJS_REPOSITORY" "$TAG_JSON" "$LILYJS_COMMIT" "$RELEASED_AT_JSON" \
+printf '{\n  "repository": "%s",\n  "tag": %s,\n  "commit": "%s"\n}\n' \
+  "$LILYJS_REPOSITORY" "$TAG_JSON" "$LILYJS_COMMIT" \
   > "$GIUSTO_DIR/packages/lilyjs/upstream.json"
 
 echo "Copying music fonts into public/lilyjs/fonts/ ..."
