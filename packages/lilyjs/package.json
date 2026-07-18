@@ -1,0 +1,10 @@
+{
+  "name": "lilyjs",
+  "version": "0.1.0-vendored",
+  "type": "module",
+  "main": "./lilyjs.esm.js",
+  "module": "./lilyjs.esm.js",
+  "types": "./index.d.ts",
+  "files": ["lilyjs.esm.js", "index.d.ts"],
+  "license": "MIT"
+}

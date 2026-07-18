@@ -1,0 +1,9 @@
+{
+  "name": "lily-viewer",
+  "version": "0.1.0-vendored",
+  "type": "module",
+  "main": "./dist/lily-viewer.js",
+  "types": "./dist/types/lib.d.ts",
+  "files": ["dist/", "style.css"],
+  "license": "MIT"
+}

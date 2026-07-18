@@ -2,9 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
-import { fileURLToPath, URL } from 'node:url'
-
-const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
+// No path-alias helper needed; workspace packages resolve by name.
 
 export default defineConfig({
   server: {
@@ -12,14 +10,10 @@ export default defineConfig({
     strictPort: true,
   },
   resolve: {
-    alias: {
-      'lily-parser': r('./packages/lily-parser/index.js'),
-      'lily-viewer/style.css': r('./packages/lily-viewer/style.css'),
-      'lily-viewer': r('./packages/lily-viewer/dist/lily-viewer.js'),
-      // Modern lilyJS bundle (parseSource → music-model, renderLily).
-      // Synced from ../lilyJS via scripts/sync-lilyjs.sh.
-      'lilyjs': r('./packages/lilyjs/lilyjs.esm.js'),
-    },
+    // Prefer workspace package resolution for `lilyjs`, `lily-parser`, and
+    // `lily-viewer`. Vendored packages are now proper workspace packages with
+    // package.json files, so explicit aliases are no longer required.
+    alias: {},
   },
   build: {
     rollupOptions: {

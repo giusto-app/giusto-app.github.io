@@ -6,6 +6,9 @@
       "name": "app-violin",
       "dependencies": {
         "abcjs": "^6.6.2",
+        "lily-parser": "workspace:*",
+        "lily-viewer": "workspace:*",
+        "lilyjs": "workspace:*",
         "pitchy": "^4.1.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
@@ -22,6 +25,18 @@
         "vite": "^6.3.1",
         "vite-plugin-pwa": "^1.2.0",
       },
+    },
+    "packages/lily-parser": {
+      "name": "lily-parser",
+      "version": "0.1.0-vendored",
+    },
+    "packages/lily-viewer": {
+      "name": "lily-viewer",
+      "version": "0.1.0-vendored",
+    },
+    "packages/lilyjs": {
+      "name": "lilyjs",
+      "version": "0.1.0-vendored",
     },
   },
   "packages": {
@@ -656,6 +671,12 @@
     "lightningcss-win32-arm64-msvc": ["lightningcss-win32-arm64-msvc@1.32.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-8SbC8BR40pS6baCM8sbtYDSwEVQd4JlFTOlaD3gWGHfThTcABnNDBda6eTZeqbofalIJhFx0qKzgHJmcPTnGdw=="],
 
     "lightningcss-win32-x64-msvc": ["lightningcss-win32-x64-msvc@1.32.0", "", { "os": "win32", "cpu": "x64" }, "sha512-Amq9B/SoZYdDi1kFrojnoqPLxYhQ4Wo5XiL8EVJrVsB8ARoC1PWW6VGtT0WKCemjy8aC+louJnjS7U18x3b06Q=="],
+
+    "lily-parser": ["lily-parser@workspace:packages/lily-parser"],
+
+    "lily-viewer": ["lily-viewer@workspace:packages/lily-viewer"],
+
+    "lilyjs": ["lilyjs@workspace:packages/lilyjs"],
 
     "lodash": ["lodash@4.17.23", "", {}, "sha512-LgVTMpQtIopCi79SJeDiP0TfWi5CNEc/L/aRdTh3yIvmZXTnheWpKjSZhnvMl8iXbC1tFg9gdHHDMLoV7CnG+w=="],
 

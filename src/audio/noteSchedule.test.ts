@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-// Runtime import of the vendored bundle directly (bun test doesn't know the
-// Vite alias; type-only 'lilyjs' imports in src/ are erased and unaffected).
-import { parseSource } from '../../packages/lilyjs/lilyjs.esm.js'
+import { parseSource } from 'lilyjs'
 import { buildNoteSchedule, noteEventIdsAtBeat } from './noteSchedule'
 import type { ScoreLike } from 'lilyjs'
 

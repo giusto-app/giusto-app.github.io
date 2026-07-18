@@ -1,11 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 // Regression tests for the two vendored lilyJS artifacts. These import the
-// built files directly (bun test doesn't apply the Vite aliases) and parse the
-// shipped Play-Along exercise, so a bad re-vendor or a broken exercise file
-// fails CI here rather than at runtime.
-import { parseDocument } from '../packages/lily-parser/index.js'
-import { parseSource } from '../packages/lilyjs/lilyjs.esm.js'
+// workspace packages by package name now that Bun workspaces are configured.
+import { parseDocument } from 'lily-parser'
+import { parseSource } from 'lilyjs'
 import type { ScoreLike } from 'lilyjs'
 
 const exercise = readFileSync(

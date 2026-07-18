@@ -1,6 +1,7 @@
 {
   "name": "app-violin",
   "private": true,
+  "workspaces": ["packages/*"],
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -14,6 +15,9 @@
     "pitchy": "^4.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "lilyjs": "workspace:*",
+    "lily-parser": "workspace:*",
+    "lily-viewer": "workspace:*",
     "vexflow": "^5.0.0"
   },
   "devDependencies": {

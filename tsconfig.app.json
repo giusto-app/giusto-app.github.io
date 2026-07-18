@@ -1,12 +1,6 @@
 {
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-    "baseUrl": ".",
-    "paths": {
-      "lily-parser": ["./packages/lily-parser/index.d.ts"],
-      "lily-viewer": ["./packages/lily-viewer/dist/types/lib.d.ts"],
-      "lilyjs": ["./packages/lilyjs/index.d.ts"]
-    },
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
