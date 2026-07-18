@@ -5,6 +5,6 @@
   "main": "./lilyjs.esm.js",
   "module": "./lilyjs.esm.js",
   "types": "./index.d.ts",
-  "files": ["lilyjs.esm.js", "index.d.ts"],
+  "files": ["lilyjs.esm.js", "index.d.ts", "upstream.json"],
   "license": "MIT"
 }

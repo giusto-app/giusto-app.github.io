@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -21,14 +21,79 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
 
+      - name: Resolve latest lilyJS release
+        id: lilyjs-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_json="$(gh api repos/MarcMouries/lilyJS/releases/latest 2>/dev/null || true)"
+          if [ -z "$release_json" ]; then
+            echo "No published lilyJS release found; using the vendored version."
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="$(jq -r '.tag_name' <<< "$release_json")"
+          released_at="$(jq -r '.published_at' <<< "$release_json")"
+          current_released_at="$(jq -r '.releasedAt // ""' packages/lilyjs/upstream.json 2>/dev/null || true)"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "released_at=$released_at" >> "$GITHUB_OUTPUT"
+          if [ -z "$current_released_at" ] || [[ "$released_at" > "$current_released_at" ]]; then
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out released lilyJS
+        if: steps.lilyjs-release.outputs.needs_sync == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: MarcMouries/lilyJS
+          ref: ${{ steps.lilyjs-release.outputs.tag }}
+          path: .upstream/lilyJS
+
+      - name: Install released lilyJS dependencies
+        if: steps.lilyjs-release.outputs.needs_sync == 'true'
+        working-directory: .upstream/lilyJS
+        run: bun install --frozen-lockfile
+
+      - name: Sync released lilyJS
+        if: steps.lilyjs-release.outputs.needs_sync == 'true'
+        env:
+          LILYJS_DIR: ${{ github.workspace }}/.upstream/lilyJS
+          LILYJS_TAG: ${{ steps.lilyjs-release.outputs.tag }}
+          LILYJS_RELEASED_AT: ${{ steps.lilyjs-release.outputs.released_at }}
+        run: bash scripts/sync-lilyjs.sh
+
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        run: bun test
 
       - name: Build
         run: bun run build
+
+      - name: Commit validated lilyJS update
+        if: steps.lilyjs-release.outputs.needs_sync == 'true'
+        env:
+          LILYJS_TAG: ${{ steps.lilyjs-release.outputs.tag }}
+        run: |
+          git add packages/lilyjs/lilyjs.esm.js packages/lilyjs/upstream.json public/lilyjs/fonts
+          if git diff --cached --quiet; then
+            echo "The released lilyJS artifacts already match the vendored files."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(vendor): sync lilyjs ${LILYJS_TAG}"
+          git push origin HEAD:main
 
       - uses: actions/configure-pages@v5
 

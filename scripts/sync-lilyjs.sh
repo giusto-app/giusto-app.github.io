@@ -10,6 +10,7 @@ set -euo pipefail
 
 GIUSTO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LILYJS_DIR="${LILYJS_DIR:-$GIUSTO_DIR/../lilyJS}"
+LILYJS_REPOSITORY="${LILYJS_REPOSITORY:-MarcMouries/lilyJS}"
 
 if [ ! -f "$LILYJS_DIR/package.json" ]; then
   echo "lilyJS repo not found at $LILYJS_DIR (set LILYJS_DIR to override)" >&2
@@ -23,10 +24,22 @@ echo "Copying bundle into packages/lilyjs/ ..."
 mkdir -p "$GIUSTO_DIR/packages/lilyjs"
 cp "$LILYJS_DIR/dist/lilyjs.esm.js" "$GIUSTO_DIR/packages/lilyjs/lilyjs.esm.js"
 
+LILYJS_COMMIT="$(git -C "$LILYJS_DIR" rev-parse HEAD)"
+LILYJS_TAG="${LILYJS_TAG:-$(git -C "$LILYJS_DIR" describe --tags --exact-match 2>/dev/null || true)}"
+LILYJS_RELEASED_AT="${LILYJS_RELEASED_AT:-}"
+TAG_JSON=null
+RELEASED_AT_JSON=null
+if [ -n "$LILYJS_TAG" ]; then TAG_JSON="\"$LILYJS_TAG\""; fi
+if [ -n "$LILYJS_RELEASED_AT" ]; then RELEASED_AT_JSON="\"$LILYJS_RELEASED_AT\""; fi
+printf '{\n  "repository": "%s",\n  "tag": %s,\n  "commit": "%s",\n  "releasedAt": %s\n}\n' \
+  "$LILYJS_REPOSITORY" "$TAG_JSON" "$LILYJS_COMMIT" "$RELEASED_AT_JSON" \
+  > "$GIUSTO_DIR/packages/lilyjs/upstream.json"
+
 echo "Copying music fonts into public/lilyjs/fonts/ ..."
 mkdir -p "$GIUSTO_DIR/public/lilyjs/fonts"
 cp "$LILYJS_DIR/src/music-rendering/fonts/Bravura.woff2" \
    "$LILYJS_DIR/src/music-rendering/fonts/Academico.woff2" \
    "$GIUSTO_DIR/public/lilyjs/fonts/"
 
-echo "Done. packages/lilyjs/index.d.ts is hand-maintained — update it if the API surface you use changed."
+echo "Synced lilyJS ${LILYJS_TAG:-$LILYJS_COMMIT}."
+echo "packages/lilyjs/index.d.ts is hand-maintained — update it if the API surface you use changed."
