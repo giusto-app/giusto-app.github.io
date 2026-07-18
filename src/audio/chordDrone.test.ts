@@ -12,6 +12,21 @@ function makeDrone(fake: FakeAudioContext, volume = 0.4) {
 }
 
 describe('ChordDrone (sawtooth voicing)', () => {
+  test('defaults to a metronome-forward playback mix', () => {
+    const fake = new FakeAudioContext()
+    const drone = new ChordDrone(asAudioContext(fake), {
+      soundType: 'sawtooth',
+      concertPitchHz: 440,
+    })
+    drone.setChord(0, 'maj', 1.0)
+
+    const branch = fake.gains.find(g => g.connections.includes(fake.destination))!
+    expect(branch.gain.events[branch.gain.events.length - 1]).toMatchObject({
+      type: 'linearRamp',
+      value: 0.18,
+    })
+  })
+
   test('voices root + perfect fifth in octave 3', () => {
     const fake = new FakeAudioContext()
     fake.currentTime = 0.5

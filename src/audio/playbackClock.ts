@@ -75,6 +75,12 @@ export class PlaybackClock {
     this._bpm = Math.max(20, Math.min(300, bpm))
   }
 
+  /** End at this absolute beat boundary. Useful for runs whose length is
+   * decided while playing, such as a tempo trainer reaching its target. */
+  setTotalBeats(totalBeats: number): void {
+    this.opts.totalBeats = Math.max(0, totalBeats)
+  }
+
   /** Subscribe to beats at schedule time (timestamps are in the future). */
   onBeat(cb: BeatCallback): () => void {
     this.beatCallbacks.add(cb)

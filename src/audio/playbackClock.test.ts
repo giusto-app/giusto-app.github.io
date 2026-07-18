@@ -116,6 +116,25 @@ describe('PlaybackClock scheduling', () => {
     expect(clock.isPlaying).toBe(false)
   })
 
+  test('setTotalBeats gives an endless run a musical stopping boundary', async () => {
+    const ctx = realtimeCtx()
+    const clock = new PlaybackClock(ctx, { bpm: 300 })
+    activeClock = clock
+    const beats: number[] = []
+    let ended = 0
+    clock.onBeat(e => {
+      beats.push(e.beat)
+      if (e.beat === 1) clock.setTotalBeats(3)
+    })
+    clock.onEnded(() => { ended++ })
+    clock.start()
+    await sleep(900)
+
+    expect(beats).toEqual([0, 1, 2])
+    expect(ended).toBe(1)
+    expect(clock.isPlaying).toBe(false)
+  })
+
   test('stop() halts scheduling immediately', async () => {
     const ctx = realtimeCtx()
     const clock = new PlaybackClock(ctx, { bpm: 300 })

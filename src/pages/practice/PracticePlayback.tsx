@@ -8,7 +8,15 @@ import {
 } from 'lilyjs'
 import LilyScore from './LilyScore'
 import ExercisePicker, { recordRecentExercise } from './ExercisePicker'
-import { exerciseUrl, type ExerciseCatalogEntry } from '../../hooks/useExerciseCatalog'
+import {
+  exerciseUrl,
+  useExerciseCatalog,
+  type ExerciseCatalogEntry,
+} from '../../hooks/useExerciseCatalog'
+import {
+  playAlongExerciseIdFromHash,
+  playAlongUrl,
+} from './playAlongLinks'
 import { resumeAudioContext } from '../../audio/audioContext'
 import { PlaybackClock } from '../../audio/playbackClock'
 import { playWoodblock } from '../../audio/woodblock'
@@ -64,11 +72,15 @@ export default function PracticePlayback({
   const [bpm, setBpm] = useState(DEFAULT_BPM)
   const [countIn, setCountIn] = useState(true)
   const [loop, setLoop] = useState(false)
-  const [metronomeVol, setMetronomeVol] = useState(0.6)
-  const [droneVol, setDroneVol] = useState(0.35)
+  const [metronomeVol, setMetronomeVol] = useState(0.85)
+  const [droneVol, setDroneVol] = useState(0.18)
   const [soundType, setSoundType] = useState<ChordDroneSoundType>('sawtooth')
   const [activeChordLabel, setActiveChordLabel] = useState<string | null>(null)
   const [isCountingIn, setIsCountingIn] = useState(false)
+  const [shareStatus, setShareStatus] = useState('')
+  const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
+  const [trainerCompleted, setTrainerCompleted] = useState(false)
+  const catalog = useExerciseCatalog()
 
   // Tempo Trainer (see src/audio/tempoPlan.ts for the ramp math)
   const [trainerOn, setTrainerOn] = useState(false)
@@ -173,15 +185,15 @@ export default function PracticePlayback({
   const startPlayback = useCallback(async () => {
     if (!schedule || schedule.totalBeats === 0) return
     stopPlayback()
+    setTrainerCompleted(false)
     const ctx = await resumeAudioContext()
 
     const drone = new ChordDrone(ctx, { soundType, concertPitchHz: concertPitch, volume: droneVol })
     await drone.prepare(schedule.events.map(e => e.rootPc))
 
-    // A per-loop trainer only makes sense looping; timed runs either way.
+    // Tempo training repeats the exercise until its target is completed.
     const plan = trainerPlan
-    const shouldLoop = loop || plan?.mode === 'perLoop'
-    if (plan?.mode === 'perLoop' && !loop) setLoop(true)
+    const shouldLoop = loop || plan !== null
     const startBpm = plan ? plan.startBpm : bpm
     if (plan) setBpm(startBpm)
     const total = schedule.totalBeats
@@ -190,8 +202,10 @@ export default function PracticePlayback({
       beatsPerMeasure: schedule.beatsPerBar,
       // Whole clock beats only (9/8 bars are 4.5 QN — round up).
       countInBeats: countIn ? Math.ceil(schedule.beatsPerBar) : 0,
-      // Endless when looping; the beat index wraps below.
-      totalBeats: shouldLoop ? undefined : total,
+      // A zero-span trainer still plays one complete target repetition.
+      totalBeats: plan && plan.startBpm === plan.endBpm
+        ? total
+        : shouldLoop ? undefined : total,
     })
 
     // Trainer ramp state. Timed offset re-anchors the ramp after a manual
@@ -222,13 +236,23 @@ export default function PracticePlayback({
           // Step FROM the current value (bpmRef) so slider drags re-anchor.
           if (e.beat > 0 && e.beat % total === 0) {
             next = bpmForLoop({ ...plan, startBpm: bpmRef.current }, 1)
+            // Once the target tempo is set, play that repetition in full and
+            // let the clock end naturally at its final boundary.
+            if (next === plan.endBpm) clock.setTotalBeats(e.beat + total)
           }
         } else if (e.isDownbeat) {
           const raw = bpmAtElapsed(plan, e.time - rampStartTime)
           if (lastTimedBpm !== null && bpmRef.current !== lastTimedBpm) {
             timedOffset = bpmRef.current - raw // slider moved since last step
           }
-          next = Math.max(20, Math.min(300, raw + timedOffset))
+          const shifted = Math.max(20, Math.min(300, raw + timedOffset))
+          const reachedTarget = plan.endBpm >= plan.startBpm
+            ? shifted >= plan.endBpm
+            : shifted <= plan.endBpm
+          next = reachedTarget ? plan.endBpm : shifted
+          if (reachedTarget) {
+            clock.setTotalBeats(e.beat + Math.ceil(schedule.beatsPerBar))
+          }
           lastTimedBpm = next
         }
         if (next !== null && next !== clock.bpm) {
@@ -274,6 +298,7 @@ export default function PracticePlayback({
 
     clock.onEnded(() => {
       drone.stop()
+      if (plan) setTrainerCompleted(true)
       stopPlayback()
     })
 
@@ -287,6 +312,10 @@ export default function PracticePlayback({
   useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
   useEffect(() => { droneRef.current?.setVolume(droneVol) }, [droneVol])
 
+  useEffect(() => {
+    setTrainerCompleted(false)
+  }, [trainerOn, trainerMode, trainerStart, trainerEnd, trainerStep, trainerMin, exercise.id])
+
   // Tear down audio when the view unmounts or the exercise changes
   useEffect(() => stopPlayback, [stopPlayback, exercise.id])
 
@@ -297,6 +326,46 @@ export default function PracticePlayback({
     setBpm(entry.bpm ?? DEFAULT_BPM)
     onSelectExercise(entry)
   }, [stopPlayback, onSelectExercise])
+
+  // Resolve #practice/<exercise-id> after the remote catalog (or cache) is
+  // available. The bundled exercise can resolve immediately while loading.
+  useEffect(() => {
+    const sharedId = playAlongExerciseIdFromHash(window.location.hash)
+    if (!sharedId) {
+      setSharedLinkError(null)
+      return
+    }
+    const linkedExercise = catalog.exercises.find(entry => entry.id === sharedId)
+    if (linkedExercise) {
+      setSharedLinkError(null)
+      if (linkedExercise.id !== exercise.id) handlePick(linkedExercise)
+    } else if (!catalog.loading) {
+      setSharedLinkError('This shared exercise is not available in the current library.')
+    }
+  }, [catalog.exercises, catalog.loading, exercise.id, handlePick])
+
+  useEffect(() => {
+    if (!shareStatus) return
+    const timeout = window.setTimeout(() => setShareStatus(''), 2500)
+    return () => window.clearTimeout(timeout)
+  }, [shareStatus])
+
+  const copyShareLink = useCallback(async () => {
+    const url = playAlongUrl(exercise.id)
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      const input = document.createElement('textarea')
+      input.value = url
+      input.style.position = 'fixed'
+      input.style.opacity = '0'
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      input.remove()
+    }
+    setShareStatus('Copied')
+  }, [exercise.id])
 
   // ── Chord-symbol highlight in the rendered SVG (M5) ────────────────────────
   useEffect(() => {
@@ -320,19 +389,56 @@ export default function PracticePlayback({
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-4">
-      {/* Exercise selector — always reachable, even when the current file fails */}
-      <div className="flex flex-col gap-2">
-        <button
-          onClick={() => setShowPicker(s => !s)}
-          className="flex items-center justify-between rounded-lg bg-gray-800/60 px-3 py-2 hover:bg-gray-800 transition-colors"
-        >
-          <span className="text-sm text-gray-200 truncate">{exercise.title}</span>
-          <span className="text-xs text-gray-500 shrink-0 ml-2">
-            {showPicker ? 'Close ▴' : 'Change ▾'}
-          </span>
-        </button>
-        {showPicker && <ExercisePicker selectedId={exercise.id} onSelect={handlePick} />}
+      {/* Current exercise and primary actions stay visible even on load errors. */}
+      <div className="flex flex-col gap-3 border-b border-gray-700/70 pb-4">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-1">Exercise</p>
+            <h2 className="text-lg font-semibold text-gray-100 leading-tight break-words">{exercise.title}</h2>
+            {exercise.subtitle && <p className="text-sm text-gray-500 mt-1">{exercise.subtitle}</p>}
+            <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-gray-500 mt-2">
+              <span>{exercise.category}</span>
+              {exercise.key && <span>Key {exercise.key}</span>}
+              {exercise.timeSig && <span>{exercise.timeSig}</span>}
+              <span>{exercise.bars} bars</span>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0 sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setShowPicker(s => !s)}
+              aria-expanded={showPicker}
+              className="h-9 flex-1 rounded-md border border-gray-700 px-3 text-xs font-semibold text-gray-300 hover:bg-gray-800 transition-colors sm:flex-none"
+            >
+              {showPicker ? 'Close' : 'Change'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyShareLink()}
+              aria-live="polite"
+              className="h-9 min-w-24 flex-1 rounded-md bg-amber-400 px-3 text-xs font-semibold text-gray-950 hover:bg-amber-300 transition-colors sm:flex-none"
+            >
+              {shareStatus || 'Copy link'}
+            </button>
+          </div>
+        </div>
+        {showPicker && (
+          <ExercisePicker
+            selectedId={exercise.id}
+            exercises={catalog.exercises}
+            loading={catalog.loading}
+            error={catalog.error}
+            onSelect={handlePick}
+            onClose={() => setShowPicker(false)}
+          />
+        )}
       </div>
+
+      {sharedLinkError && (
+        <div className="text-center text-amber-300 text-sm bg-amber-950/30 rounded-md py-3 px-4">
+          {sharedLinkError}
+        </div>
+      )}
 
       {loadError && (
         <div className="text-center text-red-400 text-sm bg-red-950/40 rounded-xl py-3 px-4">{loadError}</div>
@@ -410,7 +516,11 @@ export default function PracticePlayback({
           Count-in (1 bar)
         </label>
         <label className="flex items-center gap-2 text-gray-400">
-          <input type="checkbox" checked={loop} onChange={e => setLoop(e.target.checked)}
+          <input
+            type="checkbox"
+            checked={loop || trainerOn}
+            disabled={trainerOn}
+            onChange={e => setLoop(e.target.checked)}
             className="accent-amber-400" />
           Loop
         </label>
@@ -510,9 +620,6 @@ export default function PracticePlayback({
                   min
                 </label>
               )}
-              {trainerMode === 'perLoop' && !loop && !isPlaying && (
-                <span className="text-xs text-gray-600">enables Loop</span>
-              )}
             </div>
 
             {/* Stepped ramp viz: gray = planned, amber = reached */}
@@ -520,21 +627,29 @@ export default function PracticePlayback({
               const steps = plannedSteps(trainerPlan)
               const lo = Math.min(trainerStart, trainerEnd)
               const hi = Math.max(trainerStart, trainerEnd)
-              const frac = isPlaying ? rampFraction(trainerPlan, bpm) : 0
-              const reachedCount = Math.floor(frac * (steps.length - 1) + 1e-6) + (isPlaying ? 1 : 0)
+              const hasProgress = isPlaying || trainerCompleted
+              const frac = hasProgress ? rampFraction(trainerPlan, bpm) : 0
+              const reachedCount = Math.floor(frac * (steps.length - 1) + 1e-6) + (hasProgress ? 1 : 0)
               return (
-                <div className="flex items-end gap-[3px] h-12" aria-hidden>
-                  {steps.map((v, i) => (
-                    <div
-                      key={i}
-                      className={[
-                        'flex-1 rounded-sm transition-colors',
-                        i < reachedCount ? 'bg-amber-400' : 'bg-gray-700',
-                      ].join(' ')}
-                      style={{ height: `${hi === lo ? 100 : 20 + (80 * (v - lo)) / (hi - lo)}%` }}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="flex items-end gap-[3px] h-12" aria-hidden>
+                    {steps.map((v, i) => (
+                      <div
+                        key={i}
+                        className={[
+                          'flex-1 rounded-sm transition-colors',
+                          i < reachedCount ? 'bg-amber-400' : 'bg-gray-700',
+                        ].join(' ')}
+                        style={{ height: `${hi === lo ? 100 : 20 + (80 * (v - lo)) / (hi - lo)}%` }}
+                      />
+                    ))}
+                  </div>
+                  {trainerCompleted && (
+                    <div className="text-xs font-semibold text-emerald-400" role="status">
+                      Target reached at {trainerEnd} BPM
+                    </div>
+                  )}
+                </>
               )
             })()}
           </>

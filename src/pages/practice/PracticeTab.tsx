@@ -12,6 +12,10 @@ import RecordButton from './RecordButton'
 import SessionResults from './SessionResults'
 import PracticePlayback from './PracticePlayback'
 import {
+  playAlongExerciseIdFromHash,
+  replacePlayAlongUrl,
+} from './playAlongLinks'
+import {
   readStoredExercise,
   storeExercise,
   type ExerciseCatalogEntry,
@@ -33,14 +37,17 @@ export default function PracticeTab({
   concertPitch,
   onSessionSaved,
 }: PracticeTabProps) {
+  const [practiceMode, setPracticeMode] = useState<'pitch' | 'playAlong'>(() =>
+    playAlongExerciseIdFromHash(window.location.hash) ? 'playAlong' : 'pitch',
+  )
   const [scaleKey, setScaleKey] = useState<ScaleKey>('d-major')
   const [duration, setDuration] = useState<SessionDuration>(30)
   const [temperamentOpen, setTemperamentOpen] = useState(false)
-  const [playAlongOpen, setPlayAlongOpen] = useState(false)
   const [playAlongExercise, setPlayAlongExercise] = useState<ExerciseCatalogEntry>(readStoredExercise)
   const handleSelectExercise = (entry: ExerciseCatalogEntry) => {
     setPlayAlongExercise(entry)
     storeExercise(entry)
+    replacePlayAlongUrl(entry.id)
   }
   const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, shiftOctave: droneShiftOctave, setSoundType: droneSoundType, stop: droneStop } = useDrone()
   const {
@@ -50,6 +57,15 @@ export default function PracticeTab({
 
   // Cleanup audio when tab unmounts
   useEffect(() => () => { cleanup(); droneStop() }, [cleanup, droneStop])
+
+  // A shared #practice/<exercise-id> link opens the Play-Along workspace.
+  useEffect(() => {
+    const syncModeFromHash = () => {
+      if (playAlongExerciseIdFromHash(window.location.hash)) setPracticeMode('playAlong')
+    }
+    window.addEventListener('hashchange', syncModeFromHash)
+    return () => window.removeEventListener('hashchange', syncModeFromHash)
+  }, [])
 
   // Auto-set drone tonic to match the selected scale's root
   useEffect(() => {
@@ -71,6 +87,17 @@ export default function PracticeTab({
   function handleSave() {
     reset()
     onSessionSaved()
+  }
+
+  function handlePracticeModeChange(mode: 'pitch' | 'playAlong') {
+    setPracticeMode(mode)
+    if (mode === 'playAlong') {
+      replacePlayAlongUrl(playAlongExercise.id)
+    } else if (playAlongExerciseIdFromHash(window.location.hash)) {
+      const url = new URL(window.location.href)
+      url.hash = 'practice'
+      window.history.replaceState(null, '', url)
+    }
   }
 
   // ── Results ────────────────────────────────────────────────────────────────
@@ -179,7 +206,32 @@ export default function PracticeTab({
         </h1>
       </header>
 
-      <main className="w-full max-w-sm md:max-w-none flex flex-col gap-5 flex-1 justify-center">
+      <main className={[
+        'w-full flex flex-col gap-5 flex-1',
+        practiceMode === 'pitch' ? 'max-w-sm md:max-w-none justify-center' : 'max-w-5xl pt-4',
+      ].join(' ')}>
+        <div className="grid w-full max-w-md self-center grid-cols-2 gap-1 rounded-lg p-1 neu-inset" role="tablist" aria-label="Practice mode">
+          {([['pitch', 'Pitch Practice'], ['playAlong', 'Play-Along']] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              aria-selected={practiceMode === mode}
+              onClick={() => handlePracticeModeChange(mode)}
+              className={[
+                'min-h-10 rounded-md px-3 text-sm font-semibold transition-colors',
+                practiceMode === mode
+                  ? 'bg-gray-700 text-gray-100 shadow-sm'
+                  : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
+              ].join(' ')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {practiceMode === 'pitch' ? (
+          <>
         {/* Scale */}
         <section>
           <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-2">
@@ -247,40 +299,23 @@ export default function PracticeTab({
           />
         </section>
 
-        {/* Play-Along: score + metronome + chord-change drones — collapsible */}
-        <section>
-          <button
-            onClick={() => setPlayAlongOpen(o => !o)}
-            className="w-full flex items-center justify-between text-xs font-semibold tracking-widest uppercase text-gray-500 hover:text-gray-300 transition-colors mb-2"
-          >
-            <span>Play-Along</span>
-            <span className="flex items-center gap-1.5 normal-case tracking-normal font-normal text-gray-600">
-              {playAlongExercise.title}
-              <svg width={12} height={12} viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
-                className={`transition-transform duration-150 ${playAlongOpen ? 'rotate-180' : ''}`}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </span>
-          </button>
-          {playAlongOpen && (
-            <PracticePlayback
-              exercise={playAlongExercise}
-              onSelectExercise={handleSelectExercise}
-              concertPitch={concertPitch}
-            />
-          )}
-        </section>
-
         {/* Error */}
         {errorMessage && (
           <div className="text-center text-red-400 text-sm bg-red-950/40 rounded-xl py-3 px-4">
             {errorMessage}
           </div>
         )}
+          </>
+        ) : (
+          <PracticePlayback
+            exercise={playAlongExercise}
+            onSelectExercise={handleSelectExercise}
+            concertPitch={concertPitch}
+          />
+        )}
       </main>
 
-      <footer className="pb-2">
+      {practiceMode === 'pitch' && <footer className="pb-2">
         <RecordButton
           recorderState={recorderState}
           preCountdown={preCountdown}
@@ -290,7 +325,7 @@ export default function PracticeTab({
           onReset={reset}
           onStop={stopRecording}
         />
-      </footer>
+      </footer>}
     </div>
   )
 }

@@ -29,7 +29,7 @@ export type ChordDroneSoundType = 'sawtooth' | 'shruti' | 'cello'
 export interface ChordDroneOptions {
   soundType: ChordDroneSoundType
   concertPitchHz: number
-  /** 0–1. Default 0.35 (matches the manual drone). */
+  /** 0–1. Default 0.18 so the metronome stays perceptually in front. */
   volume?: number
 }
 
@@ -59,7 +59,7 @@ export class ChordDrone {
     this.ctx = ctx
     this.soundType = options.soundType
     this.concertPitchHz = options.concertPitchHz
-    this.volume = options.volume ?? 0.35
+    this.volume = options.volume ?? 0.18
   }
 
   /**
