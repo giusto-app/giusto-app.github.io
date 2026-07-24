@@ -21,6 +21,9 @@ import { resumeAudioContext } from '../../audio/audioContext'
 import { PlaybackClock } from '../../audio/playbackClock'
 import { playWoodblock } from '../../audio/woodblock'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
+import { StringsInstrument } from '../../audio/stringsInstrument'
+import { arpNotesInWindow, buildArpeggioSchedule, type ArpNote } from '../../audio/arpeggioSchedule'
+import { buildChordBackingSchedule, chordBlocksInWindow, type ChordBlock } from '../../audio/chordBacking'
 import {
   buildChordSchedule,
   chordSoundingAtBeat,
@@ -54,11 +57,51 @@ function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score
   return b.type === 'score' && 'score' in b
 }
 
-const DRONE_SOUNDS: Array<{ value: ChordDroneSoundType; label: string }> = [
-  { value: 'sawtooth', label: 'Synth' },
-  { value: 'shruti', label: 'Shruti' },
-  { value: 'cello', label: 'Cello' },
+type BackingMode = 'off' | 'drone' | 'chords' | 'arpeggio'
+
+const BACKING_MODES: Array<[BackingMode, string]> = [
+  ['off', 'Off'], ['drone', 'Drone'], ['chords', 'Chords'], ['arpeggio', 'Arpeggio'],
 ]
+
+// The play-along drone uses the sampled cello (steady, no wavy detune); the
+// tuning-voice choice lives in the Drone tab. Chords/arpeggio use the strings.
+const DRONE_SOUND: ChordDroneSoundType = 'cello'
+// Fixed, tasteful arpeggio shape — no UI knobs.
+const ARP_CONFIG = { pattern: 'up', rhythm: 'eighth', octaves: 1 } as const
+
+/** A labeled row of mutually-exclusive pill buttons. */
+function SegRow<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string
+  value: T
+  onChange: (value: T) => void
+  options: Array<[T, string]>
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-xs text-gray-500">{label}</span>
+      <div className="flex gap-1 flex-wrap">
+        {options.map(([val, lbl]) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => onChange(val)}
+            className={[
+              'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
+              value === val ? 'bg-gray-700 text-gray-100' : 'bg-gray-800/60 text-gray-500 hover:text-gray-300',
+            ].join(' ')}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function PracticePlayback({
   exercise,
@@ -73,8 +116,9 @@ export default function PracticePlayback({
   const [countIn, setCountIn] = useState(true)
   const [loop, setLoop] = useState(false)
   const [metronomeVol, setMetronomeVol] = useState(0.85)
-  const [droneVol, setDroneVol] = useState(0.18)
-  const [soundType, setSoundType] = useState<ChordDroneSoundType>('sawtooth')
+  // Backing: one of Off / Drone / Chords / Arpeggio, with a single volume.
+  const [backingMode, setBackingMode] = useState<BackingMode>('drone')
+  const [backingVol, setBackingVol] = useState(0.5)
   const [activeChordLabel, setActiveChordLabel] = useState<string | null>(null)
   const [isCountingIn, setIsCountingIn] = useState(false)
   const [shareStatus, setShareStatus] = useState('')
@@ -98,6 +142,13 @@ export default function PracticePlayback({
 
   const clockRef = useRef<PlaybackClock | null>(null)
   const droneRef = useRef<ChordDrone | null>(null)
+  const stringsRef = useRef<StringsInstrument | null>(null)
+  // Read live inside the clock's onBeat closure so switching backing mode takes
+  // effect without restarting playback.
+  const backingModeRef = useRef(backingMode)
+  backingModeRef.current = backingMode
+  const arpScheduleRef = useRef<ArpNote[]>([])
+  const chordBackingRef = useRef<ChordBlock[]>([])
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
   // Mirror of the bpm state, so trainer ramps re-anchor after a manual slider
@@ -134,6 +185,7 @@ export default function PracticePlayback({
       const block = scoreBlocks[exercise.scoreIndex] ?? scoreBlocks[0]
       if (!block) return null
       return {
+        score: block.score,
         chords: buildChordSchedule(block.score),
         notes: buildNoteSchedule(block.score),
         // Always render just the selected score block: whole-document renders
@@ -149,6 +201,19 @@ export default function PracticePlayback({
   const schedule: ChordScheduleResult | null = parsed?.chords ?? null
   const noteEvents: NotePlaybackEvent[] = parsed?.notes ?? []
   const hasChordTrack = (schedule?.events.length ?? 0) > 0
+
+  // Backing schedules (chords + arpeggio) — rebuilt per exercise, read live via
+  // refs inside the clock's onBeat closure.
+  const arpSchedule = useMemo<ArpNote[]>(
+    () => (parsed?.score ? buildArpeggioSchedule(parsed.score, ARP_CONFIG) : []),
+    [parsed],
+  )
+  arpScheduleRef.current = arpSchedule
+  const chordBacking = useMemo<ChordBlock[]>(
+    () => (parsed?.score ? buildChordBackingSchedule(parsed.score) : []),
+    [parsed],
+  )
+  chordBackingRef.current = chordBacking
 
   // Score \tempo (when present) beats the UI default, once per exercise —
   // clamped to the slider's range in case a file carries an extreme marking.
@@ -173,6 +238,8 @@ export default function PracticePlayback({
     clockRef.current = null
     droneRef.current?.dispose()
     droneRef.current = null
+    stringsRef.current?.dispose()
+    stringsRef.current = null
     if (noteRafRef.current !== null) cancelAnimationFrame(noteRafRef.current)
     noteRafRef.current = null
     noteAnchorRef.current = null
@@ -188,8 +255,24 @@ export default function PracticePlayback({
     setTrainerCompleted(false)
     const ctx = await resumeAudioContext()
 
-    const drone = new ChordDrone(ctx, { soundType, concertPitchHz: concertPitch, volume: droneVol })
+    // Both backing instruments are created up front; the active one is chosen
+    // live by backingModeRef, and each is enable-gated by volume (see effects).
+    const droneActive = backingMode === 'drone'
+    const stringsActive = backingMode === 'chords' || backingMode === 'arpeggio'
+    const drone = new ChordDrone(ctx, {
+      soundType: DRONE_SOUND,
+      concertPitchHz: concertPitch,
+      volume: droneActive ? backingVol * 0.4 : 0,
+    })
     await drone.prepare(schedule.events.map(e => e.rootPc))
+    const strings = new StringsInstrument(ctx, {
+      concertPitchHz: concertPitch,
+      volume: stringsActive ? backingVol : 0,
+    })
+    await strings.prepare([
+      ...arpScheduleRef.current.map(n => n.midi),
+      ...chordBackingRef.current.flatMap(b => b.midis),
+    ])
 
     // Tempo training repeats the exercise until its target is completed.
     const plan = trainerPlan
@@ -264,11 +347,31 @@ export default function PracticePlayback({
 
       const beat = shouldLoop ? e.beat % total : e.beat
       const secondsPer = 60 / clock.bpm
-      for (const chord of chordsStartingInWindow(schedule.events, beat, beat + 1)) {
-        drone.setChord(chord.rootPc, chord.quality, e.time + (chord.startBeat - beat) * secondsPer)
+      const mode = backingModeRef.current
+
+      if (mode === 'drone') {
+        for (const chord of chordsStartingInWindow(schedule.events, beat, beat + 1)) {
+          drone.setChord(chord.rootPc, chord.quality, e.time + (chord.startBeat - beat) * secondsPer)
+        }
+        // ChordDrone's same-chord guard handles the non-change case; a loop
+        // back to Gm from Bb is a real change and re-articulates.
+      } else if (mode === 'chords') {
+        for (const block of chordBlocksInWindow(chordBackingRef.current, beat, beat + 1)) {
+          const at = e.time + (block.startBeat - beat) * secondsPer
+          for (const midi of block.midis) {
+            strings.playNote(midi, at, block.durationBeats * secondsPer, block.velocity)
+          }
+        }
+      } else if (mode === 'arpeggio') {
+        for (const note of arpNotesInWindow(arpScheduleRef.current, beat, beat + 1)) {
+          strings.playNote(
+            note.midi,
+            e.time + (note.startBeat - beat) * secondsPer,
+            note.durationBeats * secondsPer,
+            note.velocity,
+          )
+        }
       }
-      // Looping back to Gm from Bb is a real chord change; ChordDrone's
-      // same-chord guard handles the non-change case automatically.
     })
 
     clock.onVisualBeat(rawBeat => {
@@ -298,19 +401,26 @@ export default function PracticePlayback({
 
     clock.onEnded(() => {
       drone.stop()
+      strings.stop()
       if (plan) setTrainerCompleted(true)
       stopPlayback()
     })
 
     clockRef.current = clock
     droneRef.current = drone
+    stringsRef.current = strings
     clock.start()
     setIsPlaying(true)
-  }, [schedule, noteEvents, soundType, concertPitch, droneVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
+  }, [schedule, noteEvents, concertPitch, backingMode, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
 
   // Live control forwarding
   useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
-  useEffect(() => { droneRef.current?.setVolume(droneVol) }, [droneVol])
+  // Backing mode/volume are volume-gated (gapless): the inactive instrument is
+  // silenced but keeps running, so switching modes needs no restart.
+  useEffect(() => {
+    droneRef.current?.setVolume(backingMode === 'drone' ? backingVol * 0.4 : 0)
+    stringsRef.current?.setVolume(backingMode === 'chords' || backingMode === 'arpeggio' ? backingVol : 0)
+  }, [backingMode, backingVol])
 
   useEffect(() => {
     setTrainerCompleted(false)
@@ -559,18 +669,7 @@ export default function PracticePlayback({
             className="w-full accent-amber-400"
           />
         </div>
-        {hasChordTrack && (
-          <div>
-            <div className="flex justify-between text-xs text-gray-500 mb-1">
-              <span>Drone</span>
-            </div>
-            <input
-              type="range" min={0} max={1} step={0.05} value={droneVol}
-              onChange={e => setDroneVol(Number(e.target.value))}
-              className="w-full accent-amber-400"
-            />
-          </div>
-        )}
+        {/* Drone volume lives in the Backing section below. */}
       </div>
 
       {/* Tempo Trainer — ramp the tempo per loop or over time */}
@@ -680,23 +779,21 @@ export default function PracticePlayback({
         )}
       </div>
 
-      {/* Drone sound — only exercises with a chord track drive the drone */}
+      {/* Backing — one control: Off / Drone / Chords / Arpeggio, played by the
+          sampled cello (drone) and string ensemble (chords/arpeggio) */}
       {hasChordTrack ? (
-        <div id="play-along-drone-sounds" className="flex gap-2">
-          {DRONE_SOUNDS.map(s => (
-            <button
-              key={s.value}
-              onClick={() => setSoundType(s.value)}
-              disabled={isPlaying}
-              className={[
-                'flex-1 py-2 rounded-xl text-sm font-medium transition-colors',
-                soundType === s.value ? 'bg-gray-700 text-gray-100' : 'bg-gray-800/60 text-gray-500',
-                isPlaying ? 'opacity-50' : 'hover:text-gray-200',
-              ].join(' ')}
-            >
-              {s.label}
-            </button>
-          ))}
+        <div id="play-along-backing" className="rounded-xl bg-gray-800/40 p-3 flex flex-col gap-3">
+          <SegRow label="Backing" value={backingMode} onChange={setBackingMode} options={BACKING_MODES} />
+          {backingMode !== 'off' && (
+            <label className="flex items-center gap-2 text-xs text-gray-500">
+              <span className="w-16 shrink-0">Volume</span>
+              <input
+                type="range" min={0} max={1} step={0.05} value={backingVol}
+                onChange={e => setBackingVol(Number(e.target.value))}
+                className="flex-1 accent-amber-400"
+              />
+            </label>
+          )}
         </div>
       ) : (
         <div className="text-xs text-gray-600 text-center">

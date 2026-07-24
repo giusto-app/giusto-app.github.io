@@ -9,11 +9,12 @@ const INTERVALS: { value: DroneInterval; label: string }[] = [
   { value: 'fifth',  label: '5th' },
 ]
 
+// Pitch-stable voices only — the wavy detuned/chorused "Synth Wavy" (shruti)
+// was removed because it made the tuning reference waver.
 const SOUND_TYPES: { value: DroneSoundType; label: string; title: string }[] = [
-  { value: 'sawtooth', label: 'Synth Pure',  title: 'Clean continuous synthesized drone' },
-  { value: 'shruti',   label: 'Synth Wavy', title: 'Warm wavering synthesized drone with chorus' },
-  { value: 'tanpura',  label: 'Tanpura',  title: 'Indian tanpura drone (Pa-Sa-Sa-Sa tuning)' },
-  { value: 'cello',    label: 'Cello',    title: 'Cello section sustain (VSCO2 CE, CC0)' },
+  { value: 'cello',    label: 'Cello',   title: 'Cello section sustain (VSCO2 CE, CC0)' },
+  { value: 'sawtooth', label: 'Synth',   title: 'Clean, steady synthesized drone' },
+  { value: 'tanpura',  label: 'Tanpura', title: 'Indian tanpura drone (Pa-Sa-Sa-Sa tuning)' },
 ]
 
 interface DroneControlProps {
@@ -36,8 +37,7 @@ export default function DroneControl({
 }: DroneControlProps) {
   const { active, pitchClass, interval, volume, octaveOffset, soundType } = droneState
   const [expanded, setExpanded] = useState(alwaysExpanded)
-  const isShruti = soundType === 'shruti'
-  const isSampleBased = soundType === 'cello' || soundType === 'shruti' || soundType === 'tanpura'
+  const isSampleBased = soundType === 'cello' || soundType === 'tanpura'
   const isOctaveFixed = soundType === 'tanpura'
 
   // When not alwaysExpanded: auto-expand when drone turns on, collapse when off
@@ -120,11 +120,6 @@ export default function DroneControl({
                 </button>
               ))}
             </div>
-            {isShruti && (
-              <span className="text-[10px] text-[color:var(--neu-fg2)] opacity-60 ml-1">
-                reed · bellows · continuous
-              </span>
-            )}
           </div>
 
           {/* Note selector with octave shift buttons on each side */}

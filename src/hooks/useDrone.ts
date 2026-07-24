@@ -38,8 +38,8 @@ export function useDrone() {
     pitchClass: 9,         // A (matches default concert pitch reference)
     interval: 'unison',
     volume: 0.35,
-    octaveOffset: 0,
-    soundType: 'sawtooth',
+    octaveOffset: -1, // all voices sound at octave 3 (A3) — see setSoundType
+    soundType: 'cello',
   })
 
   const sourcesRef = useRef<DroneSource[]>([])
@@ -171,8 +171,11 @@ export function useDrone() {
 
   const setSoundType = useCallback((soundType: DroneSoundType, concertPitchHz = 440) => {
     setState(prev => {
-      // Cello: snap to octave 2. Tanpura: octave irrelevant (exact recordings), reset to 0.
-      const octaveOffset = soundType === 'cello' ? -2 : soundType === 'tanpura' ? 0 : prev.octaveOffset
+      // Keep every voice at the same sounding octave (octave 3 / A3): synth and
+      // cello both use offset -1; tanpura is a fixed recording already at octave
+      // 3 (offset irrelevant). This stops the octave jumping when you switch
+      // sounds — synth no longer inherits the previous voice's offset.
+      const octaveOffset = soundType === 'tanpura' ? 0 : -1
       const next = { ...prev, soundType, octaveOffset }
       if (prev.active) {
         stopOscillators()

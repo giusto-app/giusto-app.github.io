@@ -155,7 +155,20 @@ export function buildArpeggioAir(
     | undefined
   if (!scoreBlock) throw new Error('buildArpeggioAir: source has no \\score block')
 
-  const timeline = buildPlaybackTimelineFromScore(scoreBlock.score)
+  return arpeggioAirFromScore(scoreBlock.score, arpeggiator, options)
+}
+
+/**
+ * Build AIR from an already-parsed score (no re-parse). Use this when the caller
+ * already holds a `ScoreLike` — e.g. a UI that parsed the source to render it —
+ * so the timeline is built once.
+ */
+export function arpeggioAirFromScore(
+  score: ScoreLike,
+  arpeggiator: ArpeggiatorOptions,
+  options: ArpeggioPlanToAirOptions = {},
+): AccompanimentIR {
+  const timeline = buildPlaybackTimelineFromScore(score)
   const plan = createArpeggioPlan(timeline, arpeggiator)
   return arpeggioPlanToAir(plan, timeline, options)
 }
