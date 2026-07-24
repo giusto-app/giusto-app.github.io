@@ -1,4 +1,4 @@
-\version "2.26.0"
+\version "2.26"
 \language "english"
 
 % Auto-height page: the rendered SVG hugs the music instead of filling a
@@ -17,11 +17,11 @@ chordNames = \chordmode {
 }
 
 simple_Arpeggios = \relative c'' {
- | g 4  bf  d  g  bf   g  d  bf
- | c 4  ef  g  c  ef   c  g  ef
+ | g 4  bf  d  g    bf   g  d  bf
+ | c 4  ef  g  c-1  ef   c  g  ef
  \break
  | f,4  a   c  f  a    f  c  a
- | bf4  d   f  bf  d    bf  f  d
+ | bf4  d   f  bf-1  d    bf  f  d
 }
 
 \score {
