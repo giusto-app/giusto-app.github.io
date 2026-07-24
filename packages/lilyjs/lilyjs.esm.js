@@ -108,10 +108,156 @@ function normalizeRational(r) {
   const num = r.num * sign;
   const den = r.den * sign;
   const g = gcd(num, den);
-  return { num: num / g, den: den / g };
+  const n = num / g;
+  return { num: n === 0 ? 0 : n, den: den / g };
 }
 function multiplyRational(a, b) {
   return normalizeRational({ num: a.num * b.num, den: a.den * b.den });
+}
+var RATIONAL_ZERO = { num: 0, den: 1 };
+function addRational(a, b) {
+  return normalizeRational({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
+}
+function subtractRational(a, b) {
+  return addRational(a, { num: -b.num, den: b.den });
+}
+function divideRational(a, b) {
+  if (b.num === 0)
+    throw new RangeError("divideRational: division by zero");
+  return multiplyRational(a, { num: b.den, den: b.num });
+}
+function compareRational(a, b) {
+  const na = normalizeRational(a);
+  const nb = normalizeRational(b);
+  const diff = na.num * nb.den - nb.num * na.den;
+  return diff < 0 ? -1 : diff > 0 ? 1 : 0;
+}
+function rationalToNumber(r) {
+  return r.num / r.den;
+}
+function isSafeRational(r) {
+  return Number.isSafeInteger(r.num) && Number.isSafeInteger(r.den) && r.den !== 0;
+}
+function minRational(a, b) {
+  return compareRational(a, b) <= 0 ? a : b;
+}
+function maxRational(a, b) {
+  return compareRational(a, b) >= 0 ? a : b;
+}
+function rationalFromNumber(value, maxDen = 3840) {
+  if (!Number.isFinite(value))
+    return { num: 0, den: 1 };
+  const sign = value < 0 ? -1 : 1;
+  let x = Math.abs(value);
+  let prevNum = 1;
+  let prevDen = 0;
+  let num = Math.floor(x);
+  let den = 1;
+  let frac = x - Math.floor(x);
+  while (frac > 0.000000000001) {
+    x = 1 / frac;
+    const whole = Math.floor(x);
+    frac = x - whole;
+    const nextNum = whole * num + prevNum;
+    const nextDen = whole * den + prevDen;
+    if (nextDen > maxDen)
+      break;
+    prevNum = num;
+    prevDen = den;
+    num = nextNum;
+    den = nextDen;
+  }
+  return normalizeRational({ num: sign * num, den });
+}
+// src/music-model/harmony.ts
+var LETTER_PITCH_CLASS = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11
+};
+function spelledPitchClass(letter, alteration) {
+  const pitchClass = ((LETTER_PITCH_CLASS[letter] + alteration) % 12 + 12) % 12;
+  return { letter, alteration, pitchClass };
+}
+var CHORD_DEGREE_BASE_SEMITONES = {
+  1: 0,
+  2: 2,
+  3: 4,
+  4: 5,
+  5: 7,
+  6: 9,
+  7: 10,
+  8: 12,
+  9: 14,
+  10: 16,
+  11: 17,
+  12: 19,
+  13: 21
+};
+var QUALITY_CORE_DEGREES = {
+  major: { 1: 0, 3: 4, 5: 7 },
+  minor: { 1: 0, 3: 3, 5: 7 },
+  diminished: { 1: 0, 3: 3, 5: 6 },
+  augmented: { 1: 0, 3: 4, 5: 8 },
+  dominant: { 1: 0, 3: 4, 5: 7, 7: 10 },
+  "major-seventh": { 1: 0, 3: 4, 5: 7, 7: 11 },
+  "minor-seventh": { 1: 0, 3: 3, 5: 7, 7: 10 },
+  "minor-major-seventh": { 1: 0, 3: 3, 5: 7, 7: 11 },
+  "diminished-seventh": { 1: 0, 3: 3, 5: 6, 7: 9 },
+  "half-diminished": { 1: 0, 3: 3, 5: 6, 7: 10 },
+  "augmented-seventh": { 1: 0, 3: 4, 5: 8, 7: 10 },
+  "suspended-second": { 1: 0, 2: 2, 5: 7 },
+  "suspended-fourth": { 1: 0, 4: 5, 5: 7 },
+  power: { 1: 0, 5: 7 }
+};
+function chordDescriptorIntervals(chord) {
+  const core = QUALITY_CORE_DEGREES[chord.quality];
+  if (!core)
+    return null;
+  const byDegree = new Map;
+  for (const [degree, semitones] of Object.entries(core)) {
+    byDegree.set(Number(degree), semitones);
+  }
+  const extension = chord.extension ?? 0;
+  if (extension >= 7 && !byDegree.has(7))
+    byDegree.set(7, CHORD_DEGREE_BASE_SEMITONES[7]);
+  for (const degree of [9, 11, 13]) {
+    if (extension >= degree && !byDegree.has(degree)) {
+      byDegree.set(degree, CHORD_DEGREE_BASE_SEMITONES[degree]);
+    }
+  }
+  for (const step of chord.additions) {
+    const base = CHORD_DEGREE_BASE_SEMITONES[step.degree];
+    if (base === undefined)
+      return null;
+    if (!byDegree.has(step.degree))
+      byDegree.set(step.degree, base + step.alteration);
+  }
+  for (const step of chord.alterations) {
+    const base = CHORD_DEGREE_BASE_SEMITONES[step.degree];
+    if (base === undefined)
+      return null;
+    byDegree.set(step.degree, base + step.alteration);
+  }
+  for (const degree of chord.omissions)
+    byDegree.delete(degree);
+  return [...byDegree.values()].sort((a, b) => a - b);
+}
+function chordDescriptorPitchClasses(chord) {
+  const intervals = chordDescriptorIntervals(chord);
+  if (intervals === null)
+    return null;
+  const out = [];
+  for (const interval of intervals) {
+    const pitchClass = ((chord.root.pitchClass + interval) % 12 + 12) % 12;
+    if (!out.includes(pitchClass))
+      out.push(pitchClass);
+  }
+  return out;
 }
 // src/music-model/musicInfo.ts
 var ABC_HEADER_CODES = [
@@ -420,12 +566,14 @@ class ChordSymbol {
   placement;
   offset;
   style;
-  constructor(text, eventId, placement = "above", offset, style) {
+  harmony;
+  constructor(text, eventId, placement = "above", offset, style, harmony) {
     this.text = text;
     this.eventId = eventId;
     this.placement = placement;
     this.offset = offset;
     this.style = style;
+    this.harmony = harmony;
   }
 }
 
@@ -589,6 +737,7 @@ class Score {
   directives;
   lyrics;
   pedalEvents;
+  harmonyTrack;
   constructor(title, parts, options = {}) {
     this.title = title;
     this.parts = parts;
@@ -597,6 +746,7 @@ class Score {
     this.directives = options.directives ?? [];
     this.lyrics = options.lyrics ?? [];
     this.pedalEvents = options.pedalEvents ?? [];
+    this.harmonyTrack = options.harmonyTrack ?? [];
   }
   static builder(id) {
     return new ScoreBuilder(id);
@@ -1035,23 +1185,26 @@ class Scanner {
   }
   readQuotedString() {
     let s = "";
-    const startPos = this.pos - 1;
     let unclosed = false;
     while (!this.done && this.peek() !== '"') {
-      if (this.peek() === "\\" && this.peek(1) === '"') {
-        this.advance();
+      if (this.peek() === "\\") {
+        const next = this.peek(1);
+        const mapped = next === "n" ? `
+` : next === "t" ? "\t" : next === "'" || next === '"' || next === "\\" ? next : undefined;
+        if (mapped !== undefined) {
+          this.advance();
+          this.advance();
+          s += mapped;
+          continue;
+        }
         s += this.advance();
         continue;
       }
       const ch = this.peek();
-      if (ch === `
-` || ch === "\r") {
-        const before = this.src.substring(Math.max(0, startPos - 100), startPos);
-        const inHeaderOrPaper = /\\(?:header|paper)\s*\{[^}]*$/.test(before);
-        if (inHeaderOrPaper) {
-          unclosed = true;
-          break;
-        }
+      if ((ch === `
+` || ch === "\r") && this.src.indexOf('"', this.pos) === -1) {
+        unclosed = true;
+        break;
       }
       s += this.advance();
     }
@@ -1307,6 +1460,11 @@ class Scanner {
             octaveStr += lower[p];
             p++;
           }
+          let reminder = "";
+          if (lower[p] === "!" || lower[p] === "?") {
+            reminder = lower[p];
+            p++;
+          }
           let durStr = "";
           if (isDigit(lower[p] ?? "")) {
             while (isDigit(lower[p] ?? "")) {
@@ -1317,6 +1475,26 @@ class Scanner {
               durStr += lower[p];
               p++;
             }
+          }
+          let durMult = 1;
+          let hasDurMult = false;
+          while ((lower[p] ?? "") === "*" && isDigit(lower[p + 1] ?? "")) {
+            p++;
+            let num = "";
+            while (isDigit(lower[p] ?? "")) {
+              num += lower[p];
+              p++;
+            }
+            let den = "";
+            if ((lower[p] ?? "") === "/" && isDigit(lower[p + 1] ?? "")) {
+              p++;
+              while (isDigit(lower[p] ?? "")) {
+                den += lower[p];
+                p++;
+              }
+            }
+            durMult *= parseInt(num, 10) / (den ? parseInt(den, 10) : 1);
+            hasDurMult = true;
           }
           let fingeringStr = "";
           if (((lower[p] ?? "") === "-" || (lower[p] ?? "") === "_" || (lower[p] ?? "") === "^") && isDigit(lower[p + 1] ?? "")) {
@@ -1335,7 +1513,14 @@ class Scanner {
           }
           this.pos = p;
           const noteName = baseSpec.base + acc;
-          return { kind: "note", value: `${noteName}|${octaveStr}|${durStr}|${fingeringStr}`, pos: start, end: this.pos };
+          const reminderSuffix = reminder ? `|${reminder}` : "";
+          return {
+            kind: "note",
+            value: `${noteName}|${octaveStr}|${durStr}|${fingeringStr}${reminderSuffix}`,
+            pos: start,
+            end: this.pos,
+            ...hasDurMult ? { durationMultiplier: durMult } : {}
+          };
         }
         if ((ch === "r" || ch === "s" || ch === "R") && !isAlpha(this.peek(1))) {
           this.advance();
@@ -1344,14 +1529,34 @@ class Scanner {
             durStr = this.readWhile(isDigit);
             durStr += this.readWhile((c) => c === ".");
           }
-          let repeatSuffix = "";
-          if (this.peek() === "*") {
+          const factors = [];
+          while (this.peek() === "*" && isDigit(this.peek(1))) {
             this.advance();
-            const n = this.readWhile(isDigit);
-            if (ch === "R" && n)
-              repeatSuffix = "*" + n;
+            const num = this.readWhile(isDigit);
+            let den = "";
+            if (this.peek() === "/" && isDigit(this.peek(1))) {
+              this.advance();
+              den = this.readWhile(isDigit);
+            }
+            factors.push({ num: parseInt(num, 10), ...den ? { den: parseInt(den, 10) } : {} });
           }
-          return { kind: "rest", value: durStr + repeatSuffix, pos: start, end: this.pos, restKind: ch };
+          let repeatSuffix = "";
+          const last = factors[factors.length - 1];
+          if (ch === "R" && last && last.den === undefined) {
+            repeatSuffix = "*" + last.num;
+            factors.pop();
+          }
+          let durMult = 1;
+          for (const f of factors)
+            durMult *= f.num / (f.den ?? 1);
+          return {
+            kind: "rest",
+            value: durStr + repeatSuffix,
+            pos: start,
+            end: this.pos,
+            restKind: ch,
+            ...factors.length ? { durationMultiplier: durMult } : {}
+          };
         }
         const word = this.readWhile(isAlphaNum);
         return { kind: "word", value: word, pos: start, end: this.pos };
@@ -2017,6 +2222,24 @@ function parseHeader(state) {
     }
     if (!expect(state, "equals", `Expected = after ${keyToken.value}`))
       continue;
+    const markupTok = current(state);
+    if (markupTok.kind === "command" && markupTok.value === "markup" && peek(state, 1)?.kind === "open") {
+      advance(state);
+      let depth = 0;
+      const bodyStart = current(state);
+      let bodyEnd = bodyStart;
+      do {
+        const tok2 = advance(state);
+        if (tok2.kind === "open")
+          depth++;
+        else if (tok2.kind === "close")
+          depth--;
+        bodyEnd = tok2;
+      } while (depth > 0 && !isAtEnd(state));
+      const raw = state.source?.slice(bodyStart.pos, bodyEnd.end ?? bodyEnd.pos);
+      fields.set(keyToken.value, raw != null ? `\\markup ${raw}` : "\\markup");
+      continue;
+    }
     const valueTok = current(state);
     const isValidHeaderValue = valueTok.kind === "string" || valueTok.kind === "word" || valueTok.kind === "command" && (valueTok.value === "#f" || valueTok.value === "#t");
     const valueToken = isValidHeaderValue ? match(state, "string", "word", "command") : null;
@@ -2375,14 +2598,38 @@ function parseLyricSyllable(state) {
   const wordTok = advance(state);
   const raw = wordTok.value;
   let text = tok.kind === "note" ? raw.split("|")[0] ?? raw : raw;
+  let tokEnd = wordTok.end ?? 0;
+  if (state.source != null) {
+    while (state.source[tokEnd] === "'") {
+      let apostropheEnd = tokEnd + 1;
+      while (state.source[apostropheEnd] === "'")
+        apostropheEnd++;
+      text += state.source.slice(tokEnd, apostropheEnd);
+      tokEnd = apostropheEnd;
+      const nxt = current(state);
+      const nxtText = nxt.kind === "note" ? nxt.value.split("|")[0] ?? nxt.value : nxt.value;
+      if ((nxt.kind === "word" || nxt.kind === "note") && state.source.startsWith(nxtText, apostropheEnd)) {
+        advance(state);
+        text += nxtText;
+        tokEnd = apostropheEnd + nxtText.length;
+      } else {
+        break;
+      }
+    }
+  }
   if (state.source != null) {
     const lyricPunctuation = new Set(["!", ".", ",", "?", ";", ":"]);
-    let p = wordTok.end ?? 0;
+    let p = tokEnd;
     while (p < state.source.length && lyricPunctuation.has(state.source[p])) {
       text += state.source[p];
       p++;
     }
   }
+  const durationMatch = /^(.*[^0-9.])([0-9]+\.*)$/.exec(text);
+  if (durationMatch)
+    text = durationMatch[1];
+  if (text.length > 1)
+    text = text.replace(/_/g, " ");
   let hyphen;
   let extender;
   if (check(state, "lyric_hyphen")) {
@@ -2428,6 +2675,18 @@ function parseLyricsBlock(state, parseCommand) {
         }));
         syncBreak = true;
         break;
+      }
+      if (tok.value === "skip") {
+        advance(state);
+        if (check(state, "number") || check(state, "note"))
+          advance(state);
+        elements.push({
+          type: "lyricSyllable",
+          text: "",
+          skip: true,
+          loc: tokenToLoc(tok)
+        });
+        continue;
       }
     }
     if (tok.kind === "word" || tok.kind === "note") {
@@ -2503,8 +2762,16 @@ function parseNoteValue(value) {
     noteName: parts[0] ?? "",
     octaveStr: parts[1] ?? "",
     durationStr: parts[2] ?? "",
-    fingering: parts[3] ?? ""
+    fingering: parts[3] ?? "",
+    reminder: parts[4] ?? ""
   };
+}
+function forceAccidentalFromReminder(reminder) {
+  if (reminder === "!")
+    return "forced";
+  if (reminder === "?")
+    return "cautionary";
+  return;
 }
 function parsePitch(noteName, octaveStr) {
   const base = noteName[0] ?? "c";
@@ -2546,12 +2813,15 @@ function parseNoteToken(token) {
   const components = parseNoteValue(token.value);
   const pitch2 = parsePitch(components.noteName, components.octaveStr);
   const duration2 = parseDuration(components.durationStr);
+  const forceAccidental = forceAccidentalFromReminder(components.reminder);
   return {
     type: "note",
     pitch: pitch2,
     loc: tokenToLoc2(token),
     ...duration2 ? { duration: duration2 } : {},
-    ...components.fingering ? { fingering: components.fingering } : {}
+    ...token.durationMultiplier != null ? { durationMultiplier: token.durationMultiplier } : {},
+    ...components.fingering ? { fingering: components.fingering } : {},
+    ...forceAccidental ? { forceAccidental } : {}
   };
 }
 
@@ -2575,7 +2845,8 @@ function parseRest(token) {
           value: durationValue,
           dots
         }
-      }
+      },
+      ...token.durationMultiplier != null ? { durationMultiplier: token.durationMultiplier } : {}
     };
   }
   return {
@@ -2586,7 +2857,8 @@ function parseRest(token) {
         value: durationValue,
         dots
       }
-    }
+    },
+    ...token.durationMultiplier != null ? { durationMultiplier: token.durationMultiplier } : {}
   };
 }
 function parsePitchFromNoteToken(token) {
@@ -2659,7 +2931,155 @@ function parseUnsupportedEnglishAccidentalWord(state, tok) {
     loc: tokenToLoc(tok)
   };
 }
+// src/music-input/lilypond/phases/parser/primitives/chordModifiers.ts
+function spelledPitchFromLyName(lyName) {
+  const lower = lyName.toLowerCase();
+  const letter = (lower[0] ?? "c").toUpperCase();
+  const acc = lower.slice(1);
+  let alteration = 0;
+  if (acc === "s" || acc === "is")
+    alteration = 1;
+  else if (acc === "ss" || acc === "isis" || acc === "x")
+    alteration = 2;
+  else if (acc === "f" || acc === "es")
+    alteration = -1;
+  else if (acc === "ff" || acc === "eses")
+    alteration = -2;
+  return spelledPitchClass(letter, alteration);
+}
+var QUALITY_KEYWORDS = ["maj", "min", "dim", "aug", "sus2", "sus4", "sus", "m"];
+function readStep(s, i) {
+  const m = /^(\d+)([+-]?)/.exec(s.slice(i));
+  if (!m)
+    return null;
+  return {
+    degree: Number.parseInt(m[1], 10),
+    alteration: m[2] === "+" ? 1 : m[2] === "-" ? -1 : 0,
+    next: i + m[0].length
+  };
+}
+function tertianExtension(n) {
+  return n === 7 || n === 9 || n === 11 || n === 13 ? n : undefined;
+}
+function classifyQuality(keyword, mainNumber, alterations) {
+  const hasSeventhStack = mainNumber === 7 || mainNumber === 9 || mainNumber === 11 || mainNumber === 13;
+  const flatFive = alterations.some((a) => a.degree === 5 && a.alteration < 0);
+  const sharpSeventh = alterations.some((a) => a.degree === 7 && a.alteration > 0);
+  switch (keyword) {
+    case "m":
+    case "min":
+      if (sharpSeventh)
+        return "minor-major-seventh";
+      if (!hasSeventhStack)
+        return "minor";
+      return flatFive ? "half-diminished" : "minor-seventh";
+    case "maj":
+      return hasSeventhStack ? "major-seventh" : "major";
+    case "dim":
+      return hasSeventhStack ? "diminished-seventh" : "diminished";
+    case "aug":
+      return hasSeventhStack ? "augmented-seventh" : "augmented";
+    case "sus2":
+      return "suspended-second";
+    case "sus4":
+    case "sus":
+      return "suspended-fourth";
+    default:
+      if (mainNumber === 5)
+        return "power";
+      if (hasSeventhStack && sharpSeventh)
+        return "major-seventh";
+      return hasSeventhStack ? "dominant" : "major";
+  }
+}
+function parseChordModifierString(raw) {
+  const s = raw;
+  let i = 0;
+  let keyword = "";
+  let mainNumber;
+  const additions = [];
+  const alterations = [];
+  const omissions = [];
+  let bass;
+  if (s[i] === ":") {
+    i++;
+    for (const kw of QUALITY_KEYWORDS) {
+      if (s.startsWith(kw, i)) {
+        keyword = kw;
+        i += kw.length;
+        break;
+      }
+    }
+    const mainStep = readStep(s, i);
+    if (mainStep) {
+      mainNumber = mainStep.degree;
+      i = mainStep.next;
+      if (mainStep.alteration !== 0) {
+        alterations.push({ degree: mainStep.degree, alteration: mainStep.alteration });
+      }
+    }
+    while (s[i] === ".") {
+      i++;
+      const step = readStep(s, i);
+      if (!step)
+        break;
+      i = step.next;
+      if (step.alteration !== 0)
+        alterations.push({ degree: step.degree, alteration: step.alteration });
+      else
+        additions.push({ degree: step.degree, alteration: 0 });
+    }
+    if (s[i] === "^") {
+      i++;
+      let step = readStep(s, i);
+      while (step) {
+        i = step.next;
+        omissions.push(step.degree);
+        if (s[i] === ".") {
+          i++;
+          step = readStep(s, i);
+        } else {
+          break;
+        }
+      }
+    }
+  }
+  if (s[i] === "/") {
+    i++;
+    const added = s[i] === "+";
+    if (added)
+      i++;
+    const bassLy = s.slice(i).replace(/[',]/g, "");
+    if (bassLy)
+      bass = { pitch: spelledPitchFromLyName(bassLy), added };
+  }
+  if (mainNumber === 6)
+    additions.unshift({ degree: 6, alteration: 0 });
+  return {
+    quality: classifyQuality(keyword, mainNumber, alterations),
+    extension: tertianExtension(mainNumber),
+    additions,
+    alterations,
+    omissions,
+    bass
+  };
+}
+function chordDescriptorFrom(root, rawModifier) {
+  const mods = parseChordModifierString(rawModifier);
+  return {
+    root,
+    quality: mods.quality,
+    ...mods.extension != null ? { extension: mods.extension } : {},
+    additions: mods.additions,
+    alterations: mods.alterations,
+    omissions: mods.omissions,
+    ...mods.bass ? { bass: mods.bass } : {}
+  };
+}
+
 // src/music-input/lilypond/phases/parser/primitives/chordMode.ts
+var ZERO_WHOLE = { num: 0, den: 1 };
+var QUARTER_WHOLE = { num: 1, den: 4 };
 function chordRootDisplay(ly) {
   const lower = ly.toLowerCase();
   const base = lower[0] ?? "c";
@@ -2690,6 +3110,17 @@ function durationStrToQN(durationStr, prevDuration) {
   }
   return qn;
 }
+function writtenDurationToRational(durationStr, prev) {
+  if (!durationStr)
+    return prev;
+  const value = Number.parseInt(durationStr, 10);
+  if (!Number.isFinite(value) || value <= 0)
+    return prev;
+  const dots = (durationStr.match(/\./g) || []).length;
+  const num = Math.pow(2, dots + 1) - 1;
+  const den = value * Math.pow(2, dots);
+  return normalizeRational({ num, den });
+}
 function normalizeChordQuality(raw) {
   const q = raw.startsWith(":") ? raw.slice(1) : raw;
   if (!q)
@@ -2704,13 +3135,35 @@ function normalizeChordQuality(raw) {
     return "aug";
   return q;
 }
+function chordModifierEnd(source, start) {
+  if (!source)
+    return start;
+  let i = start;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === " " || c === "\t" || c === `
+` || c === "\r" || c === "}" || c === "{")
+      break;
+    i++;
+  }
+  return i;
+}
+function repeatWordMatch(value) {
+  const m = /^q(\d*\.*)$/.exec(value);
+  return m ? { duration: m[1] ?? "" } : null;
+}
+function makeHarmony(chord, kind, duration2, text, source) {
+  return { chord, kind, duration: duration2, offset: ZERO_WHOLE, text, ...source ? { source } : {} };
+}
 function parseChordModeCommand(state, cmdToken) {
   if (!expect(state, "open", "Expected { after \\chordmode"))
     return null;
   const chords = [];
   let prevDuration = 4;
+  let prevDurationRational = QUARTER_WHOLE;
   let prevChordName = "C";
   let prevChordRoot = "C";
+  let prevChord = null;
   const startLoc = tokenToLoc(cmdToken);
   while (!isAtEnd(state) && !check(state, "close")) {
     const tok = current(state);
@@ -2719,45 +3172,90 @@ function parseChordModeCommand(state, cmdToken) {
       const lyName = parts[0] ?? "c";
       const durationStr = parts[2] ?? "";
       prevDuration = durationStrToQN(durationStr, prevDuration);
+      prevDurationRational = writtenDurationToRational(durationStr, prevDurationRational);
+      const rootTokenEnd = tok.end ?? tok.pos;
+      const rootTokenStart = tok.pos;
       advance(state);
       let quality = "";
+      let qualValue = "";
       if (check(state, "word") || check(state, "number")) {
         const qualTok = advance(state);
-        quality = normalizeChordQuality(qualTok.value);
+        qualValue = qualTok.value;
+        quality = normalizeChordQuality(qualValue);
       }
       const root = chordRootDisplay(lyName);
       const name = `${root}${quality}`;
-      chords.push({
-        name,
-        duration: prevDuration
+      const modEnd = chordModifierEnd(state.source, rootTokenEnd);
+      const rawMod = state.source ? state.source.slice(rootTokenEnd, modEnd) : qualValue ? `:${qualValue}` : "";
+      while (!isAtEnd(state) && current(state).pos < modEnd)
+        advance(state);
+      const descriptor = chordDescriptorFrom(spelledPitchFromLyName(lyName), rawMod);
+      const harmony2 = makeHarmony(descriptor, "explicit", prevDurationRational, name, {
+        start: rootTokenStart,
+        end: modEnd
       });
+      chords.push({ name, duration: prevDuration, harmony: harmony2 });
       prevChordName = name;
       prevChordRoot = root;
+      prevChord = descriptor;
+      continue;
+    }
+    if (tok.kind === "word" && repeatWordMatch(tok.value)) {
+      const durPart = repeatWordMatch(tok.value).duration;
+      prevDuration = durationStrToQN(durPart, prevDuration);
+      prevDurationRational = writtenDurationToRational(durPart, prevDurationRational);
+      advance(state);
+      const harmony2 = makeHarmony(prevChord ? { ...prevChord } : null, "continuation", prevDurationRational, prevChordName, { start: tok.pos, end: tok.end ?? tok.pos });
+      chords.push({ name: prevChordName, duration: prevDuration, harmony: harmony2 });
       continue;
     }
     if (tok.kind === "number") {
+      const numTokenEnd = tok.end ?? tok.pos;
+      const numTokenStart = tok.pos;
       prevDuration = durationStrToQN(tok.value, prevDuration);
+      prevDurationRational = writtenDurationToRational(tok.value, prevDurationRational);
       advance(state);
       let quality = "";
+      let qualValue = "";
       if (check(state, "word") || check(state, "number")) {
         const qualTok = advance(state);
-        quality = normalizeChordQuality(qualTok.value);
+        qualValue = qualTok.value;
+        quality = normalizeChordQuality(qualValue);
       }
       const name = quality ? `${prevChordRoot}${quality}` : prevChordName;
-      chords.push({
-        name,
-        duration: prevDuration
+      let descriptor;
+      let kind;
+      if (quality && prevChord) {
+        const modEnd = chordModifierEnd(state.source, numTokenEnd);
+        const rawMod = state.source ? state.source.slice(numTokenEnd, modEnd) : qualValue ? `:${qualValue}` : "";
+        while (!isAtEnd(state) && current(state).pos < modEnd)
+          advance(state);
+        descriptor = chordDescriptorFrom(prevChord.root, rawMod);
+        kind = "explicit";
+      } else {
+        descriptor = prevChord ? { ...prevChord } : null;
+        kind = "continuation";
+      }
+      const harmony2 = makeHarmony(descriptor, kind, prevDurationRational, name, {
+        start: numTokenStart,
+        end: tok.end ?? numTokenStart
       });
+      chords.push({ name, duration: prevDuration, harmony: harmony2 });
       prevChordName = name;
+      if (descriptor)
+        prevChord = descriptor;
       continue;
     }
     if (tok.kind === "rest") {
       prevDuration = durationStrToQN(tok.value, prevDuration);
+      prevDurationRational = writtenDurationToRational(tok.value, prevDurationRational);
+      const kind = tok.restKind === "s" ? "skip" : "no-chord";
       advance(state);
-      chords.push({
-        name: "",
-        duration: prevDuration
+      const harmony2 = makeHarmony(null, kind, prevDurationRational, "", {
+        start: tok.pos,
+        end: tok.end ?? tok.pos
       });
+      chords.push({ name: "", duration: prevDuration, harmony: harmony2 });
       continue;
     }
     if (tok.kind === "command" && tok.value === "partial") {
@@ -2830,6 +3328,11 @@ function parseChordModeCommand(state, cmdToken) {
             const m = last.name.match(/^([A-G](?:#|b)?)/);
             if (m?.[1])
               prevChordRoot = m[1];
+            if (last.harmony) {
+              prevDurationRational = last.harmony.duration;
+              if (last.harmony.chord)
+                prevChord = last.harmony.chord;
+            }
           }
         }
       }
@@ -2843,6 +3346,11 @@ function parseChordModeCommand(state, cmdToken) {
         if (last) {
           prevDuration = last.duration;
           prevChordName = last.name;
+          if (last.harmony) {
+            prevDurationRational = last.harmony.duration;
+            if (last.harmony.chord)
+              prevChord = last.harmony.chord;
+          }
         }
       }
       continue;
@@ -2945,7 +3453,7 @@ function parseContextOperationAssignment(state, cmdToken, kind) {
     skipBalancedBlock2(state);
     return null;
   }
-  if (rhs.kind !== "word" && rhs.kind !== "number" && rhs.kind !== "string" && rhs.kind !== "command" && rhs.kind !== "note") {
+  if (rhs.kind !== "word" && rhs.kind !== "number" && rhs.kind !== "string" && rhs.kind !== "command" && rhs.kind !== "note" && rhs.kind !== "scheme_block" && rhs.kind !== "scheme_symbol") {
     return null;
   }
   advance(state);
@@ -4783,7 +5291,7 @@ function parseNewContextCommand(state, cmdToken, parseMusic) {
     };
   }
   if (ctxVal === "PianoStaff" || ctxVal === "GrandStaff" || ctxVal === "StaffGroup") {
-    parseContextWithOperations(state, ctxVal);
+    const operations = parseContextWithOperations(state, ctxVal);
     const body = parseMusic(state);
     if (!body)
       return null;
@@ -4792,6 +5300,28 @@ function parseNewContextCommand(state, cmdToken, parseMusic) {
       type: "staffGroupContext",
       groupType: ctxVal,
       staves: [...elements],
+      ...operations.length ? { operations } : {},
+      loc: tokenToLoc(cmdToken)
+    };
+  }
+  if (ctxVal === "Voice") {
+    const body = parseMusic(state);
+    if (!body)
+      return null;
+    if (contextName)
+      body.voiceName = contextName;
+    return body;
+  }
+  if (ctxVal === "CueVoice") {
+    const body = parseMusic(state);
+    if (!body)
+      return null;
+    if (contextName)
+      body.voiceName = contextName;
+    return {
+      type: "musicScale",
+      scale: Math.pow(2, -4 / 6),
+      body,
       loc: tokenToLoc(cmdToken)
     };
   }
@@ -5030,6 +5560,7 @@ function parseCommandDispatch(state, parseMusic, parseCommand) {
     case "fixed":
       return parseRelativeOrFixedCommand(state, cmdToken, parseMusic);
     case "new":
+    case "context":
       return parseNewContextCommand(state, cmdToken, parseMusic);
     case "key": {
       const pitchToken = expect(state, "note", "Expected pitch after \\key");
@@ -5326,7 +5857,7 @@ function parseCommandDispatch(state, parseMusic, parseCommand) {
       };
     }
     case "lyricsto": {
-      const voiceToken = expect(state, "string", "Expected voice name after \\lyricsto");
+      const voiceToken = check(state, "string") ? advance(state) : check(state, "word") ? advance(state) : expect(state, "string", "Expected voice name after \\lyricsto");
       if (!voiceToken)
         return null;
       const body = parseLyricsBodyOrVariableRef(state, parseCommand);
@@ -5352,7 +5883,6 @@ function parseCommandDispatch(state, parseMusic, parseCommand) {
       return null;
     }
     case "with":
-    case "context":
     case "markup":
     case "wordwrap":
     case "typewriter":
@@ -6315,6 +6845,19 @@ function parseVariableDef(state) {
     }
     return null;
   }
+  if (check(state, "command")) {
+    const cmd = current(state);
+    if (cmd.value === "markup" || cmd.value === "markuplist") {
+      const markupTok = advance(state);
+      const markupNode = parseTopLevelMarkup(state, markupTok);
+      return {
+        type: "variableDef",
+        name: nameToken.value,
+        body: markupNode,
+        loc: tokenToLoc(nameToken)
+      };
+    }
+  }
   const body = parseMusic(state);
   if (!body) {
     state.errors.add(new ParseError({
@@ -6655,7 +7198,7 @@ function transformMusic(node, ctx, variables) {
         return result.node;
       });
       return {
-        node: { type: "staffGroupContext", groupType: sg.groupType, staves: transformedStaves, loc: sg.loc },
+        node: { ...sg, staves: transformedStaves },
         ctx: currentCtx
       };
     }
@@ -7127,7 +7670,7 @@ function parseFingering(raw) {
 function emitNote(node, ctx, semitoneShift = 0, diatonicShift = 0) {
   const pitch2 = transposePitch(node.pitch, semitoneShift, diatonicShift);
   const resolvedDuration = effectiveDuration(node.duration, ctx);
-  const qn = durationToQN(resolvedDuration);
+  const qn = durationToQN(resolvedDuration) * (node.durationMultiplier ?? 1);
   const fingering = parseFingering(node.fingering);
   const wd = durationToWritten(resolvedDuration);
   const noteName = pitchToNoteName(pitch2);
@@ -7145,6 +7688,7 @@ function emitNote(node, ctx, semitoneShift = 0, diatonicShift = 0) {
     ...node.fingering && node.loc?.endOffset != null ? { fingeringRange: { start: node.loc.endOffset - node.fingering.length, end: node.loc.endOffset } } : {},
     ...fingering.value !== undefined ? { fingering: fingering.value } : {},
     ...fingering.below ? { fingeringBelow: true } : {},
+    ...node.forceAccidental ? { forceAccidental: node.forceAccidental } : {},
     ...ctx.activeBeamGroupId ? { beamGroupId: ctx.activeBeamGroupId } : {},
     ...ctx.stemDirection ?? ctx.activeBeamStemDirection ? { stemDirection: ctx.stemDirection ?? ctx.activeBeamStemDirection } : {}
   };
@@ -7156,7 +7700,7 @@ function emitNote(node, ctx, semitoneShift = 0, diatonicShift = 0) {
 }
 function emitRest(node, ctx) {
   const resolvedDuration = effectiveDuration(node.duration, ctx);
-  const qn = durationToQN(resolvedDuration);
+  const qn = durationToQN(resolvedDuration) * (node.durationMultiplier ?? 1);
   const wd = durationToWritten(resolvedDuration);
   const isFullMeasureRest = node.type === "multiRest";
   const mmBars = isFullMeasureRest ? node.barCount ?? 1 : undefined;
@@ -7231,6 +7775,18 @@ function emitChord(node, ctx, semitoneShift = 0, diatonicShift = 0) {
 }
 
 // src/music-input/lilypond/phases/emit/chords.ts
+function addRational2(a, b) {
+  return normalizeRational({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
+}
+function assignChordHarmonyOffsets(chordNames) {
+  let offset = { num: 0, den: 1 };
+  for (const cn of chordNames) {
+    if (!cn.harmony)
+      continue;
+    cn.harmony.offset = offset;
+    offset = addRational2(offset, cn.harmony.duration);
+  }
+}
 var CHORD_ROOT_PITCH_CLASS = {
   C: 0,
   D: 2,
@@ -7348,6 +7904,34 @@ function collectChordModeChords(node) {
 }
 
 // src/music-input/lilypond/phases/emit/lyrics.ts
+function lyricTextFontDelta(node) {
+  const n = node;
+  switch (n.type) {
+    case "override": {
+      if (String(n.grob ?? "").split(".").pop() === "LyricText" && n.property === "font-size") {
+        const v = Number(n.value);
+        return Number.isFinite(v) ? v : undefined;
+      }
+      return;
+    }
+    case "lyricMode":
+    case "lyrics":
+    case "addlyrics":
+    case "lyricsto":
+      return n.body ? lyricTextFontDelta(n.body) : undefined;
+    case "sequential":
+    case "simultaneous": {
+      for (const el of n.elements ?? []) {
+        const v = lyricTextFontDelta(el);
+        if (v !== undefined)
+          return v;
+      }
+      return;
+    }
+    default:
+      return;
+  }
+}
 function collectSyllables(node) {
   switch (node.type) {
     case "set": {
@@ -7385,10 +7969,24 @@ function collectSyllables(node) {
 }
 function buildLyricLine(syllables, notes, startIdx, voiceId) {
   const lyricableIdx = [];
+  let slurDepth = 0;
+  let prevTiedForward = false;
   for (let i = 0;i < notes.length; i++) {
     const n = notes[i];
-    if (!n.isGrace && !n.isRest)
+    if (n.isGrace)
+      continue;
+    if (n.isRest) {
+      prevTiedForward = false;
+      continue;
+    }
+    const continuesMelisma = slurDepth > 0 || prevTiedForward;
+    if (!continuesMelisma)
       lyricableIdx.push(startIdx + i);
+    if (n.slurStart)
+      slurDepth++;
+    if (n.slurEnd)
+      slurDepth = Math.max(0, slurDepth - 1);
+    prevTiedForward = Boolean(n.tieStart);
   }
   const out = [];
   let stanza;
@@ -7580,6 +8178,13 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
     case "sequential": {
       const seq = node;
       const lyricEls = seq.elements.filter((el) => isLyricNode(el.type));
+      for (const el of lyricEls) {
+        if (ctx.lyricFontSizeDelta !== undefined)
+          break;
+        const d = lyricTextFontDelta(el);
+        if (d !== undefined)
+          ctx.lyricFontSizeDelta = d;
+      }
       if (lyricEls.length > 0) {
         const melodyEls = seq.elements.filter((el) => !isLyricNode(el.type));
         const startIdx = ctx.notes.length;
@@ -7605,6 +8210,13 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
     case "simultaneous": {
       const sim = node;
       const lyricEls = sim.elements.filter((el) => isLyricNode(el.type));
+      for (const el of lyricEls) {
+        if (ctx.lyricFontSizeDelta !== undefined)
+          break;
+        const d = lyricTextFontDelta(el);
+        if (d !== undefined)
+          ctx.lyricFontSizeDelta = d;
+      }
       const PROPERTY_NODE_TYPES = new Set(["set", "override", "unset", "revert", "omit"]);
       const propertyEls = sim.elements.filter((el) => !isLyricNode(el.type) && PROPERTY_NODE_TYPES.has(el.type));
       for (const el of propertyEls) {
@@ -7683,7 +8295,12 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
         const isTopLevelPolyphony = ctx.simultaneousDepth === 0 && ctx.notes.length === 0;
         if (isTopLevelPolyphony) {
           for (let vi = 0;vi < voiceNotes.length; vi++) {
-            ctx.voices.push({ voiceIndex: vi, notes: voiceNotes[vi] });
+            const voiceName = voiceEls[vi]?.voiceName;
+            ctx.voices.push({
+              voiceIndex: vi,
+              notes: voiceNotes[vi],
+              ...voiceName ? { voiceName } : {}
+            });
           }
         }
         const merged = mergeVoicesByTime(voiceNotes);
@@ -7732,11 +8349,19 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
           ctx.printInitialRepeatBar = value;
       } else if (isMidiInstrumentProperty(setNode.property) && typeof setNode.value === "string") {
         ctx.midiInstrument = setNode.value;
+      } else if ((setNode.property === "instrumentName" || setNode.property.endsWith(".instrumentName")) && typeof setNode.value === "string" && ctx.instrumentName === undefined) {
+        ctx.instrumentName = setNode.value;
       }
       break;
     }
     case "override": {
       const override = node;
+      if (override.grob.split(".").pop() === "LyricText" && override.property === "font-size") {
+        const delta = Number(override.value);
+        if (Number.isFinite(delta) && ctx.lyricFontSizeDelta === undefined) {
+          ctx.lyricFontSizeDelta = delta;
+        }
+      }
       if (override.grob.split(".").pop() === "Glissando" && override.property === "style") {
         const style = normalizeGlissandoStyle(override.value);
         if (style) {
@@ -8395,11 +9020,29 @@ function applyVerticalSpacingSetting(target, rawKey, rawValue) {
   }
   return false;
 }
+function momentSchemeToQN(raw) {
+  if (typeof raw !== "string")
+    return;
+  const m = raw.match(/ly:make-moment\s+(\d+)\s*[/\s]\s*(\d+)/);
+  if (!m)
+    return;
+  const num = Number(m[1]);
+  const den = Number(m[2]);
+  if (!(num > 0) || !(den > 0))
+    return;
+  return num / den * 4;
+}
 function applyLayoutSetting(target, rawKey, rawValue) {
-  if (rawKey === "Lyrics.LyricText.font-size") {
+  if (rawKey === "Lyrics.LyricText.font-size" || rawKey === "Score.LyricText.font-size" || rawKey === "LyricText.font-size") {
     const delta = coerceNumber(rawValue);
     if (delta !== undefined)
       target.lyricFontSizeDelta = delta;
+    return;
+  }
+  if (rawKey === "Score.SpacingSpanner.base-shortest-duration" || rawKey === "SpacingSpanner.base-shortest-duration") {
+    const qn = momentSchemeToQN(rawValue);
+    if (qn !== undefined)
+      target.baseShortestDurationQN = qn;
     return;
   }
   if (rawKey === "Score.BarNumber.self-alignment-X" || rawKey === "BarNumber.self-alignment-X") {
@@ -8419,6 +9062,67 @@ function applyLayoutSetting(target, rawKey, rawValue) {
     if (visibility)
       target.barNumberVisibility = visibility;
   }
+}
+function taglineTextFromMarkup(raw) {
+  const parts = [];
+  let i = 0;
+  const n = raw.length;
+  while (i < n) {
+    const c = raw[i];
+    if (c === "\\") {
+      i++;
+      while (i < n && /[a-zA-Z-]/.test(raw[i]))
+        i++;
+    } else if (c === "#") {
+      i++;
+      if (raw[i] === "'")
+        i++;
+      if (raw[i] === "(") {
+        let depth = 0;
+        do {
+          if (raw[i] === "(")
+            depth++;
+          else if (raw[i] === ")")
+            depth--;
+          i++;
+        } while (i < n && depth > 0);
+      } else if (raw[i] === '"') {
+        i++;
+        while (i < n && raw[i] !== '"')
+          i++;
+        i++;
+      } else {
+        while (i < n && /\S/.test(raw[i]) && raw[i] !== "{" && raw[i] !== "}")
+          i++;
+      }
+    } else if (c === '"') {
+      i++;
+      let s = "";
+      while (i < n && raw[i] !== '"')
+        s += raw[i++];
+      i++;
+      if (s)
+        parts.push(s);
+    } else if (c === "{" || c === "}" || /\s/.test(c)) {
+      i++;
+    } else {
+      let w = "";
+      while (i < n && /\S/.test(raw[i]) && !'{}"\\#'.includes(raw[i]))
+        w += raw[i++];
+      if (w)
+        parts.push(w);
+    }
+  }
+  return parts.join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
+}
+function taglineBoxFromMarkup(raw) {
+  if (!/\\box\b/.test(raw))
+    return;
+  const padding = /box-padding\s*\.\s*([\d.]+)/.exec(raw);
+  return {
+    padding: padding ? Number(padding[1]) : 0.2,
+    wordwrap: /\\wordwrap\b/.test(raw)
+  };
 }
 function extractMeta(ast) {
   const info = {};
@@ -8451,8 +9155,18 @@ function extractMeta(ast) {
               info.subsubtitle = val;
             break;
           case "tagline":
-            if (typeof val === "string" || typeof val === "boolean")
+            if (typeof val === "boolean") {
               info.tagline = val;
+            } else if (typeof val === "string") {
+              if (val.trimStart().startsWith("\\markup")) {
+                info.tagline = taglineTextFromMarkup(val);
+                const box = taglineBoxFromMarkup(val);
+                if (box)
+                  info.taglineBox = box;
+              } else {
+                info.tagline = val;
+              }
+            }
             break;
           case "arranger":
             if (typeof val === "string")
@@ -8555,6 +9269,20 @@ function extractMeta(ast) {
             if (typeof rawVal === "string")
               paper.paperFont = rawVal;
             break;
+          case "tagline":
+            if (typeof rawVal === "boolean") {
+              info.tagline = rawVal;
+            } else if (typeof rawVal === "string") {
+              if (rawVal.trimStart().startsWith("\\markup")) {
+                info.tagline = taglineTextFromMarkup(rawVal);
+                const box = taglineBoxFromMarkup(rawVal);
+                if (box)
+                  info.taglineBox = box;
+              } else {
+                info.tagline = rawVal;
+              }
+            }
+            break;
           case "paper-width": {
             const mm = coerceMm(rawVal);
             if (mm !== undefined)
@@ -8653,6 +9381,13 @@ function collectPedalEvents(notes) {
 }
 function tuneFromContext(ctx, meta = {}) {
   const pedalEvents = collectPedalEvents(ctx.notes);
+  assignChordHarmonyOffsets(ctx.chordNames);
+  if (ctx.voices.length > 0) {
+    const blockLen = ctx.voices.reduce((sum, v) => sum + v.notes.length, 0);
+    if (ctx.notes.length > blockLen) {
+      ctx.voices[0].notes.push(...ctx.notes.slice(blockLen));
+    }
+  }
   return {
     notes: ctx.notes,
     ...ctx.voices.length > 0 ? { voices: ctx.voices } : {},
@@ -8671,6 +9406,8 @@ function tuneFromContext(ctx, meta = {}) {
     ottavaRegions: ctx.ottavaRegions,
     tempoMarks: ctx.tempoMarks,
     ...ctx.midiInstrument ? { midiInstrument: ctx.midiInstrument } : {},
+    ...ctx.instrumentName ? { instrumentName: ctx.instrumentName } : {},
+    ...ctx.lyricFontSizeDelta !== undefined ? { lyricFontSizeDelta: ctx.lyricFontSizeDelta } : {},
     rehearsalMarks: ctx.rehearsalMarks,
     ...pedalEvents.length ? { pedalEvents } : {},
     ...ctx.structuralEvents.length > 0 ? { structuralEvents: ctx.structuralEvents } : {}
@@ -9510,6 +10247,65 @@ function extractStaffGroupContext(node) {
   }
   return null;
 }
+function collectVoiceNames(node, out) {
+  const withName = node;
+  if (withName.voiceName)
+    out.add(withName.voiceName);
+  if (Array.isArray(withName.elements))
+    for (const el of withName.elements)
+      collectVoiceNames(el, out);
+  if (withName.body)
+    collectVoiceNames(withName.body, out);
+}
+function attachLyricToStaff(staff2, lyric) {
+  return staff2.type === "simultaneous" ? { ...staff2, elements: [...staff2.elements, lyric] } : { type: "simultaneous", elements: [staff2, lyric], loc: staff2.loc };
+}
+function extractBareStaffGroupContext(node) {
+  let top = node;
+  if (top.type === "sequential" && Array.isArray(top.elements) && top.elements.length === 1) {
+    top = top.elements[0];
+  }
+  if (top.type !== "simultaneous" || !Array.isArray(top.elements))
+    return null;
+  const els = top.elements;
+  const staffCtxs = els.filter((el) => el.type === "staffContext");
+  if (staffCtxs.length < 2)
+    return null;
+  if (els.some((el) => el.type === "staffGroupContext"))
+    return null;
+  const isLyricNode2 = (t) => t === "lyricsto" || t === "addlyrics" || t === "lyricMode" || t === "lyrics";
+  const staves = [];
+  const staffVoiceNames = [];
+  for (const el of els) {
+    if (el.type === "staffContext") {
+      staves.push(el);
+      const names = new Set;
+      collectVoiceNames(el, names);
+      staffVoiceNames.push(names);
+    } else if (isLyricNode2(el.type)) {
+      if (staves.length === 0)
+        return null;
+      const voiceName = el.voiceName;
+      let target = staves.length - 1;
+      if (voiceName) {
+        const idx = staffVoiceNames.findIndex((names) => names.has(voiceName));
+        if (idx >= 0)
+          target = idx;
+      }
+      staves[target] = attachLyricToStaff(staves[target], el);
+    } else {
+      return null;
+    }
+  }
+  if (staves.length < 2)
+    return null;
+  return {
+    type: "staffGroupContext",
+    groupType: "StaffGroup",
+    staves,
+    loc: node.loc
+  };
+}
 function extractMixedStaffGroupContext(node) {
   let top = node;
   if (top.type === "sequential" && Array.isArray(top.elements) && top.elements.length === 1) {
@@ -9523,6 +10319,7 @@ function extractMixedStaffGroupContext(node) {
   if (groups.length !== 1 || staffCtxs.length === 0)
     return null;
   const staves = [];
+  const nestedGroups = [];
   for (const el of els) {
     if (el.type === "staffContext") {
       staves.push(el);
@@ -9532,7 +10329,15 @@ function extractMixedStaffGroupContext(node) {
       const prev = staves[staves.length - 1];
       staves[staves.length - 1] = prev.type === "simultaneous" ? { ...prev, elements: [...prev.elements, el] } : { type: "simultaneous", elements: [prev, el], loc: prev.loc };
     } else if (el.type === "staffGroupContext") {
-      staves.push(...el.staves);
+      const inner = el;
+      const start = staves.length;
+      staves.push(...inner.staves);
+      nestedGroups.push({
+        start,
+        end: staves.length,
+        groupType: inner.groupType,
+        ...inner.operations?.length ? { operations: inner.operations } : {}
+      });
     } else {
       return null;
     }
@@ -9544,6 +10349,7 @@ function extractMixedStaffGroupContext(node) {
     type: "staffGroupContext",
     groupType: group.groupType,
     staves,
+    ...nestedGroups.length ? { nestedGroups } : {},
     loc: node.loc
   };
 }
@@ -9588,6 +10394,7 @@ function documentMetaFromTune(tune) {
     debugSkylines: tune.debugSkylines,
     midiInstrument: tune.midiInstrument,
     lyricFontSizeDelta: tune.lyricFontSizeDelta,
+    baseShortestDurationQN: tune.baseShortestDurationQN,
     barNumberSelfAlignmentX: tune.barNumberSelfAlignmentX,
     barNumberDirection: tune.barNumberDirection,
     barNumberVisibility: tune.barNumberVisibility
@@ -9674,6 +10481,21 @@ function parsedScoreFromTune(tune, options = {}) {
     ...options.range ? { range: options.range } : {}
   };
 }
+function nestedGroupsFromNode(sgNode, emittedStaffCount) {
+  if (!sgNode.nestedGroups?.length)
+    return;
+  if (emittedStaffCount !== sgNode.staves.length)
+    return;
+  return sgNode.nestedGroups.map((group) => {
+    const instrumentName = group.operations?.find((op) => op.type === "set" && (op.property === "instrumentName" || op.property.endsWith(".instrumentName")) && typeof op.value === "string")?.value;
+    return {
+      start: group.start,
+      end: group.end,
+      groupType: group.groupType,
+      ...instrumentName ? { instrumentName } : {}
+    };
+  });
+}
 function parsedPianoScoreFromStaves(score2, options = {}) {
   const context = buildPianoScoreContext(score2, options);
   const engravingEvents2 = buildEngravingEventStream(context);
@@ -9683,6 +10505,7 @@ function parsedPianoScoreFromStaves(score2, options = {}) {
     ...score2.meta ? { meta: score2.meta } : {},
     context,
     engravingEvents: engravingEvents2,
+    ...score2.nestedGroups?.length ? { nestedGroups: score2.nestedGroups } : {},
     ...score2.range ? { range: score2.range } : {}
   };
 }
@@ -9813,7 +10636,7 @@ function buildParsedDocumentBlocks(ast, tune) {
         const scoreNode = child;
         if (scoreNode.midi && !scoreNode.layout)
           continue;
-        const sgNode = extractStaffGroupContext(scoreNode.music) ?? extractMixedStaffGroupContext(scoreNode.music);
+        const sgNode = extractStaffGroupContext(scoreNode.music) ?? extractMixedStaffGroupContext(scoreNode.music) ?? extractBareStaffGroupContext(scoreNode.music);
         if (sgNode) {
           const metaTune = emit({
             type: "root",
@@ -9824,12 +10647,14 @@ function buildParsedDocumentBlocks(ast, tune) {
           const staves = emitStaffGroup(sgNode, meta);
           if (staves.length >= 2) {
             const range2 = sourceRangeFromNode2(child);
+            const nestedGroups = nestedGroupsFromNode(sgNode, staves.length);
             nextBlocks.push({
               type: "pianoScore",
               score: parsedPianoScoreFromStaves({
                 groupType: sgNode.groupType,
                 staves,
                 meta,
+                ...nestedGroups ? { nestedGroups } : {},
                 range: range2
               }, { scoreNode, layoutNodes, range: range2 }),
               range: range2
@@ -10526,7 +11351,7 @@ var REHEARSAL_MARK_PAD = LINE_SPACING * 0.352;
 var REHEARSAL_MARK_PAD_X = REHEARSAL_MARK_PAD;
 var FINGERING_FONT_SIZE = Math.round(LINE_SPACING * 1.2);
 var VOLTA_NUMBER_FONT_SIZE = Math.round(LINE_SPACING * 1.55);
-var TUPLET_NUMBER_FONT_SIZE = Math.round(LINE_SPACING * 1.2);
+var TUPLET_NUMBER_FONT_SIZE = Math.round(LINE_SPACING * 1.746);
 var TIME_SIG_Y_OFFSETS = {
   Leipzig: -Math.round(LINE_SPACING * 1.6) + Math.round(LINE_SPACING * 0.14)
 };
@@ -10714,12 +11539,12 @@ function noteAccState(noteName) {
     return "flat";
   return "natural";
 }
-function resolveAccidental(noteName, octave, keySet, measureAcc) {
+function resolveAccidental(noteName, octave, keySet, measureAcc, forced = false) {
   const base = noteName[0].toUpperCase();
   const slot = base + octave;
   const noteAcc = noteAccState(noteName);
   const active = measureAcc.get(slot) ?? keyAccState(base, keySet);
-  if (noteAcc === active)
+  if (noteAcc === active && !forced)
     return null;
   measureAcc.set(slot, noteAcc);
   if (noteAcc === "sharp")
@@ -10740,7 +11565,7 @@ function planAccidentalsForNote(input) {
     return { items: [], reserveColumnCount: layoutReserve ?? 0 };
   }
   const pending = [];
-  const primarySymbol = resolveAccidental(note.noteName, note.octave, keySet, measureAcc);
+  const primarySymbol = resolveAccidental(note.noteName, note.octave, keySet, measureAcc, note.forceAccidental != null);
   if (primarySymbol !== null) {
     pending.push({
       kind: "primary",
@@ -11199,8 +12024,17 @@ function computeVerticalBounds(noteYByGlobalIdx, regionStart, regionEnd) {
   }
   return { minY: regionMinY, maxY: regionMaxY };
 }
+// src/music-rendering/debugFlags.ts
+function debugFlag(name) {
+  const env = globalThis.process?.env;
+  return Boolean(env?.[name]);
+}
+
 // src/music-rendering/engraving/chordDisplacement.ts
-function computeChordDisplacements(mainStep, chordSteps, stemUp, noteheadRadius = NH_RX) {
+function wideIntervalIsolationDefault() {
+  return !debugFlag("LILYJS_NO_WIDE_ISOLATION");
+}
+function computeChordDisplacements(mainStep, chordSteps, stemUp, noteheadRadius = NH_RX, wideIntervalIsolation = wideIntervalIsolationDefault()) {
   const displacement = noteheadRadius * 0.9;
   const offsets = new Array(chordSteps.length).fill(0);
   const all = [
@@ -11227,7 +12061,7 @@ function computeChordDisplacements(mainStep, chordSteps, stemUp, noteheadRadius 
   }
   const ISOLATION_GAP = 5;
   const allSteps = [mainStep, ...chordSteps];
-  if (allSteps.length === 2) {
+  if (wideIntervalIsolation && allSteps.length === 2) {
     for (let i = 0;i < chordSteps.length; i++) {
       if (offsets[i] !== 0)
         continue;
@@ -11579,6 +12413,239 @@ function solveSpringChain(springs, targetLengthSs) {
   };
 }
 
+// src/music-rendering/layout/skyline.ts
+var INF = Number.POSITIVE_INFINITY;
+var EPS2 = 0.000000001;
+function buildingHeight(b, x) {
+  return !Number.isFinite(x) ? b.intercept : b.slope * x + b.intercept;
+}
+function makeBuilding(start, startH, endH, end) {
+  let slope = 0;
+  if (startH !== endH && Number.isFinite(start) && Number.isFinite(end) && end !== start) {
+    slope = (endH - startH) / (end - start);
+  }
+  const intercept = !Number.isFinite(start) || slope === 0 ? startH : startH - slope * start;
+  return { start, end, slope, intercept };
+}
+
+class Skyline {
+  sky;
+  buildings;
+  constructor(sky, buildings) {
+    this.sky = sky;
+    this.buildings = buildings ?? [{ start: -INF, end: INF, slope: 0, intercept: -INF }];
+  }
+  static fromBoxes(boxes, sky) {
+    const raw = [];
+    for (const b of boxes) {
+      const [h0, h1] = b.horizon;
+      if (!(h1 > h0))
+        continue;
+      const outer = sky === 1 ? Math.max(b.extent[0], b.extent[1]) : Math.min(b.extent[0], b.extent[1]);
+      const height = sky * outer;
+      raw.push(makeBuilding(h0, height, height, h1));
+    }
+    return new Skyline(sky, buildSkyline(raw));
+  }
+  heightAt(x) {
+    for (const b of this.buildings) {
+      if (x <= b.end || b.end === INF)
+        return buildingHeight(b, x);
+    }
+    const last = this.buildings[this.buildings.length - 1];
+    return last ? buildingHeight(last, x) : -INF;
+  }
+  outerAt(x) {
+    return this.sky * this.heightAt(x);
+  }
+  maxHeight() {
+    let m = -INF;
+    for (const b of this.buildings) {
+      m = Math.max(m, buildingHeight(b, b.start), buildingHeight(b, b.end));
+    }
+    return m;
+  }
+  isEmpty() {
+    return this.buildings.every((b) => buildingHeight(b, b.start) === -INF);
+  }
+  raise(r) {
+    return new Skyline(this.sky, this.buildings.map((b) => ({ ...b, intercept: b.intercept + r })));
+  }
+  shift(dx) {
+    return new Skyline(this.sky, this.buildings.map((b) => ({
+      start: b.start + dx,
+      end: b.end + dx,
+      slope: b.slope,
+      intercept: b.intercept - b.slope * dx
+    })));
+  }
+  merge(other) {
+    if (other.sky !== this.sky)
+      throw new Error("Skyline.merge: direction mismatch");
+    return new Skyline(this.sky, mergeBuildings(this.buildings, other.buildings));
+  }
+  padded(horizonPadding) {
+    if (!(horizonPadding > 0))
+      return this;
+    const pad = [];
+    for (const b of this.buildings) {
+      if (b.start > -INF) {
+        const h = buildingHeight(b, b.start);
+        if (h > -INF) {
+          pad.push(makeBuilding(b.start - 2 * horizonPadding, h - horizonPadding, h, b.start - horizonPadding));
+          pad.push(makeBuilding(b.start - horizonPadding, h, h, b.start));
+        }
+      }
+      if (b.end < INF) {
+        const h = buildingHeight(b, b.end);
+        if (h > -INF) {
+          pad.push(makeBuilding(b.end, h, h, b.end + horizonPadding));
+          pad.push(makeBuilding(b.end + horizonPadding, h, h - horizonPadding, b.end + 2 * horizonPadding));
+        }
+      }
+    }
+    return new Skyline(this.sky, mergeBuildings(buildSkyline(pad), this.buildings));
+  }
+  distance(other, horizonPadding = 0) {
+    if (other.sky !== -this.sky)
+      throw new Error("Skyline.distance: needs opposing directions");
+    const self = horizonPadding > 0 ? this.padded(horizonPadding) : this;
+    let i = 0;
+    let j = 0;
+    let dist = -INF;
+    let start = -INF;
+    const a = self.buildings;
+    const b = other.buildings;
+    while (i < a.length && j < b.length) {
+      const end = Math.min(a[i].end, b[j].end);
+      const startDist = buildingHeight(a[i], start) + buildingHeight(b[j], start);
+      const endDist = buildingHeight(a[i], end) + buildingHeight(b[j], end);
+      dist = Math.max(dist, Math.max(startDist, endDist));
+      if (a[i].end <= b[j].end)
+        i++;
+      else
+        j++;
+      start = end;
+    }
+    return dist;
+  }
+}
+function buildSkyline(raw) {
+  const finite = raw.filter((b) => b.end > b.start && Number.isFinite(b.start) && Number.isFinite(b.end));
+  if (!finite.length)
+    return [{ start: -INF, end: INF, slope: 0, intercept: -INF }];
+  const xs = new Set;
+  for (const b of finite) {
+    xs.add(b.start);
+    xs.add(b.end);
+  }
+  const points = [...xs].sort((p, q) => p - q);
+  const out = [];
+  const push = (start, sh, eh, end) => {
+    const prev = out[out.length - 1];
+    if (prev && Math.abs(prev.end - start) < EPS2 && Math.abs(buildingHeight(prev, prev.end) - sh) < EPS2 && Math.abs(prev.slope) < EPS2 && Math.abs(sh - eh) < EPS2) {
+      prev.end = end;
+      return;
+    }
+    out.push(makeBuilding(start, sh, eh, end));
+  };
+  push(-INF, -INF, -INF, points[0]);
+  for (let k = 0;k + 1 < points.length; k++) {
+    const s = points[k];
+    const e = points[k + 1];
+    let sh = -INF;
+    let eh = -INF;
+    for (const b of finite) {
+      if (b.start <= s + EPS2 && b.end >= e - EPS2) {
+        sh = Math.max(sh, buildingHeight(b, s));
+        eh = Math.max(eh, buildingHeight(b, e));
+      }
+    }
+    push(s, sh, eh, e);
+  }
+  push(points[points.length - 1], -INF, -INF, INF);
+  return out;
+}
+function mergeBuildings(a, b) {
+  return buildSkyline([...a, ...b]);
+}
+
+// src/music-rendering/layout/columnSkyline.ts
+var EXTRA_SPACING_WIDTH = [-0.1, 0.1];
+var ACCIDENTAL_EXTRA_SPACING_WIDTH = [-0.2, 0];
+var NOTE_COLUMN_SKYLINE_VERTICAL_PADDING = 0.15;
+var HEAD_W = 1;
+var HEAD_HALF_H = 0.5;
+var STEM_W2 = 0.14;
+var DOT_OFFSET2 = HEAD_W + 0.5;
+var DOT_R2 = 0.2;
+function widen(x, esw) {
+  return [x[0] + esw[0], x[1] + esw[1]];
+}
+function unconditionalBoxes(note) {
+  const boxes = [];
+  if (!note.positions.length)
+    return boxes;
+  for (const p of note.positions) {
+    boxes.push({
+      horizon: [p - HEAD_HALF_H, p + HEAD_HALF_H],
+      extent: widen([0, HEAD_W], EXTRA_SPACING_WIDTH)
+    });
+  }
+  if (note.stem) {
+    const top = Math.max(...note.positions);
+    const bottom = Math.min(...note.positions);
+    const len = note.stemLength ?? 3.5;
+    const x = note.stem === "up" ? [HEAD_W - STEM_W2, HEAD_W] : [0, STEM_W2];
+    const y = note.stem === "up" ? [top, top + len] : [bottom - len, bottom];
+    boxes.push({ horizon: y, extent: widen(x, EXTRA_SPACING_WIDTH) });
+  }
+  const dots = note.dots ?? 0;
+  for (let d = 0;d < dots; d++) {
+    const cx = DOT_OFFSET2 + d * (DOT_R2 * 2 + 0.2);
+    for (const p of note.positions) {
+      boxes.push({
+        horizon: [p - DOT_R2, p + DOT_R2],
+        extent: widen([cx - DOT_R2, cx + DOT_R2], [0, 0.2])
+      });
+    }
+  }
+  return boxes;
+}
+function conditionalBoxes(note) {
+  const acc = note.accidental;
+  if (!acc || !(acc.width > 0) || !acc.positions.length)
+    return [];
+  const right = -0.15;
+  return acc.positions.map((p) => ({
+    horizon: [p - HEAD_HALF_H, p + HEAD_HALF_H],
+    extent: widen([right - acc.width, right], ACCIDENTAL_EXTRA_SPACING_WIDTH)
+  }));
+}
+function noteColumnSkylines(note, verticalPadding = NOTE_COLUMN_SKYLINE_VERTICAL_PADDING) {
+  const boxes = unconditionalBoxes(note);
+  const cond = conditionalBoxes(note);
+  return {
+    left: Skyline.fromBoxes(boxes, -1).padded(verticalPadding),
+    right: Skyline.fromBoxes(boxes, 1).padded(verticalPadding),
+    conditionalLeft: Skyline.fromBoxes(cond, -1).padded(verticalPadding)
+  };
+}
+function barlineSkylines(halfHeight = 2, thickness = 0.19, verticalPadding = 0) {
+  const boxes = [
+    { horizon: [-halfHeight, halfHeight], extent: widen([0, thickness], EXTRA_SPACING_WIDTH) }
+  ];
+  return {
+    left: Skyline.fromBoxes(boxes, -1).padded(verticalPadding),
+    right: Skyline.fromBoxes(boxes, 1).padded(verticalPadding),
+    conditionalLeft: new Skyline(-1)
+  };
+}
+function paperColumnMinimumDistance(left, right) {
+  const rightFacing = right.left.merge(right.conditionalLeft);
+  return Math.max(0, rightFacing.distance(left.right));
+}
+
 // src/music-rendering/layout/spacingModel.ts
 var PIXEL_EPSILON = 0.5;
 function noteSpaceW(dur2, shortestDur) {
@@ -11643,6 +12710,7 @@ function spacingEventsForMeasure(measure2) {
       dynamic: note.dynamic,
       hasFingering: note.fingering != null,
       hasOrnament: hasOrnamentArticulation(note.articulations),
+      ...note.lyricWidth ? { lyricWidth: note.lyricWidth } : {},
       ...note.isRest ? {} : {
         stemUp: note.stemDirection != null ? note.stemDirection === "up" : noteStep(note.noteName, note.octave) < 4,
         step: noteStep(note.noteName, note.octave),
@@ -11696,13 +12764,77 @@ function spacingDurationsForMeasure(measure2) {
   }
   return durations;
 }
-function measureWidthForSpacingEvents(realEvents, shortestDur, opts) {
+function polyphonicColumnDurations(measure2) {
+  let hasSecondary = false;
+  for (const note of measure2) {
+    if (note.voiceDuration != null && !note.isGrace) {
+      hasSecondary = true;
+      break;
+    }
+  }
+  if (!hasSecondary)
+    return null;
+  let measureLenQN = 0;
+  for (const note of measure2) {
+    if (note.voiceDuration != null || note.isGrace || note.duration <= 0 || isStructuralMarkerNote(note)) {
+      continue;
+    }
+    measureLenQN += note.duration;
+  }
+  if (!(measureLenQN > 0))
+    return null;
+  const onsets = [];
+  let primaryCursor = 0;
+  for (const note of measure2) {
+    if (note.isGrace || isStructuralMarkerNote(note))
+      continue;
+    if (note.voiceDuration != null) {
+      if (!(note.voiceDuration > 0))
+        continue;
+      const raw = note.voiceOffsetQN ?? 0;
+      onsets.push((raw % measureLenQN + measureLenQN) % measureLenQN);
+    } else {
+      if (note.duration <= 0)
+        continue;
+      onsets.push(primaryCursor);
+      primaryCursor += note.duration;
+    }
+  }
+  if (!onsets.length)
+    return null;
+  const EPS3 = 0.000001;
+  onsets.sort((a, b) => a - b);
+  const distinct = [];
+  for (const onset of onsets) {
+    if (!distinct.length || onset - distinct[distinct.length - 1] > EPS3)
+      distinct.push(onset);
+  }
+  const durations = [];
+  for (let i = 0;i < distinct.length; i++) {
+    const next = i + 1 < distinct.length ? distinct[i + 1] : measureLenQN;
+    const gap = next - distinct[i];
+    if (gap > EPS3)
+      durations.push(gap);
+  }
+  return durations.length ? durations : null;
+}
+function applyTerminalShortTail(events2, shortestDur, active) {
+  if (!active || !events2.length)
+    return events2;
+  const last = events2[events2.length - 1];
+  if (!(last.duration > shortestDur))
+    return events2;
+  return [...events2.slice(0, -1), { ...last, duration: shortestDur }];
+}
+function measureWidthForSpacingEvents(realEventsIn, shortestDur, opts) {
+  let realEvents = realEventsIn;
   if ((opts?.mmRestBars ?? 0) > 1) {
     const singleBarW = Math.max(MIN_MEASURE_W, noteSpaceW(4, shortestDur));
     return singleBarW;
   }
   if (!realEvents.length)
     return MIN_MEASURE_W;
+  realEvents = applyTerminalShortTail(realEvents, shortestDur, opts?.chainTerminalShortTail);
   let total = 0;
   let allOrdinaryAttacks = true;
   for (const event of realEvents) {
@@ -11710,26 +12842,61 @@ function measureWidthForSpacingEvents(realEvents, shortestDur, opts) {
     if (!isOrdinaryAttackEvent(event))
       allOrdinaryAttacks = false;
   }
-  const attackSpan = minimumAttackSpan(realEvents, shortestDur, opts?.firstOrdinaryOffset);
+  const attackSpan = minimumAttackSpan(realEvents, shortestDur, opts?.firstOrdinaryOffset, opts?.chainLeadingGapW, opts?.chainFullTail, opts?.lyricSeamFloor);
   const compactSingleEvent = realEvents.length === 1 && !realEvents[0].isRest && realEvents[0].duration <= 1;
   const minMeasureW = compactSingleEvent ? Math.round(LINE_SPACING * 4.5) : MIN_MEASURE_W;
   return Math.max(minMeasureW, allOrdinaryAttacks ? attackSpan : total, attackSpan);
 }
 function measureWidthWithShortest(m, shortestDur, opts) {
+  const columnDurations = polyphonicColumnDurations(m);
+  if (columnDurations) {
+    let localShortest = shortestDur;
+    for (const duration3 of columnDurations) {
+      if (duration3 < localShortest)
+        localShortest = duration3;
+    }
+    return measureWidthForSpacingEvents(columnDurations.map((duration3) => ({ duration: duration3 })), localShortest, {
+      firstOrdinaryOffset: opts?.firstOrdinaryOffset,
+      chainLeadingGapW: opts?.chainLeadingGapW,
+      chainFullTail: opts?.chainFullTail,
+      lyricSeamFloor: opts?.lyricSeamFloor,
+      chainTerminalShortTail: opts?.chainTerminalShortTail
+    });
+  }
   const mmRest = m.find((n) => n.mmRestBars && n.mmRestBars > 1);
-  return measureWidthForSpacingEvents(spacingEventsForMeasureWithTarget(m, opts?.targetDuration), shortestDur, {
+  const durationWidth = measureWidthForSpacingEvents(spacingEventsForMeasureWithTarget(m, opts?.targetDuration), shortestDur, {
     firstOrdinaryOffset: opts?.firstOrdinaryOffset,
-    mmRestBars: mmRest?.mmRestBars
+    mmRestBars: mmRest?.mmRestBars,
+    chainLeadingGapW: opts?.chainLeadingGapW,
+    chainFullTail: opts?.chainFullTail,
+    lyricSeamFloor: opts?.lyricSeamFloor,
+    chainTerminalShortTail: opts?.chainTerminalShortTail
   });
+  return Math.max(durationWidth, lyricNaturalWidth(m));
+}
+function lyricNaturalWidth(m) {
+  if (!m.some((n) => (n.lyricWidth ?? 0) > 0))
+    return 0;
+  const visible = m.filter((n) => isSpacingVisibleNote(n));
+  let span = 0;
+  for (let k = 0;k + 1 < visible.length; k++) {
+    span += lyricPairRod(visible[k], visible[k + 1]);
+  }
+  const firstW = visible[0]?.lyricWidth ?? 0;
+  const lastW = visible[visible.length - 1]?.lyricWidth ?? 0;
+  return span + firstW / 2 + lastW / 2;
 }
 function barlineTailReserveW(lastHasFlag) {
   return lastHasFlag ? 0 : Math.round(LINE_SPACING * 0.5);
 }
 function computeMeasureLayoutWidths(m, shortestDur, scale, opts) {
-  const baseW = measureWidthWithShortest(m, shortestDur, {
+  const baseW = Math.max(measureWidthWithShortest(m, shortestDur, {
     firstOrdinaryOffset: opts?.firstOrdinaryOffset,
-    targetDuration: opts?.targetDuration
-  }) * scale;
+    targetDuration: opts?.targetDuration,
+    chainLeadingGapW: opts?.chainLeadingGapW,
+    chainFullTail: opts?.chainFullTail,
+    lyricSeamFloor: opts?.lyricSeamFloor
+  }) * scale, lyricNaturalWidth(m));
   const keyW = opts?.keySigChangeW ?? 0;
   const timeW = opts?.timeSigChangeW ?? 0;
   const clefW = opts?.clefChangeW ?? 0;
@@ -11775,10 +12942,6 @@ var ORDINARY_POST_BARLINE_ATTACK_OFFSET = LINE_SPACING * 0.9;
 var POST_BARLINE_NOTEHEAD_CLEARANCE = LINE_SPACING * 0.5;
 var POST_BARLINE_FIRST_NOTE_GAP_FLOOR = LINE_SPACING * 1.6;
 var COMPACT_SHORT_POST_BARLINE_FIRST_NOTE_GAP_FLOOR = LINE_SPACING * 1.1;
-var DENSE_BEAM_LEADING_ATTACK_TARGET = LINE_SPACING * 2.6;
-var DENSE_BEAM_INTERNAL_GAP_FLOOR = LINE_SPACING * 2.35;
-var DENSE_ACCIDENTAL_BEAM_INTERNAL_GAP_FLOOR = LINE_SPACING * 2.05;
-var DENSE_ACCIDENTAL_DESCENDING_CONTOUR_RELAXATION = LINE_SPACING * 0.12;
 var DENSE_ACCIDENTAL_FOLLOWING_ATTACK_GAP = LINE_SPACING * 2.55;
 var DENSE_REMOTE_ACCIDENTAL_FOLLOWING_ATTACK_GAP = LINE_SPACING * 2.05;
 var ORDINARY_FINAL_ATTACK_TAIL = Math.round(LINE_SPACING * 2.6);
@@ -11849,15 +13012,22 @@ function firstAttackOffset(event, width, useOrdinaryRod = true, ordinaryOffset =
   }
   return useOrdinaryRod && isOrdinaryAttackEvent(event) ? ordinaryOffset : width * 0.5;
 }
+function lyricSeamHalfW(event) {
+  return event.lyricWidth ? event.lyricWidth / 2 + LYRIC_SYLLABLE_GAP / 2 : 0;
+}
 function finalAttackTail(event, width) {
   const scale = spacingEventScale(event);
+  const lyricTail = lyricSeamHalfW(event);
   if (!event.isRest && event.duration >= 2) {
-    return Math.max(width * 0.5, ORDINARY_FINAL_LONG_ATTACK_TAIL);
+    return Math.max(width * 0.5, ORDINARY_FINAL_LONG_ATTACK_TAIL, lyricTail);
   }
-  return !event.isRest && event.duration >= 1 ? Math.max(width * 0.5, ORDINARY_FINAL_ATTACK_TAIL) : Math.max(width * 0.5, NH_RX * scale + LINE_SPACING * scale);
+  return !event.isRest && event.duration >= 1 ? Math.max(width * 0.5, ORDINARY_FINAL_ATTACK_TAIL, lyricTail) : Math.max(width * 0.5, NH_RX * scale + LINE_SPACING * scale, lyricTail);
 }
 function postBarlineFirstNoteGap(event, shortestDur, solvedFirstSpringW, options = {}) {
-  const clearanceGap = Math.max(ORDINARY_POST_BARLINE_ATTACK_OFFSET, NH_RX * spacingEventScale(event) + POST_BARLINE_NOTEHEAD_CLEARANCE * spacingEventScale(event), options.compactShortNoteBoundary ? COMPACT_SHORT_POST_BARLINE_FIRST_NOTE_GAP_FLOOR : POST_BARLINE_FIRST_NOTE_GAP_FLOOR);
+  if (options.chainLeadingGapW != null) {
+    return chainLeadingSpan({ ...event, duration: event.duration }, options.chainLeadingGapW);
+  }
+  const clearanceGap = Math.max(ORDINARY_POST_BARLINE_ATTACK_OFFSET, NH_RX * spacingEventScale(event) + POST_BARLINE_NOTEHEAD_CLEARANCE * spacingEventScale(event), options.compactShortNoteBoundary ? COMPACT_SHORT_POST_BARLINE_FIRST_NOTE_GAP_FLOOR : POST_BARLINE_FIRST_NOTE_GAP_FLOOR, options.lyricSeamFloor ? lyricSeamHalfW(event) : 0);
   let solvedSpringGap = 0;
   const naturalSpringW = shortestDur != null && Number.isFinite(shortestDur) && shortestDur > 0 && event.duration > 0 ? spacingEventWidth(event, shortestDur) : 0;
   if (solvedFirstSpringW != null && Number.isFinite(solvedFirstSpringW) && solvedFirstSpringW > 0) {
@@ -11877,6 +13047,25 @@ function postBarlineFirstNoteGap(event, shortestDur, solvedFirstSpringW, options
   const denseSustainedGap = event.duration >= 1.5 && shortestDur > 0.125 && shortestDur <= 0.25 ? naturalSpringW * DENSE_SUSTAINED_POST_BARLINE_GAP_RATIO : 0;
   return Math.max(clearanceGap, naturalSpringW * 0.25, denseSustainedGap, sustainedNaturalGap, solvedSpringGap);
 }
+function postBarlineSkylineRodPx(input) {
+  const { note } = input;
+  if (note.isRest || isStructuralMarkerNote(note) || note.isPercentRepeatPlaceholder)
+    return null;
+  const steps = input.chordSteps?.length ? input.chordSteps : input.step != null ? [input.step] : [];
+  if (!steps.length)
+    return null;
+  const positions = steps.map((step) => (step - 4) * 0.5);
+  const scale = noteMusicScale(note);
+  const accidentalWidthSs = (input.accidentalWidthPx ?? 0) / LINE_SPACING;
+  const column = {
+    positions,
+    stem: note.duration > 0 && note.duration < 4 ? input.stemUp ? "up" : "down" : undefined,
+    dots: isDotted(note.duration) ? 1 : 0,
+    accidental: accidentalWidthSs > 0 ? { width: accidentalWidthSs, positions } : undefined
+  };
+  const rodSs = paperColumnMinimumDistance(barlineSkylines(), noteColumnSkylines(column));
+  return (rodSs * LINE_SPACING + NH_RX) * scale;
+}
 function shouldUseCompactShortBoundaryGap(measure2, shortestDur, beamedIndices) {
   if (shortestDur == null || !Number.isFinite(shortestDur) || shortestDur <= 0 || shortestDur > 0.25 || beamedIndices == null) {
     return false;
@@ -11894,7 +13083,19 @@ function shouldUseCompactShortBoundaryGap(measure2, shortestDur, beamedIndices) 
     return beamedIndices.has(idx) && !note.isRest && !note.isPercentRepeatPlaceholder && duration3 > 0 && duration3 <= Math.max(shortestDur, 0.5);
   });
 }
-function minimumAttackSpan(events2, shortestDur, firstOrdinaryOffset = ORDINARY_POST_BARLINE_ATTACK_OFFSET) {
+function chainLeadingSpan(event, chainLeadingGapW) {
+  const scale = spacingEventScale(event);
+  return Math.max(chainLeadingGapW, NH_RX * scale + POST_BARLINE_NOTEHEAD_CLEARANCE * scale, lyricSeamHalfW(event));
+}
+function chainPlacementLead(events2, shortestDur, opts) {
+  if (!events2.length)
+    return 0;
+  const first = events2[0];
+  if (opts?.chainLeadingGapW != null)
+    return chainLeadingSpan(first, opts.chainLeadingGapW);
+  return firstAttackOffset(first, spacingEventWidth(first, shortestDur), opts?.useFirstOrdinaryRod !== false, opts?.firstOrdinaryOffset);
+}
+function minimumAttackSpan(events2, shortestDur, firstOrdinaryOffset = ORDINARY_POST_BARLINE_ATTACK_OFFSET, chainLeadingGapW, chainFullTail, lyricSeamFloor) {
   if (!events2.length)
     return 0;
   const widths = new Array(events2.length);
@@ -11902,13 +13103,16 @@ function minimumAttackSpan(events2, shortestDur, firstOrdinaryOffset = ORDINARY_
     widths[i] = spacingEventWidth(events2[i], shortestDur);
   }
   if (events2.length === 1 && isOrdinaryAttackEvent(events2[0]) && events2[0].duration >= 2) {
-    return firstAttackOffset(events2[0], widths[0], true, firstOrdinaryOffset) + widths[0];
+    const lead = chainLeadingGapW != null ? chainLeadingSpan(events2[0], chainLeadingGapW) : firstAttackOffset(events2[0], widths[0], true, firstOrdinaryOffset);
+    return lead + widths[0];
   }
-  let span = firstAttackOffset(events2[0], widths[0], true, firstOrdinaryOffset);
+  let span = chainLeadingGapW != null ? chainLeadingSpan(events2[0], chainLeadingGapW) : Math.max(firstAttackOffset(events2[0], widths[0], true, firstOrdinaryOffset), lyricSeamFloor ? lyricSeamHalfW(events2[0]) : 0);
   for (let i = 1;i < widths.length; i++) {
     span += ordinaryAttackAdvance(widths[i - 1], events2[i - 1], events2[i]);
   }
-  span += finalAttackTail(events2[events2.length - 1], widths[widths.length - 1]);
+  const lastEvent = events2[events2.length - 1];
+  const lastWidth = widths[widths.length - 1];
+  span += chainFullTail ? Math.max(lastWidth, finalAttackTail(lastEvent, lastWidth)) : finalAttackTail(lastEvent, lastWidth);
   return span;
 }
 function systemSpacingReferenceDur(measures) {
@@ -11958,34 +13162,6 @@ function systemHeaderLayoutPlan(opts) {
 function systemContentStartX(opts) {
   return systemHeaderLayoutPlan(opts).contentStartX;
 }
-function distributeAmountWithCaps(amount, capacities, priorities) {
-  const out = new Array(capacities.length).fill(0);
-  let remaining = amount;
-  let active = capacities.map((cap, i) => ({ cap, i })).filter(({ cap }) => cap > 0.000001).map(({ i }) => i);
-  while (remaining > 0.000001 && active.length > 0) {
-    const totalPriority = active.reduce((sum, i) => sum + Math.max(0.000001, priorities[i] ?? 0), 0);
-    let saturated = false;
-    for (const i of [...active]) {
-      const priority = Math.max(0.000001, priorities[i] ?? 0);
-      const share = remaining * (priority / totalPriority);
-      const room = (capacities[i] ?? 0) - out[i];
-      if (share >= room - 0.000001) {
-        out[i] = capacities[i];
-        remaining -= room;
-        active = active.filter((idx) => idx !== i);
-        saturated = true;
-      }
-    }
-    if (!saturated) {
-      for (const i of active) {
-        const priority = Math.max(0.000001, priorities[i] ?? 0);
-        out[i] += remaining * (priority / totalPriority);
-      }
-      remaining = 0;
-    }
-  }
-  return out;
-}
 var DENSE_32ND_SPRING_MIN_RATIO = 0.71;
 function springMinRatio(dur2, shortestDur) {
   if (dur2 <= 0)
@@ -12018,7 +13194,41 @@ function denseBeamedPairFloor(prevNote, nextNote, shortestDur, prevIsBeamed, nex
   }
   return noteSpaceW(prevDur, shortestDur) * noteMusicScale(prevNote) * DENSE_32ND_SPRING_MIN_RATIO;
 }
-function solveSpringWidths(durations, shortestDur, targetTotal, musicScales = [], stemInfo = []) {
+function solveSpringWidths(durations, shortestDur, targetTotal, musicScales = [], stemInfo = [], chainFullTail = false) {
+  const springs = buildEventSprings(durations, shortestDur, musicScales, stemInfo);
+  if (!springs.length)
+    return [];
+  if (chainFullTail)
+    applyBarlineStretchStiffening(springs, durations, shortestDur);
+  const solution = solveSpringChain(springs, targetTotal / LINE_SPACING);
+  return solution.lengthsSs.map((len) => len * LINE_SPACING);
+}
+function applyBarlineStretchStiffening(springs, durations, shortestDur) {
+  const li = springs.length - 1;
+  if (li < 1 || !(durations[li] > shortestDur))
+    return;
+  const sp = springs[li];
+  if (!(sp.idealDistanceSs > 0))
+    return;
+  const NOTE_BAR_SKYLINE_MIN_SS = 1.6;
+  const effectiveMin = Math.max(sp.minDistanceSs, NOTE_BAR_SKYLINE_MIN_SS);
+  const halfGapIdeal = (sp.idealDistanceSs + effectiveMin) / 2;
+  const factor = Math.max(0, Math.min(1, halfGapIdeal / sp.idealDistanceSs));
+  springs[li] = { ...sp, inverseStretchStrength: sp.inverseStretchStrength * factor };
+}
+function measureSpringAggregate(durations, shortestDur, musicScales = [], stemInfo = []) {
+  const springs = buildEventSprings(durations, shortestDur, musicScales, stemInfo);
+  let idealPx = 0;
+  let minPx = 0;
+  let inverseStretch = 0;
+  for (const s of springs) {
+    idealPx += s.idealDistanceSs * LINE_SPACING;
+    minPx += s.minDistanceSs * LINE_SPACING;
+    inverseStretch += s.inverseStretchStrength;
+  }
+  return { idealPx, minPx, inverseStretch };
+}
+function buildEventSprings(durations, shortestDur, musicScales = [], stemInfo = []) {
   if (!durations.length)
     return [];
   const scaleAt = (i) => {
@@ -12055,14 +13265,13 @@ function solveSpringWidths(durations, shortestDur, targetTotal, musicScales = []
       inverseCompressStrength: Math.max(0.000000001, s.inverseCompressStrength * scale)
     };
   });
-  const solution = solveSpringChain(springs, targetTotal / LINE_SPACING);
-  return solution.lengthsSs.map((len) => len * LINE_SPACING);
+  return springs;
 }
 function attackOffsetsForEvents(widths, events2, opts) {
   if (!widths.length)
     return [];
   const offsets = [];
-  let attack = firstAttackOffset(events2[0] ?? { duration: 0 }, widths[0], opts?.useFirstOrdinaryRod !== false, opts?.firstOrdinaryOffset);
+  let attack = opts?.fixedFirstAttack != null ? opts.fixedFirstAttack : opts?.chainLeadingGapW != null && events2[0] ? chainLeadingSpan(events2[0], opts.chainLeadingGapW) : firstAttackOffset(events2[0] ?? { duration: 0 }, widths[0], opts?.useFirstOrdinaryRod !== false, opts?.firstOrdinaryOffset);
   for (let i = 0;i < widths.length; i++) {
     offsets.push(attack);
     const nextEvent = events2[i + 1];
@@ -12074,6 +13283,14 @@ function attackOffsetsForEvents(widths, events2, opts) {
     });
   }
   return offsets;
+}
+var LYRIC_SYLLABLE_GAP = Math.round(LINE_SPACING * 0.6);
+function lyricPairRod(fromNote, toNote) {
+  const fromW = fromNote.lyricWidth ?? 0;
+  const toW = toNote.lyricWidth ?? 0;
+  if (fromW <= 0 && toW <= 0)
+    return 0;
+  return fromW / 2 + toW / 2 + LYRIC_SYLLABLE_GAP;
 }
 function buildMeasureRods(measure2, noteAccCols, noteAccidentalKinds, noteSteps) {
   const rods = [];
@@ -12156,7 +13373,7 @@ function buildMeasureRods(measure2, noteAccCols, noteAccidentalKinds, noteSteps)
       musicScale: toScale,
       isRest: !!toNote.isRest,
       dynamic: toNote.dynamic
-    }), dynamicHorizontalRod(fromNote.dynamic, toNote.dynamic));
+    }), dynamicHorizontalRod(fromNote.dynamic, toNote.dynamic), lyricPairRod(fromNote, toNote));
     rods.push({ fromIdx, toIdx, minDist });
   }
   return rods;
@@ -12250,6 +13467,9 @@ function measureNoteContentRightX(opts) {
 function noteRightBearing(note, isBeamed = false) {
   const scale = noteMusicScale(note);
   let bearing = NH_RX * scale;
+  if (note.lyricWidth) {
+    bearing = Math.max(bearing, note.lyricWidth / 2 + LYRIC_SYLLABLE_GAP / 2 - LINE_SPACING);
+  }
   if (note.dynamic) {
     bearing = Math.max(bearing, dynamicHorizontalRod(note.dynamic, undefined) - LINE_SPACING * 0.4);
   }
@@ -12284,6 +13504,7 @@ function enforceBarlineFirstNoteGap(noteXs, measure2, noteAreaStartX, shortestDu
     musicScale: noteMusicScale(firstNote),
     isRest: !!firstNote.isRest,
     isPercentRepeatPlaceholder: !!firstNote.isPercentRepeatPlaceholder,
+    lyricWidth: firstNote.lyricWidth,
     dynamic: firstNote.dynamic
   }, shortestDur, solvedFirstSpringW, options);
   const minX = noteAreaStartX + Math.max(minGap, minimumCenterGap ?? 0, firstAccidentalBoundaryGap(firstNote, options.firstAccidentalColumns, options.firstAccidentalKind));
@@ -12344,6 +13565,71 @@ function enforceBarlineLastNoteGap(noteXs, measure2, contentRightX, rods = [], s
   }
   return noteXs;
 }
+function enforceMeasureLeftBoundaryRod(noteXs, measure2, noteAreaStartX, contentRightX, shortestDur, minimumCenterGap, solvedFirstSpringW, beamedIndices, firstNoteGapOptions = {}, noteSteps, plainMidlineBoundary = false) {
+  if (measure2.some((note) => note.voiceDuration != null))
+    return noteXs;
+  const realIndices = [];
+  for (let i = 0;i < measure2.length; i++) {
+    if (isSpacingVisibleNote(measure2[i]))
+      realIndices.push(i);
+  }
+  if (realIndices.length < 2)
+    return noteXs;
+  const firstIdx = realIndices[0];
+  const lastIdx = realIndices[realIndices.length - 1];
+  const firstNote = measure2[firstIdx];
+  const lastNote = measure2[lastIdx];
+  const skylineRod = plainMidlineBoundary ? postBarlineSkylineRodPx({
+    note: firstNote,
+    step: noteSteps?.[firstIdx],
+    stemUp: firstNote.stemDirection === "up",
+    accidentalWidthPx: (firstNoteGapOptions.firstAccidentalColumns ?? 0) * ACC_EXTRA_W * noteMusicScale(firstNote)
+  }) : null;
+  const boundaryRod = skylineRod ?? postBarlineFirstNoteGap({
+    duration: spacingDurationForNote(firstNote),
+    musicScale: noteMusicScale(firstNote),
+    isRest: !!firstNote.isRest,
+    isPercentRepeatPlaceholder: !!firstNote.isPercentRepeatPlaceholder,
+    lyricWidth: firstNote.lyricWidth,
+    dynamic: firstNote.dynamic
+  }, shortestDur, solvedFirstSpringW, { chainLeadingGapW: firstNoteGapOptions.chainLeadingGapW });
+  const minFirstX = noteAreaStartX + Math.max(boundaryRod, minimumCenterGap ?? 0, firstAccidentalBoundaryGap(firstNote, firstNoteGapOptions.firstAccidentalColumns, firstNoteGapOptions.firstAccidentalKind));
+  const maxLastX = contentRightX - noteRightBearing(lastNote, beamedIndices?.has(lastIdx) ?? false) - LINE_SPACING;
+  const shift = Math.min(Math.max(0, minFirstX - noteXs[firstIdx]), Math.max(0, maxLastX - noteXs[lastIdx]));
+  if (shift > PIXEL_EPSILON) {
+    for (const idx of realIndices)
+      noteXs[idx] += shift;
+  }
+  return noteXs;
+}
+function distributeAmountWithCaps(amount, capacities, priorities) {
+  const out = new Array(capacities.length).fill(0);
+  let remaining = amount;
+  let active = capacities.map((cap, i) => ({ cap, i })).filter(({ cap }) => cap > 0.000001).map(({ i }) => i);
+  while (remaining > 0.000001 && active.length > 0) {
+    const totalPriority = active.reduce((sum, i) => sum + Math.max(0.000001, priorities[i] ?? 0), 0);
+    let saturated = false;
+    for (const i of [...active]) {
+      const priority = Math.max(0.000001, priorities[i] ?? 0);
+      const share = remaining * (priority / totalPriority);
+      const room = (capacities[i] ?? 0) - out[i];
+      if (share >= room - 0.000001) {
+        out[i] = capacities[i];
+        remaining -= room;
+        active = active.filter((idx) => idx !== i);
+        saturated = true;
+      }
+    }
+    if (!saturated) {
+      for (const i of active) {
+        const priority = Math.max(0.000001, priorities[i] ?? 0);
+        out[i] += remaining * (priority / totalPriority);
+      }
+      remaining = 0;
+    }
+  }
+  return out;
+}
 function fitBarlineBoundaryGaps(noteXs, measure2, noteAreaStartX, contentRightX, rods = [], shortestDur, minimumCenterGap, solvedFirstSpringW, noteSteps, beamedIndices, firstNoteGapOptions = {}) {
   const realIndices = [];
   for (let i = 0;i < measure2.length; i++) {
@@ -12361,6 +13647,7 @@ function fitBarlineBoundaryGaps(noteXs, measure2, noteAreaStartX, contentRightX,
     musicScale: noteMusicScale(firstNote),
     isRest: !!firstNote.isRest,
     isPercentRepeatPlaceholder: !!firstNote.isPercentRepeatPlaceholder,
+    lyricWidth: firstNote.lyricWidth,
     dynamic: firstNote.dynamic
   }, shortestDur, solvedFirstSpringW, firstNoteGapOptions), minimumCenterGap ?? 0, firstAccidentalBoundaryGap(firstNote, firstNoteGapOptions.firstAccidentalColumns, firstNoteGapOptions.firstAccidentalKind));
   const maxLastX = contentRightX - noteRightBearing(lastNote, beamedIndices?.has(lastIdx) ?? false) - LINE_SPACING;
@@ -12407,106 +13694,6 @@ function fitBarlineBoundaryGaps(noteXs, measure2, noteAreaStartX, contentRightX,
   for (let pos = 0;pos < targetGaps.length; pos++) {
     x += targetGaps[pos];
     noteXs[realIndices[pos + 1]] = x;
-  }
-  return noteXs;
-}
-function balanceMeasureBoundaryCenterSlack(noteXs, measure2, noteAreaStartX, contentRightX, shortestDur, minimumCenterGap, solvedFirstSpringW, beamedIndices, firstNoteGapOptions = {}, noteSteps) {
-  if (measure2.some((note) => note.voiceDuration != null))
-    return noteXs;
-  const realIndices = [];
-  for (let i = 0;i < measure2.length; i++) {
-    if (isSpacingVisibleNote(measure2[i]))
-      realIndices.push(i);
-  }
-  if (realIndices.length < 3)
-    return noteXs;
-  const events2 = realIndices.map((idx) => ({
-    idx,
-    note: measure2[idx],
-    duration: spacingDurationForNote(measure2[idx])
-  }));
-  const allCompactShortNotes = events2.every(({ note, duration: duration3 }) => !note.isRest && !note.isPercentRepeatPlaceholder && duration3 > 0 && duration3 <= Math.max(shortestDur ?? duration3, 0.5));
-  if (!allCompactShortNotes)
-    return noteXs;
-  const firstIdx = realIndices[0];
-  const lastIdx = realIndices[realIndices.length - 1];
-  const firstNote = measure2[firstIdx];
-  const lastNote = measure2[lastIdx];
-  const minFirstX = noteAreaStartX + Math.max(postBarlineFirstNoteGap({
-    duration: spacingDurationForNote(firstNote),
-    musicScale: noteMusicScale(firstNote),
-    isRest: !!firstNote.isRest,
-    isPercentRepeatPlaceholder: !!firstNote.isPercentRepeatPlaceholder,
-    dynamic: firstNote.dynamic
-  }, shortestDur, solvedFirstSpringW), minimumCenterGap ?? 0, firstAccidentalBoundaryGap(firstNote, firstNoteGapOptions.firstAccidentalColumns, firstNoteGapOptions.firstAccidentalKind));
-  const maxLastX = contentRightX - noteRightBearing(lastNote, beamedIndices?.has(lastIdx) ?? false) - LINE_SPACING;
-  const leftGap = noteXs[firstIdx] - noteAreaStartX;
-  const rightGap = contentRightX - noteXs[lastIdx];
-  const allBeamed = events2.every(({ idx }) => beamedIndices?.has(idx));
-  const denseBeamedBoundaryBalance = allBeamed && events2.length >= 5 && events2.every(({ duration: duration3 }) => shortestDur != null && Number.isFinite(shortestDur) && duration3 <= shortestDur + 0.000001);
-  if (allBeamed && !denseBeamedBoundaryBalance)
-    return noteXs;
-  const initialLeadingDeficit = denseBeamedBoundaryBalance ? DENSE_BEAM_LEADING_ATTACK_TARGET - leftGap : 0;
-  const initialTrailingSlack = denseBeamedBoundaryBalance ? rightGap - POST_BARLINE_FIRST_NOTE_GAP_FLOOR : 0;
-  const preserveTightTrailingSlack = allBeamed && initialLeadingDeficit > PIXEL_EPSILON && initialTrailingSlack < initialLeadingDeficit - PIXEL_EPSILON;
-  const denseBeamedRightBias = denseBeamedBoundaryBalance ? LINE_SPACING * 0.75 : 0;
-  const desiredShift = preserveTightTrailingSlack ? 0 : (rightGap - leftGap + denseBeamedRightBias) / 2;
-  const minShift = minFirstX - noteXs[firstIdx];
-  const maxShift = maxLastX - noteXs[lastIdx];
-  const shift = Math.max(minShift, Math.min(maxShift, desiredShift));
-  if (Math.abs(shift) > PIXEL_EPSILON) {
-    for (const idx of realIndices)
-      noteXs[idx] += shift;
-  }
-  if (denseBeamedBoundaryBalance) {
-    const currentRightGap = contentRightX - noteXs[lastIdx];
-    const trailingSlack = currentRightGap - POST_BARLINE_FIRST_NOTE_GAP_FLOOR;
-    const currentLeftGap = noteXs[firstIdx] - noteAreaStartX;
-    const leadingDeficit = DENSE_BEAM_LEADING_ATTACK_TARGET - currentLeftGap;
-    if (trailingSlack > PIXEL_EPSILON && leadingDeficit <= trailingSlack + PIXEL_EPSILON) {
-      const denom = realIndices.length - 1;
-      for (let pos = 1;pos < realIndices.length; pos++) {
-        noteXs[realIndices[pos]] += trailingSlack * (pos / denom);
-      }
-    }
-    const adjustedLeftGap = noteXs[firstIdx] - noteAreaStartX;
-    const adjustedLeadingDeficit = DENSE_BEAM_LEADING_ATTACK_TARGET - adjustedLeftGap;
-    if (adjustedLeadingDeficit > PIXEL_EPSILON && realIndices.length > 1) {
-      const denseInternalGapFloor = (firstNoteGapOptions.firstAccidentalColumns ?? 0) > 0 ? DENSE_ACCIDENTAL_BEAM_INTERNAL_GAP_FLOOR : DENSE_BEAM_INTERNAL_GAP_FLOOR;
-      const capacities = [];
-      const priorities = [];
-      for (let pos = 0;pos < realIndices.length - 1; pos++) {
-        const leftIdx = realIndices[pos];
-        const rightIdx = realIndices[pos + 1];
-        capacities[pos] = Math.max(0, noteXs[rightIdx] - noteXs[leftIdx] - denseInternalGapFloor);
-        const stepDelta = noteSteps?.[rightIdx] != null && noteSteps?.[leftIdx] != null ? noteSteps[rightIdx] - noteSteps[leftIdx] : 0;
-        priorities[pos] = (firstNoteGapOptions.firstAccidentalColumns ?? 0) > 0 && stepDelta <= -3 ? 1.8 : stepDelta <= -2 ? 1.35 : 1;
-      }
-      const compressed = distributeAmountWithCaps(adjustedLeadingDeficit, capacities, priorities);
-      const leadingShift = compressed.reduce((sum, amount) => sum + amount, 0);
-      if (leadingShift > PIXEL_EPSILON) {
-        let remainingShift = leadingShift;
-        for (let pos = 0;pos < realIndices.length - 1; pos++) {
-          noteXs[realIndices[pos]] += remainingShift;
-          remainingShift -= compressed[pos] ?? 0;
-        }
-      }
-      const firstStep = noteSteps?.[firstIdx];
-      const secondIdx = realIndices[1];
-      const secondStep = secondIdx != null ? noteSteps?.[secondIdx] : undefined;
-      const firstGap = secondIdx != null ? noteXs[secondIdx] - noteXs[firstIdx] : 0;
-      const firstDescendingAccidentalGap = (firstNoteGapOptions.firstAccidentalColumns ?? 0) > 0 && firstStep != null && secondStep != null && secondStep - firstStep <= -3;
-      if (firstDescendingAccidentalGap && secondIdx != null && realIndices.length > 2) {
-        const relaxation = Math.max(0, Math.min(DENSE_ACCIDENTAL_DESCENDING_CONTOUR_RELAXATION, firstGap - denseInternalGapFloor));
-        if (relaxation > PIXEL_EPSILON) {
-          const movableCount = realIndices.length - 2;
-          for (let pos = 1;pos < realIndices.length - 1; pos++) {
-            const taper = 1 - (pos - 1) / Math.max(1, movableCount);
-            noteXs[realIndices[pos]] -= relaxation * taper;
-          }
-        }
-      }
-    }
   }
   return noteXs;
 }
@@ -12656,10 +13843,14 @@ function accidentalClearanceKindForItems(items) {
 }
 function buildMeasureSpacingPlan(input) {
   const scale = input.scale ?? 1;
-  const baseW = measureWidthWithShortest(input.measure, input.shortestDur, {
+  const baseW = Math.max(measureWidthWithShortest(input.measure, input.shortestDur, {
+    chainFullTail: input.chainFullTail,
+    lyricSeamFloor: input.lyricSeamFloor,
+    chainTerminalShortTail: input.chainTerminalShortTail,
     firstOrdinaryOffset: input.firstOrdinaryOffset,
-    targetDuration: input.targetDuration
-  }) * scale;
+    targetDuration: input.targetDuration,
+    chainLeadingGapW: input.chainLeadingGapW
+  }) * scale, lyricNaturalWidth(input.measure));
   const accidentalPlan2 = input.noteAccCols == null && input.keySet && input.stepForPitch ? planAccidentalsForMeasure({
     measure: input.measure,
     keySet: input.keySet,
@@ -12670,19 +13861,19 @@ function buildMeasureSpacingPlan(input) {
   const noteAccidentalKinds = input.noteAccidentalKinds ?? accidentalPlan2?.beatPlans.map((plan) => accidentalClearanceKindForItems(plan.items)) ?? new Array(input.measure.length).fill(undefined);
   const gracePlan = input.gracePlan ?? planGraceSpacingForMeasure(input.measure);
   const inlineClefPlan = input.inlineClefPlan ?? planInlineClefSpacingForMeasure(input.measure);
-  const tailW = input.tailW ?? barlineTailReserveW(measureLastNoteHasFlag(input.measure));
+  const tailW = input.chainFullTail ? 0 : input.tailW ?? barlineTailReserveW(measureLastNoteHasFlag(input.measure));
   const keySigChangeW = input.keySigChangeW ?? 0;
   const timeSigChangeW = input.timeSigChangeW ?? 0;
   const clefChangeW = input.clefChangeW ?? 0;
   const preBarlineReserveW = input.preBarlineReserveW ?? 0;
   const repStartOffset = input.repStartOffset ?? 0;
   const repeatEndReserveW = input.isRepeatEnd ? REPEAT_BAR_W : 0;
-  const accidentalReserveW = noteAccCols.reduce((sum, cols, idx) => sum + cols * ACC_EXTRA_W * noteMusicScale(input.measure[idx]), 0);
+  const accidentalReserveW = input.chainFullTail ? 0 : noteAccCols.reduce((sum, cols, idx) => sum + cols * ACC_EXTRA_W * noteMusicScale(input.measure[idx]), 0);
   const graceReserveW = gracePlan.totalGraceSpace;
   const inlineClefReserveW = inlineClefPlan.totalInlineClefSpace;
-  const dynamicReserveW = input.dynamicReserveW ?? 0;
+  const dynamicReserveW = input.chainFullTail ? 0 : input.dynamicReserveW ?? 0;
   const fixedReserveW = repStartOffset + repeatEndReserveW + accidentalReserveW + graceReserveW + inlineClefReserveW + dynamicReserveW + tailW + keySigChangeW + timeSigChangeW + clefChangeW + preBarlineReserveW;
-  const { mw, noteArea } = computeMeasureLayoutWidths(input.measure, input.shortestDur, scale, {
+  const { mw: mwComputed, noteArea: noteAreaComputed } = computeMeasureLayoutWidths(input.measure, input.shortestDur, scale, {
     keySigChangeW,
     timeSigChangeW,
     clefChangeW,
@@ -12695,8 +13886,14 @@ function buildMeasureSpacingPlan(input) {
     totalInlineClefSpace: inlineClefReserveW,
     dynamicReserveW,
     firstOrdinaryOffset: input.firstOrdinaryOffset,
-    targetDuration: input.targetDuration
+    targetDuration: input.targetDuration,
+    chainLeadingGapW: input.chainLeadingGapW,
+    chainFullTail: input.chainFullTail,
+    lyricSeamFloor: input.lyricSeamFloor,
+    chainTerminalShortTail: input.chainTerminalShortTail
   });
+  const noteArea = input.noteAreaOverrideW ?? noteAreaComputed;
+  const mw = input.noteAreaOverrideW != null ? input.noteAreaOverrideW + fixedReserveW : mwComputed;
   return {
     noteAccCols,
     noteAccidentalKinds,
@@ -12721,7 +13918,9 @@ function buildMeasureSpacingPlan(input) {
     noteArea,
     naturalWidthContribution: measureWidthWithShortest(input.measure, input.shortestDur, {
       firstOrdinaryOffset: input.firstOrdinaryOffset,
-      targetDuration: input.targetDuration
+      targetDuration: input.targetDuration,
+      chainFullTail: input.chainFullTail,
+      chainTerminalShortTail: input.chainTerminalShortTail
     }) + tailW + accidentalReserveW + graceReserveW + inlineClefReserveW + dynamicReserveW
   };
 }
@@ -12926,6 +14125,7 @@ function dpPackSection(measures, startMi, isFirstOfPiece, initialKey, measureKey
   const stride = n + 1;
   const intervalShortestDur = new Float64Array(stride * stride);
   const referenceDurations = new Set;
+  const baseCapQN = options.baseShortestDurationQN;
   for (let from = 0;from < n; from++) {
     let shortestDur = Infinity;
     for (let to = from + 1;to <= n; to++) {
@@ -12933,7 +14133,9 @@ function dpPackSection(measures, startMi, isFirstOfPiece, initialKey, measureKey
       if (facts.events.length && facts.shortestDur < shortestDur) {
         shortestDur = facts.shortestDur;
       }
-      const refDur = Number.isFinite(shortestDur) ? shortestDur : 1;
+      let refDur = Number.isFinite(shortestDur) ? shortestDur : 1;
+      if (baseCapQN != null && baseCapQN > 0)
+        refDur = Math.min(refDur, baseCapQN);
       intervalShortestDur[intervalCacheIndex(from, to, stride)] = refDur;
       referenceDurations.add(refDur);
     }
@@ -13222,6 +14424,65 @@ function durationFromParsedNote(note) {
   return new Duration(qnToRational(note.duration), { tuplets });
 }
 
+// src/music-core-adapter/chordSymbols.ts
+function buildHarmonyTrack(chordNames) {
+  if (!chordNames?.length)
+    return [];
+  return chordNames.flatMap((cn) => cn.harmony ? [cn.harmony] : []);
+}
+function computeChordPlacements(chordNames) {
+  if (!chordNames?.length)
+    return [];
+  const placements = [];
+  let offsetQN = 0;
+  for (const cn of chordNames) {
+    placements.push({ name: cn.name, offsetQN, harmony: cn.harmony });
+    offsetQN += cn.duration;
+  }
+  return placements;
+}
+function chordSymbolsForMeasure(placements, measureStartQN, measureQN) {
+  const out = [];
+  const measureEndQN = measureStartQN + measureQN;
+  for (const p of placements) {
+    if (!p.name)
+      continue;
+    if (p.offsetQN < measureStartQN - 0.001)
+      continue;
+    if (p.offsetQN >= measureEndQN - 0.001)
+      continue;
+    const relQN = p.offsetQN - measureStartQN;
+    out.push(new ChordSymbol(p.name, null, "above", qnToRational(relQN), undefined, p.harmony));
+  }
+  return out;
+}
+
+// src/music-core-adapter/lyricAssociation.ts
+function buildLyricVoiceResolver(voices, voiceMeasures) {
+  if (!voices?.length || !voiceMeasures.length)
+    return;
+  const byName = new Map;
+  const maps = [];
+  voices.forEach((voice, vi) => {
+    if (voice.voiceName)
+      byName.set(voice.voiceName, vi);
+    const byIndex = new Map;
+    let voiceNoteIndex = 0;
+    voiceMeasures[vi]?.forEach((measureNotes, mi) => {
+      let localIndex = 0;
+      for (const note of measureNotes) {
+        if (isStructuralMarkerNote(note))
+          continue;
+        byIndex.set(voiceNoteIndex, `v${vi + 1}-event-${localIndex}-m${mi}`);
+        voiceNoteIndex++;
+        localIndex++;
+      }
+    });
+    maps.push(byIndex);
+  });
+  return { byName, maps };
+}
+
 // src/music-core-adapter/pitchConversion.ts
 function pitchFromParsedNote(noteName, octave) {
   const step = noteName[0].toUpperCase();
@@ -13334,10 +14595,18 @@ function attachParsedRenderingMetadata(event, note) {
     tagged.__lilyGlissandoStyle = note.glissandoStyle;
   if (note.fingerGlideStart)
     tagged.__lilyFingerGlideStart = true;
+  if (note.forceAccidental)
+    tagged.__lilyForceAccidental = note.forceAccidental;
+  return event;
+}
+function attachSourceRange(event, note) {
+  if (note.sourceRange) {
+    event.__lilySourceRange = note.sourceRange;
+  }
   return event;
 }
 function attachParsedEventMetadata(event, note) {
-  return attachParsedRenderingMetadata(attachEmbeddedVoiceMetadata(attachGraceType(attachMusicScale(event, note), note), note), note);
+  return attachSourceRange(attachParsedRenderingMetadata(attachEmbeddedVoiceMetadata(attachGraceType(attachMusicScale(event, note), note), note), note), note);
 }
 function musicalEventFromParsedNote(eventId2, note) {
   const duration3 = durationFromParsedNote(note.voiceDuration != null ? { ...note, duration: note.voiceDuration } : note);
@@ -13349,6 +14618,9 @@ function musicalEventFromParsedNote(eventId2, note) {
     }
     if (note.isFullMeasureRest) {
       rest.__lilyIsFullMeasureRest = true;
+    }
+    if (note.isSpacer) {
+      rest.__lilyIsSpacer = true;
     }
     return attachParsedEventMetadata(rest, note);
   }
@@ -13363,6 +14635,25 @@ function musicalEventFromParsedNote(eventId2, note) {
     }), note);
   }
   return attachParsedEventMetadata(new Note(eventId2, pitchFromParsedNote(note.noteName, note.octave), duration3, { articulations, isGrace: note.isGrace }), note);
+}
+function chordSymbolFromNoteText(note, eventId2) {
+  if (!note.noteText)
+    return null;
+  const style = {
+    bold: note.noteText.bold,
+    italic: note.noteText.italic,
+    large: note.noteText.large,
+    color: note.noteText.color,
+    code: note.noteText.code,
+    wordwrap: note.noteText.wordwrap,
+    fontSizeScale: note.noteText.fontSizeScale,
+    circled: note.noteText.circled,
+    boxed: note.noteText.boxed,
+    smallCaps: note.noteText.smallCaps,
+    textAnchor: note.noteText.textAnchor,
+    runs: note.noteText.runs
+  };
+  return new ChordSymbol(note.noteText.text, eventId2, note.noteText.placement, undefined, style);
 }
 
 // src/music-core-adapter/structuralEvents.ts
@@ -13509,13 +14800,15 @@ function assembleScoreFromParsedTune(input) {
     ...tune.globalStaffSize != null ? { globalStaffSize: tune.globalStaffSize } : {},
     ...tune.debugSkylines != null ? { debugSkylines: tune.debugSkylines } : {},
     ...tune.midiInstrument ? { midiInstrument: tune.midiInstrument } : {},
+    ...tune.instrumentName ? { instrumentName: tune.instrumentName } : {},
     ...tune.printInitialRepeatBar ? { printInitialRepeatBar: true } : {},
     ...tune.barNumberSelfAlignmentX ? { barNumberSelfAlignmentX: tune.barNumberSelfAlignmentX } : {},
     ...tune.barNumberDirection ? { barNumberDirection: tune.barNumberDirection } : {},
     ...tune.barNumberVisibility ? { barNumberVisibility: tune.barNumberVisibility } : {},
     ...tune.annotateSpacing != null ? { annotateSpacing: tune.annotateSpacing } : {},
     ...tune.pageBreaking ? { pageBreaking: tune.pageBreaking } : {},
-    ...tune.lyricFontSizeDelta != null ? { lyricFontSizeDelta: tune.lyricFontSizeDelta } : {}
+    ...tune.lyricFontSizeDelta != null ? { lyricFontSizeDelta: tune.lyricFontSizeDelta } : {},
+    ...tune.baseShortestDurationQN != null ? { baseShortestDurationQN: tune.baseShortestDurationQN } : {}
   };
   const baseScoreInfo = Object.keys(scoreInfoPayload).length > 0 ? scoreInfoPayload : tune.info;
   const scoreInfo = persistedStructuralEvents.length > 0 ? { ...baseScoreInfo, structuralEvents: persistedStructuralEvents } : baseScoreInfo;
@@ -13524,7 +14817,8 @@ function assembleScoreFromParsedTune(input) {
     info: scoreInfo,
     directives,
     lyrics,
-    pedalEvents
+    pedalEvents,
+    harmonyTrack: buildHarmonyTrack(tune.chordNames)
   });
   score2.__lilyStructuralEvents = persistedStructuralEvents;
   score2.__lilySourceRangeByEventId = sourceRangeByEventId;
@@ -13549,6 +14843,49 @@ function replaceMeasureBarlineEnd(target, barlineEnd) {
     barlineStart: target.barlineStart ?? undefined,
     barlineEnd
   });
+}
+
+// src/music-core-adapter/voiceSpanners.ts
+function voiceIdMapByNoteIdentity(originalIdByNote, voiceNotes) {
+  const out = new Map;
+  for (const { note, voiceEventId } of voiceNotes) {
+    const originalId = originalIdByNote.get(note);
+    if (originalId != null)
+      out.set(originalId, voiceEventId);
+  }
+  return out;
+}
+function remapSpannerEventIds(idMap, spanners) {
+  const remap = (id) => idMap.get(id) ?? id;
+  for (const slur of spanners.slurs ?? []) {
+    slur.startEventId = remap(slur.startEventId);
+    slur.endEventId = remap(slur.endEventId);
+  }
+  for (const tie of spanners.ties ?? []) {
+    tie.fromNoteId = remap(tie.fromNoteId);
+    tie.toNoteId = remap(tie.toNoteId);
+  }
+  for (const group of spanners.beamGroups ?? []) {
+    group.eventIds = group.eventIds.map(remap);
+  }
+  for (const sym of spanners.chordSymbols ?? []) {
+    if (sym.eventId != null)
+      sym.eventId = remap(sym.eventId);
+  }
+}
+function collectSecondaryVoiceSpanner(note, eventId2, voiceIndex, pending, emit2, out) {
+  if (note.slurEnd && pending.slur[voiceIndex]) {
+    out.slurs.push(emit2.slur(pending.slur[voiceIndex], eventId2));
+    pending.slur[voiceIndex] = null;
+  }
+  if (note.slurStart)
+    pending.slur[voiceIndex] = eventId2;
+  if (note.tieEnd && pending.tie[voiceIndex]) {
+    out.ties.push(emit2.tie(pending.tie[voiceIndex], eventId2));
+    pending.tie[voiceIndex] = null;
+  }
+  if (note.tieStart)
+    pending.tie[voiceIndex] = eventId2;
 }
 
 // src/music-core-adapter/prefixScoreEventIds.ts
@@ -13656,13 +14993,15 @@ function prefixScoreEventIds(score2, prefix) {
 }
 
 // src/music-core-adapter/index.ts
-function modelLyricsFromParsedLyrics(lines, eventIdByParsedIndex) {
+function modelLyricsFromParsedLyrics(lines, eventIdByParsedIndex, perVoice) {
   if (!lines?.length)
     return [];
   const out = [];
   for (const line of lines) {
+    const voiceIndex = line.voiceId != null ? perVoice?.byName.get(line.voiceId) : undefined;
+    const voiceMap = voiceIndex != null ? perVoice?.maps[voiceIndex] : undefined;
     const syllables = line.syllables.flatMap((syllable) => {
-      const eventId2 = eventIdByParsedIndex.get(syllable.noteIndex);
+      const eventId2 = voiceMap?.get(syllable.noteIndex) ?? eventIdByParsedIndex.get(syllable.noteIndex);
       if (!eventId2)
         return [];
       return [{
@@ -13717,6 +15056,7 @@ function buildScoreFromTune(tune) {
       voiceMeasures.push(groupMeasures(vNotes, tune.timeSig, tune.partialDuration, engravingEvents2));
     }
   }
+  const lyricVoiceResolver = isPolyphonic ? buildLyricVoiceResolver(tune.voices, voiceMeasures) : undefined;
   const canonicalMeasures = isPolyphonic && voiceMeasures.length > 0 ? voiceMeasures[0] : measures;
   const measureTimeSigs = timeSigByMeasure(canonicalMeasures, tune.timeSig, engravingEvents2);
   const measureKeySigs = keySigByMeasure(canonicalMeasures, tune.key, engravingEvents2);
@@ -13730,13 +15070,10 @@ function buildScoreFromTune(tune) {
     }
   }
   const measureQNOffsets = [];
-  {
-    let qn = 0;
-    for (const m of canonicalMeasures) {
-      measureQNOffsets.push(qn);
-      qn += m.reduce((s, n) => s + n.duration, 0);
-    }
-  }
+  canonicalMeasures.reduce((qn, m) => {
+    measureQNOffsets.push(qn);
+    return qn + m.reduce((s, n) => s + n.duration, 0);
+  }, 0);
   const offsetQNByParsedIndex = new Map;
   let totalOffsetQN = 0;
   {
@@ -13751,17 +15088,12 @@ function buildScoreFromTune(tune) {
     }
     offsetQNByParsedIndex.set(parsedIndex, totalOffsetQN);
   }
-  const chordNameOffsets = [];
-  if (tune.chordNames?.length) {
-    let qn = 0;
-    for (const cn of tune.chordNames) {
-      chordNameOffsets.push({ name: cn.name, offset: qn });
-      qn += cn.duration;
-    }
-  }
+  const chordPlacements = computeChordPlacements(tune.chordNames);
   let globalIndex = 0;
   let noteTokenIndex = 0;
   let pendingSlurStart = null;
+  const pendingByVoice = { slur: [], tie: [] };
+  const spannerCtors = { slur: (f, t) => new Slur(f, t), tie: (f, t) => new Tie(f, t) };
   let pendingTieStart = null;
   const measureObjs = canonicalMeasures.map((measureNotes, mi) => {
     const events2 = [];
@@ -13795,23 +15127,9 @@ function buildScoreFromTune(tune) {
       if (note.chordSymbol) {
         chordSymbols.push(new ChordSymbol(note.chordSymbol, eventId2, note.chordSymbolBelow ? "below" : "above"));
       }
-      if (note.noteText) {
-        const style = {
-          bold: note.noteText.bold,
-          italic: note.noteText.italic,
-          large: note.noteText.large,
-          color: note.noteText.color,
-          code: note.noteText.code,
-          wordwrap: note.noteText.wordwrap,
-          fontSizeScale: note.noteText.fontSizeScale,
-          circled: note.noteText.circled,
-          boxed: note.noteText.boxed,
-          smallCaps: note.noteText.smallCaps,
-          textAnchor: note.noteText.textAnchor,
-          runs: note.noteText.runs
-        };
-        chordSymbols.push(new ChordSymbol(note.noteText.text, eventId2, note.noteText.placement, undefined, style));
-      }
+      const noteTextSymbol = chordSymbolFromNoteText(note, eventId2);
+      if (noteTextSymbol)
+        chordSymbols.push(noteTextSymbol);
       if (note.dynamic) {
         dynamics.push(new DynamicMark(note.dynamic, eventId2, "below"));
       }
@@ -13890,19 +15208,10 @@ function buildScoreFromTune(tune) {
         ...span.hideNumber ? { __lilyHideTupletNumber: true } : {}
       });
     }
-    if (chordNameOffsets.length) {
+    if (chordPlacements.length) {
       const measureStartQN = measureQNOffsets[mi] ?? 0;
       const measureQN = measureNotes.reduce((s, n) => s + n.duration, 0);
-      for (const cn of chordNameOffsets) {
-        if (!cn.name)
-          continue;
-        if (cn.offset < measureStartQN - 0.001)
-          continue;
-        if (cn.offset >= measureStartQN + measureQN - 0.001)
-          continue;
-        const offsetQN = cn.offset - measureStartQN;
-        chordSymbols.push(new ChordSymbol(cn.name, null, "above", qnToRational(offsetQN)));
-      }
+      chordSymbols.push(...chordSymbolsForMeasure(chordPlacements, measureStartQN, measureQN));
     }
     const ts = timeSignatureFromString(measureTimeSigs[mi] ?? tune.timeSig);
     const measureStart = measureNoteOffsets[mi] ?? 0;
@@ -13927,6 +15236,7 @@ function buildScoreFromTune(tune) {
     }
     let staffMeasures;
     if (isPolyphonic && tune.voices) {
+      const voiceNotes = [];
       const voiceContents = tune.voices.map((_voice, vi) => {
         const vMeasureNotes = voiceMeasures[vi]?.[mi] ?? [];
         const vEvents = [];
@@ -13934,11 +15244,19 @@ function buildScoreFromTune(tune) {
           if (isStructuralMarkerNote(note))
             continue;
           const eventId2 = `v${vi + 1}-event-${vEvents.length}-m${mi}`;
+          voiceNotes.push({ note, voiceEventId: eventId2 });
           vEvents.push(musicalEventFromParsedNote(eventId2, note));
+          if (vi >= 1) {
+            collectSecondaryVoiceSpanner(note, eventId2, vi, pendingByVoice, spannerCtors, { slurs, ties });
+            const secondaryText = chordSymbolFromNoteText(note, eventId2);
+            if (secondaryText)
+              chordSymbols.push(secondaryText);
+          }
         }
         return { voiceId: `v${vi + 1}`, events: vEvents };
       });
       staffMeasures = [{ staffId: "staff-1", voices: voiceContents }];
+      remapSpannerEventIds(voiceIdMapByNoteIdentity(new Map(eventEntries.map((e) => [e.note, e.eventId])), voiceNotes), { slurs, ties, beamGroups, chordSymbols });
     }
     const measure2 = new Measure(mi + 1, ts, isPolyphonic ? [] : events2, slurs, ties, beamGroups, {
       keySignature: keySignatureFromString(measureKeySigs[mi] ?? initialKey),
@@ -14067,7 +15385,7 @@ function buildScoreFromTune(tune) {
   const part2 = new Part("part-1", tune.title ?? "Part", [staff2], measureObjs, voiceDefs.length > 0 ? { voices: voiceDefs } : undefined);
   const persistedStructuralEvents = structuralEvents.filter((ev) => ev.type === "autoBeam" || ev.type === "cadenza");
   const directives = scoreDirectivesFromStructuralEvents(structuralEvents, eventIdByParsedIndex, offsetQNByParsedIndex, totalOffsetQN);
-  const lyrics = modelLyricsFromParsedLyrics(tune.lyricLines, eventIdByParsedIndex);
+  const lyrics = modelLyricsFromParsedLyrics(tune.lyricLines, eventIdByParsedIndex, lyricVoiceResolver);
   const pedalEvents = modelPedalEventsFromParsedPedals(tune.pedalEvents, eventIdByParsedIndex);
   const score2 = assembleScoreFromParsedTune({
     tune,
@@ -14159,7 +15477,8 @@ function markupFromParsed(block) {
     ...block.thickness !== undefined ? { thickness: block.thickness } : {},
     ...block.cornerRadius !== undefined ? { cornerRadius: block.cornerRadius } : {},
     ...block.smallCaps !== undefined ? { smallCaps: block.smallCaps } : {},
-    ...block.align !== undefined ? { align: block.align } : {}
+    ...block.align !== undefined ? { align: block.align } : {},
+    ...block.compactLineGap !== undefined ? { compactLineGap: block.compactLineGap } : {}
   };
 }
 function fillLineFromParsed(block) {
@@ -14223,6 +15542,9 @@ function scoreFromParsedPianoScore(score2) {
   }
   combinedScore.__lilySourceRangeByEventId = sourceRangeByEventId;
   combinedScore.__lilyStaffGroupType = score2.groupType;
+  if (score2.nestedGroups?.length) {
+    combinedScore.__lilyNestedStaffGroups = score2.nestedGroups;
+  }
   return combinedScore;
 }
 function musicBlocksFromParsedBlock(block) {
@@ -14425,7 +15747,7 @@ function sourceRangeForAbcLineContent(line, startIndex, endIndex) {
     endColumn: end.column
   };
 }
-function diagnostic(line, message, code, startIndex, endIndex) {
+function diagnostic2(line, message, code, startIndex, endIndex) {
   const start = sourceOffsetForContentIndex(line, startIndex);
   const end = sourceOffsetForContentIndex(line, Math.max(startIndex, endIndex));
   return {
@@ -14457,7 +15779,7 @@ function validateQuotedChordSymbols(line) {
   }
   if (quotedStart < 0)
     return [];
-  return [diagnostic(line, "Unterminated quoted chord symbol", "abc.unterminatedQuotedChordSymbol", quotedStart, line.content.length)];
+  return [diagnostic2(line, "Unterminated quoted chord symbol", "abc.unterminatedQuotedChordSymbol", quotedStart, line.content.length)];
 }
 function validateBracketedSpans(line) {
   const diagnostics = [];
@@ -14486,12 +15808,12 @@ function validateBracketedSpans(line) {
         continue;
       const openIndex = stack.pop();
       if (openIndex === undefined) {
-        diagnostics.push(diagnostic(line, "Unexpected closing bracket in ABC bracketed span", "abc.unexpectedBracketClose", index, index + 1));
+        diagnostics.push(diagnostic2(line, "Unexpected closing bracket in ABC bracketed span", "abc.unexpectedBracketClose", index, index + 1));
       }
     }
   }
   for (const openIndex of stack) {
-    diagnostics.push(diagnostic(line, "Unterminated bracketed span", "abc.unterminatedBracketedSpan", openIndex, line.content.length));
+    diagnostics.push(diagnostic2(line, "Unterminated bracketed span", "abc.unterminatedBracketedSpan", openIndex, line.content.length));
   }
   return diagnostics;
 }
@@ -14585,7 +15907,7 @@ var VOICE_PROPERTY_NAMES = new Set([
   "stafflines",
   "staffscale"
 ]);
-function diagnostic2(field, message, code) {
+function diagnostic3(field, message, code) {
   return {
     kind: "diagnostic",
     severity: "warning",
@@ -14761,7 +16083,7 @@ function validateAbcKeyModifiers(field) {
   for (const word of splitWords(field.value)) {
     const prop = splitProperty(word);
     if (prop && !KEY_PROPERTY_NAMES.has(prop[0])) {
-      diagnostics.push(diagnostic2(field, `Unsupported ABC key modifier "${prop[0]}"`, "abc.unknownKeyModifier"));
+      diagnostics.push(diagnostic3(field, `Unsupported ABC key modifier "${prop[0]}"`, "abc.unknownKeyModifier"));
     }
   }
   return diagnostics;
@@ -14774,16 +16096,16 @@ function validateAbcVoiceModifiers(field) {
       continue;
     const [name, value] = prop;
     if (!VOICE_PROPERTY_NAMES.has(name)) {
-      diagnostics.push(diagnostic2(field, `Unsupported ABC voice modifier "${name}"`, "abc.unknownVoiceModifier"));
+      diagnostics.push(diagnostic3(field, `Unsupported ABC voice modifier "${name}"`, "abc.unknownVoiceModifier"));
     } else if (name === "stem" && value !== "up" && value !== "down") {
-      diagnostics.push(diagnostic2(field, `Invalid ABC voice stem direction "${value}"`, "abc.invalidVoiceModifier"));
+      diagnostics.push(diagnostic3(field, `Invalid ABC voice stem direction "${value}"`, "abc.invalidVoiceModifier"));
     }
   }
   return diagnostics;
 }
 
 // src/music-input/abc/musicLineParser.ts
-function diagnostic3(sourceRange, message, code, severity = "warning") {
+function diagnostic4(sourceRange, message, code, severity = "warning") {
   return {
     kind: "diagnostic",
     severity,
@@ -14945,7 +16267,7 @@ function parseAbcMusicLineElements(line, options, diagnostics) {
       elements: []
     };
     if (close < 0) {
-      diagnostics.push(diagnostic3(groupRange, "ABC grace group is missing a closing brace", "abc.unclosedGraceGroup"));
+      diagnostics.push(diagnostic4(groupRange, "ABC grace group is missing a closing brace", "abc.unclosedGraceGroup"));
     }
     let cursor2 = index2 + 1;
     while (cursor2 < end - (close >= 0 ? 1 : 0)) {
@@ -14958,7 +16280,7 @@ function parseAbcMusicLineElements(line, options, diagnostics) {
         group.elements.push(note.note);
         cursor2 = note.end;
       } else {
-        diagnostics.push(diagnostic3(contentRange(cursor2, cursor2 + 1), `Unsupported ABC grace-note syntax "${content[cursor2]}"`, "abc.unsupportedGraceSyntax"));
+        diagnostics.push(diagnostic4(contentRange(cursor2, cursor2 + 1), `Unsupported ABC grace-note syntax "${content[cursor2]}"`, "abc.unsupportedGraceSyntax"));
         cursor2++;
       }
     }
@@ -15052,7 +16374,7 @@ function parseAbcMusicLineElements(line, options, diagnostics) {
     }
     if (char === "^") {
       if (content[index + 1] === "^") {
-        diagnostics.push(diagnostic3(contentRange(index, index + 2), "Double sharps are not part of the Cooley ABC MVP yet", "abc.unsupportedAccidental"));
+        diagnostics.push(diagnostic4(contentRange(index, index + 2), "Double sharps are not part of the Cooley ABC MVP yet", "abc.unsupportedAccidental"));
         pendingAccidental = { value: "^", startIndex: index };
         index += 2;
       } else {
@@ -15062,7 +16384,7 @@ function parseAbcMusicLineElements(line, options, diagnostics) {
       continue;
     }
     if (char === "_" || char === "=") {
-      diagnostics.push(diagnostic3(contentRange(index, index + 1), `Accidental "${char}" is not part of the Cooley ABC MVP yet`, "abc.unsupportedAccidental"));
+      diagnostics.push(diagnostic4(contentRange(index, index + 1), `Accidental "${char}" is not part of the Cooley ABC MVP yet`, "abc.unsupportedAccidental"));
       pendingAccidental = null;
       index++;
       continue;
@@ -15075,9 +16397,9 @@ function parseAbcMusicLineElements(line, options, diagnostics) {
       continue;
     }
     if (/\d/.test(char)) {
-      diagnostics.push(diagnostic3(contentRange(index, index + 1), `Duration "${char}" is not attached to an ABC note`, "abc.malformedDuration"));
+      diagnostics.push(diagnostic4(contentRange(index, index + 1), `Duration "${char}" is not attached to an ABC note`, "abc.malformedDuration"));
     } else {
-      diagnostics.push(diagnostic3(contentRange(index, index + 1), `Unsupported ABC music syntax "${char}"`, "abc.unsupportedMusicSyntax"));
+      diagnostics.push(diagnostic4(contentRange(index, index + 1), `Unsupported ABC music syntax "${char}"`, "abc.unsupportedMusicSyntax"));
     }
     pendingAccidental = null;
     pendingDecorations = [];
@@ -15095,7 +16417,7 @@ var INLINE_HEADER_CODES = new Set(["K", "M", "L", "V"]);
 function range2(start, end, line = 1, column = 0) {
   return { start, end, line, column, endLine: line, endColumn: column + Math.max(0, end - start) };
 }
-function diagnostic4(sourceRange, message, code, severity = "warning") {
+function diagnostic5(sourceRange, message, code, severity = "warning") {
   return {
     kind: "diagnostic",
     severity,
@@ -15159,7 +16481,7 @@ function parseInlineHeaders(line) {
 function applyHeaderToTune(tune, field, diagnostics) {
   tune.headers.push(field);
   if (!MVP_HEADER_CODES.has(field.code)) {
-    diagnostics.push(diagnostic4(field.sourceRange, `Unknown ABC header field "${field.code}:"`, "abc.unknownHeaderField"));
+    diagnostics.push(diagnostic5(field.sourceRange, `Unknown ABC header field "${field.code}:"`, "abc.unknownHeaderField"));
     return;
   }
   if (field.code === "X")
@@ -15171,24 +16493,24 @@ function applyHeaderToTune(tune, field, diagnostics) {
     if (meter)
       tune.meter = meter;
     else
-      diagnostics.push(diagnostic4(field.valueRange ?? field.sourceRange, `Invalid ABC meter "${field.value}"`, "abc.invalidMeter"));
+      diagnostics.push(diagnostic5(field.valueRange ?? field.sourceRange, `Invalid ABC meter "${field.value}"`, "abc.invalidMeter"));
   } else if (field.code === "L") {
     const duration3 = parseAbcDurationValue(field.value);
     if (duration3)
       tune.defaultNoteLength = duration3;
     else
-      diagnostics.push(diagnostic4(field.valueRange ?? field.sourceRange, `Invalid ABC default note length "${field.value}"`, "abc.invalidDefaultNoteLength"));
+      diagnostics.push(diagnostic5(field.valueRange ?? field.sourceRange, `Invalid ABC default note length "${field.value}"`, "abc.invalidDefaultNoteLength"));
   } else if (field.code === "K") {
     const key = parseAbcKey(field.value);
     if (key)
       tune.key = key;
     else
-      diagnostics.push(diagnostic4(field.valueRange ?? field.sourceRange, `Invalid ABC key "${field.value}"`, "abc.invalidKey"));
+      diagnostics.push(diagnostic5(field.valueRange ?? field.sourceRange, `Invalid ABC key "${field.value}"`, "abc.invalidKey"));
     diagnostics.push(...validateAbcKeyModifiers(field));
   } else if (field.code === "V") {
     const voice = parseAbcVoiceDeclaration(field);
     if (!voice) {
-      diagnostics.push(diagnostic4(field.valueRange ?? field.sourceRange, "ABC voice declaration is missing a voice id", "abc.invalidVoice"));
+      diagnostics.push(diagnostic5(field.valueRange ?? field.sourceRange, "ABC voice declaration is missing a voice id", "abc.invalidVoice"));
       return;
     }
     diagnostics.push(...validateAbcVoiceModifiers(field));
@@ -15245,7 +16567,7 @@ function finalizeTune(tune, index, diagnostics) {
   if (!tune.defaultNoteLength)
     tune.defaultNoteLength = inferAbcDefaultNoteLength(tune.meter);
   if (!tune.key) {
-    diagnostics.push(diagnostic4(tune.firstRange, "ABC tune is missing a K: key field", "abc.missingKey"));
+    diagnostics.push(diagnostic5(tune.firstRange, "ABC tune is missing a K: key field", "abc.missingKey"));
   }
   return {
     kind: "tune",
@@ -15495,7 +16817,7 @@ function normalizeRational3(value) {
   const divisor = a || 1;
   return { num: value.num / divisor, den: value.den / divisor };
 }
-function addRational(a, b) {
+function addRational3(a, b) {
   return normalizeRational3({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
 }
 function lessThan(a, b) {
@@ -15660,7 +16982,7 @@ function addNoteEvent(draft, tune, note, eventCounter, keyInfo, accidentalMemory
   draft.events.push(event);
   sourceRangeByEventId.set(event.id, sourceRangeFromAbc(note.sourceRange));
   if (!isGrace)
-    draft.durationWhole = addRational(draft.durationWhole, durationWholeFromAbcDuration(note.duration));
+    draft.durationWhole = addRational3(draft.durationWhole, durationWholeFromAbcDuration(note.duration));
   return event;
 }
 function addGraceGroup(draft, tune, group, eventCounter, keyInfo, accidentalMemory, sourceRangeByEventId) {
@@ -66309,7 +67631,7 @@ var DEFAULT_SVG_LAYOUT_MODE = "fixed";
 var DEFAULT_SCORE_WIDTH_PX = Math.round(SVG_W * 3 / 4);
 
 // src/music-rendering/engraving/skyline.ts
-class Skyline {
+class Skyline2 {
   dir;
   baseline;
   isAbove;
@@ -66807,7 +68129,7 @@ function chordSuffixNode(item) {
   if (!item.suffix || item.suffix === "maj7")
     return null;
   return el("tspan", {
-    baselineShift: "super",
+    dy: -LINE_SPACING * 1.2,
     fontSize: CHORD_NAME_FONT_SIZE * Math.SQRT1_2
   }, item.suffix);
 }
@@ -68096,9 +69418,10 @@ function baseSlurNoteheadAttachmentY(noteY, dir, staffLineYs) {
 }
 var TIE_END_OFF_STEM_DOWN = LINE_SPACING * 0.726;
 var TIE_END_OFF_STEM_UP = LINE_SPACING * 0.239;
-var TIE_CTRL_MIN = LINE_SPACING * 0.574;
-var TIE_CTRL_INTERCEPT = LINE_SPACING * 0.42;
-var TIE_CTRL_SLOPE = 0.077;
+var TIE_CTRL_MIN = LINE_SPACING * 0.68;
+var TIE_CTRL_INTERCEPT = LINE_SPACING * 0.6435;
+var TIE_CTRL_SLOPE = 0.02877;
+var TIE_CTRL_MAX = LINE_SPACING * 1;
 var TIE_PEAK_FACTOR = 0.75;
 var TIE_THICKNESS = LINE_SPACING * 0.12;
 var TIE_INSET_MIN = 0.15;
@@ -68307,7 +69630,7 @@ function computeTieGeometry(startNoteY, endNoteY, x1, x2, tieUp, stemDown, staff
   const sy2 = endNoteY + endOff * dir;
   const span = Math.abs(x2 - x1);
   const spanSS = span / LINE_SPACING;
-  let ctrlH = Math.max(TIE_CTRL_MIN, TIE_CTRL_INTERCEPT + span * TIE_CTRL_SLOPE);
+  let ctrlH = Math.min(TIE_CTRL_MAX, Math.max(TIE_CTRL_MIN, TIE_CTRL_INTERCEPT + span * TIE_CTRL_SLOPE));
   if (staffLineYs) {
     const midY0 = (sy1 + sy2) / 2;
     ctrlH = clearStaffLines(midY0, ctrlH, dir, sy1, sy2, staffLineYs, TIE_PEAK_FACTOR);
@@ -68544,9 +69867,141 @@ function buildRenderedSlurTrace(input) {
   };
 }
 
+// src/music-rendering/renderer/staffRow/slurSlots.ts
+function voiceKeyOfEventId(eventId2) {
+  if (!eventId2)
+    return null;
+  const cut = eventId2.indexOf("-event-");
+  return cut > 0 ? eventId2.slice(0, cut) : null;
+}
+function sourceRangeAttr(range3) {
+  return range3 ? `${range3.start}:${range3.end}` : undefined;
+}
+function closeSlurSlot(slot, ctx) {
+  const {
+    els,
+    note,
+    nx,
+    ny,
+    stemUp,
+    mi,
+    ni,
+    yOffset,
+    middleY,
+    staffLineYs,
+    noteBeamOuterY,
+    noteBeamStemX,
+    noteXs,
+    noteSteps,
+    graceXOffsets,
+    beamedNoteStemUp,
+    stepForPitch,
+    onSlurTrace
+  } = ctx;
+  if (slot.curveContext) {
+    appendNoteToSlurCurveContext({
+      context: slot.curveContext,
+      note,
+      ni,
+      endpoint: true,
+      yOffset,
+      noteXs,
+      noteSteps,
+      graceXOffsets,
+      noteBeamOuterY,
+      noteBeamStemX,
+      beamedNoteStemUp,
+      stepForPitch
+    });
+  }
+  const { x: x1, y: y1 } = slot, x2 = nx, y2 = ny;
+  const curveContext = slot.curveContext;
+  const startBeamOuterY = slot.stemUp === true ? slot.beamOuterY ?? undefined : undefined;
+  const endBeamOuterY = stemUp && noteBeamOuterY.has(ni) ? noteBeamOuterY.get(ni) : undefined;
+  const slurX1 = startBeamOuterY !== undefined && slot.beamStemX !== null ? slot.beamStemX : x1;
+  const slurX2 = endBeamOuterY !== undefined && noteBeamStemX.has(ni) ? noteBeamStemX.get(ni) : x2;
+  const slurGeom = computeSlurGeometry(slurX1, y1, slurX2, y2, middleY, staffLineYs, undefined, undefined, startBeamOuterY, endBeamOuterY, curveContext, "outside-beam", !!onSlurTrace);
+  const { pathD } = slurGeom;
+  if (onSlurTrace) {
+    const trace = buildRenderedSlurTrace({
+      measureIndex: slot.mi,
+      kind: "slur",
+      startNoteIndex: slot.ni,
+      endNoteIndex: ni,
+      ...slot.eventId ? { startEventId: slot.eventId } : {},
+      ...note.eventId ? { endEventId: note.eventId } : {},
+      geom: slurGeom
+    });
+    if (trace)
+      onSlurTrace(trace);
+  }
+  els.push(el("path", {
+    fill: C_WHITE,
+    stroke: C_WHITE,
+    strokeWidth: LINE_SPACING * 0.08,
+    strokeLinejoin: "round",
+    strokeLinecap: "round",
+    d: pathD,
+    "data-lily-element": "slur",
+    ...slot.eventId ? { "data-lily-event-id": slot.eventId } : {},
+    ...note.eventId ? { "data-lily-target-event-id": note.eventId } : {},
+    "data-lily-location": `${slot.mi}:${slot.ni}`,
+    ...mi != null && ni != null ? { "data-lily-target-location": `${mi}:${ni}` } : {},
+    ...sourceRangeAttr(slot.sourceRange) ? { "data-lily-source-range": sourceRangeAttr(slot.sourceRange) } : {},
+    ...sourceRangeAttr(note.sourceRange) ? { "data-lily-target-source-range": sourceRangeAttr(note.sourceRange) } : {}
+  }, undefined, `slur${yOffset}-${mi}-${ni}-${slot.mi}-${slot.ni}`));
+}
+function openSlurSlot(ctx) {
+  const {
+    note,
+    nx,
+    ny,
+    stemUp,
+    mi,
+    ni,
+    yOffset,
+    noteBeamOuterY,
+    noteBeamStemX,
+    noteXs,
+    noteSteps,
+    graceXOffsets,
+    beamedNoteStemUp,
+    stepForPitch
+  } = ctx;
+  const slot = {
+    x: nx,
+    y: ny,
+    mi,
+    ni,
+    stemUp,
+    beamOuterY: stemUp && noteBeamOuterY.has(ni) ? noteBeamOuterY.get(ni) : null,
+    beamStemX: stemUp && noteBeamStemX.has(ni) ? noteBeamStemX.get(ni) : null,
+    eventId: note.eventId ?? null,
+    sourceRange: note.sourceRange ?? null,
+    curveContext: { notes: [], obstacles: [] },
+    voiceKey: voiceKeyOfEventId(note.eventId)
+  };
+  appendNoteToSlurCurveContext({
+    context: slot.curveContext,
+    note,
+    ni,
+    endpoint: true,
+    yOffset,
+    noteXs,
+    noteSteps,
+    graceXOffsets,
+    noteBeamOuterY,
+    noteBeamStemX,
+    beamedNoteStemUp,
+    stepForPitch
+  });
+  return slot;
+}
+
 // src/music-rendering/renderer/staffRow/slursTies.ts
 function createSlurTieState() {
   return {
+    openSlurs: new Map,
     slurStartX: null,
     slurStartY: null,
     slurStartMi: null,
@@ -68573,7 +70028,7 @@ function createSlurTieState() {
     tieStartStemUp: null
   };
 }
-function sourceRangeAttr(range3) {
+function sourceRangeAttr2(range3) {
   return range3 ? `${range3.start}:${range3.end}` : undefined;
 }
 function renderGraceGroupSlurIfNeeded(opts) {
@@ -68628,28 +70083,50 @@ function updateSlursAndTiesForNote(opts) {
     stepForPitch,
     onSlurTrace
   } = opts;
-  if (note.slurEnd && state.slurStartX !== null && state.slurStartY !== null) {
-    if (state.slurCurveContext) {
-      appendNoteToSlurCurveContext({
-        context: state.slurCurveContext,
-        note,
-        ni,
-        endpoint: true,
-        yOffset,
-        noteXs,
-        noteSteps,
-        graceXOffsets,
-        noteBeamOuterY,
-        noteBeamStemX,
-        beamedNoteStemUp,
-        stepForPitch
-      });
-    }
-    const { slurStartX: x1, slurStartY: y1 } = state, x2 = nx, y2 = ny;
-    const curveContext = state.slurCurveContext ?? (state.slurStartMi === mi ? buildMeasureSlurCurveContext({
-      measure: measure2,
-      startNi: state.slurStartNi,
-      endNi: ni,
+  const slotCtx = {
+    els,
+    note,
+    nx,
+    ny,
+    stemUp,
+    mi,
+    ni,
+    yOffset,
+    middleY,
+    staffLineYs,
+    noteBeamOuterY,
+    noteBeamStemX,
+    noteXs,
+    noteSteps,
+    graceXOffsets,
+    beamedNoteStemUp,
+    stepForPitch,
+    ...onSlurTrace ? { onSlurTrace } : {}
+  };
+  const closeSlot = (slot) => closeSlurSlot(slot, slotCtx);
+  const openSlot = () => openSlurSlot(slotCtx);
+  const endIds = note.slurEndIds ?? [];
+  const startIds = note.slurStartIds ?? [];
+  const noteVoiceKey = voiceKeyOfEventId(note.eventId);
+  for (const id of endIds) {
+    const slot = state.openSlurs.get(id);
+    if (!slot)
+      continue;
+    closeSlot(slot);
+    state.openSlurs.delete(id);
+  }
+  for (const [id, slot] of state.openSlurs) {
+    if (endIds.includes(id))
+      continue;
+    if (slot.voiceKey && noteVoiceKey && slot.voiceKey !== noteVoiceKey)
+      continue;
+    if (!slot.curveContext)
+      continue;
+    appendNoteToSlurCurveContext({
+      context: slot.curveContext,
+      note,
+      ni,
+      endpoint: false,
       yOffset,
       noteXs,
       noteSteps,
@@ -68658,48 +70135,45 @@ function updateSlursAndTiesForNote(opts) {
       noteBeamStemX,
       beamedNoteStemUp,
       stepForPitch
-    }) : buildEndpointSlurCurveContext({
-      x1,
-      y1,
-      stemUp1: state.slurStartStemUp,
-      x2,
-      y2,
-      stemUp2: stemUp
-    }));
-    const startBeamOuterY = state.slurStartStemUp === true ? state.slurStartBeamOuterY ?? undefined : undefined;
-    const endBeamOuterY = stemUp && noteBeamOuterY.has(ni) ? noteBeamOuterY.get(ni) : undefined;
-    const slurX1 = startBeamOuterY !== undefined && state.slurStartBeamStemX !== null ? state.slurStartBeamStemX : x1;
-    const slurX2 = endBeamOuterY !== undefined && noteBeamStemX.has(ni) ? noteBeamStemX.get(ni) : x2;
-    const slurGeom = computeSlurGeometry(slurX1, y1, slurX2, y2, middleY, staffLineYs, undefined, undefined, startBeamOuterY, endBeamOuterY, curveContext, "outside-beam", !!onSlurTrace);
-    const { pathD } = slurGeom;
-    if (onSlurTrace) {
-      const trace = buildRenderedSlurTrace({
-        measureIndex: state.slurStartMi ?? mi,
-        kind: "slur",
-        startNoteIndex: state.slurStartNi ?? ni,
-        endNoteIndex: ni,
-        ...state.slurStartEventId ? { startEventId: state.slurStartEventId } : {},
-        ...note.eventId ? { endEventId: note.eventId } : {},
-        geom: slurGeom
-      });
-      if (trace)
-        onSlurTrace(trace);
-    }
-    els.push(el("path", {
-      fill: C_WHITE,
-      stroke: C_WHITE,
-      strokeWidth: LINE_SPACING * 0.08,
-      strokeLinejoin: "round",
-      strokeLinecap: "round",
-      d: pathD,
-      "data-lily-element": "slur",
-      ...state.slurStartEventId ? { "data-lily-event-id": state.slurStartEventId } : {},
-      ...note.eventId ? { "data-lily-target-event-id": note.eventId } : {},
-      ...state.slurStartMi != null && state.slurStartNi != null ? { "data-lily-location": `${state.slurStartMi}:${state.slurStartNi}` } : {},
-      ...mi != null && ni != null ? { "data-lily-target-location": `${mi}:${ni}` } : {},
-      ...sourceRangeAttr(state.slurStartSourceRange) ? { "data-lily-source-range": sourceRangeAttr(state.slurStartSourceRange) } : {},
-      ...sourceRangeAttr(note.sourceRange) ? { "data-lily-target-source-range": sourceRangeAttr(note.sourceRange) } : {}
-    }, undefined, `slur${yOffset}-${mi}-${ni}`));
+    });
+  }
+  for (const id of startIds) {
+    state.openSlurs.set(id, openSlot());
+  }
+  if (!endIds.length && note.slurEnd && state.slurStartX !== null && state.slurStartY !== null) {
+    const legacySlot = {
+      x: state.slurStartX,
+      y: state.slurStartY,
+      mi: state.slurStartMi ?? mi,
+      ni: state.slurStartNi ?? ni,
+      stemUp: state.slurStartStemUp ?? false,
+      beamOuterY: state.slurStartBeamOuterY,
+      beamStemX: state.slurStartBeamStemX,
+      eventId: state.slurStartEventId,
+      sourceRange: state.slurStartSourceRange,
+      curveContext: state.slurCurveContext ?? (state.slurStartMi === mi ? buildMeasureSlurCurveContext({
+        measure: measure2,
+        startNi: state.slurStartNi,
+        endNi: ni,
+        yOffset,
+        noteXs,
+        noteSteps,
+        graceXOffsets,
+        noteBeamOuterY,
+        noteBeamStemX,
+        beamedNoteStemUp,
+        stepForPitch
+      }) : buildEndpointSlurCurveContext({
+        x1: state.slurStartX,
+        y1: state.slurStartY,
+        stemUp1: state.slurStartStemUp,
+        x2: nx,
+        y2: ny,
+        stemUp2: stemUp
+      })),
+      voiceKey: null
+    };
+    closeSlot(legacySlot);
     state.slurStartX = null;
     state.slurStartY = null;
     state.slurStartMi = null;
@@ -68710,7 +70184,7 @@ function updateSlursAndTiesForNote(opts) {
     state.slurStartEventId = null;
     state.slurStartSourceRange = null;
     state.slurCurveContext = null;
-  } else if (state.slurCurveContext) {
+  } else if (!endIds.length && !startIds.length && state.slurCurveContext) {
     appendNoteToSlurCurveContext({
       context: state.slurCurveContext,
       note,
@@ -68726,7 +70200,7 @@ function updateSlursAndTiesForNote(opts) {
       stepForPitch
     });
   }
-  if (note.slurStart) {
+  if (!startIds.length && note.slurStart) {
     state.slurStartX = nx;
     state.slurStartY = ny;
     state.slurStartMi = mi;
@@ -68817,8 +70291,8 @@ function updateSlursAndTiesForNote(opts) {
       ...note.eventId ? { "data-lily-target-event-id": note.eventId } : {},
       ...state.phrasingSlurStartMi != null && state.phrasingSlurStartNi != null ? { "data-lily-location": `${state.phrasingSlurStartMi}:${state.phrasingSlurStartNi}` } : {},
       ...mi != null && ni != null ? { "data-lily-target-location": `${mi}:${ni}` } : {},
-      ...sourceRangeAttr(state.phrasingSlurStartSourceRange) ? { "data-lily-source-range": sourceRangeAttr(state.phrasingSlurStartSourceRange) } : {},
-      ...sourceRangeAttr(note.sourceRange) ? { "data-lily-target-source-range": sourceRangeAttr(note.sourceRange) } : {}
+      ...sourceRangeAttr2(state.phrasingSlurStartSourceRange) ? { "data-lily-source-range": sourceRangeAttr2(state.phrasingSlurStartSourceRange) } : {},
+      ...sourceRangeAttr2(note.sourceRange) ? { "data-lily-target-source-range": sourceRangeAttr2(note.sourceRange) } : {}
     }, undefined, `pslur${yOffset}-${mi}-${ni}`));
     state.phrasingSlurStartX = null;
     state.phrasingSlurStartY = null;
@@ -69146,7 +70620,8 @@ function renderLyricsRow(lyricLine, noteXs, baselineY, fontFamily, rowKey, fontS
             y: hy,
             width: dashW,
             height: HYPHEN_H,
-            fill: "currentColor"
+            fill: "currentColor",
+            "data-lily-element": "lyric-hyphen"
           }, undefined, `lyh-${rowKey}-${si}`));
         }
       }
@@ -69159,7 +70634,7 @@ function renderLyricsRow(lyricLine, noteXs, baselineY, fontFamily, rowKey, fontS
         const nextTextW = nextSyl.text.length * fontSize * CHAR_W_RATIO;
         const extX1 = x + textW / 2 + 1;
         const extX2 = x2 - nextTextW / 2 - 1;
-        if (extX2 > extX1) {
+        if (extX2 - extX1 > 1) {
           const extY = baselineY - 1;
           els.push(el("line", {
             x1: extX1,
@@ -69167,7 +70642,8 @@ function renderLyricsRow(lyricLine, noteXs, baselineY, fontFamily, rowKey, fontS
             x2: extX2,
             y2: extY,
             stroke: "currentColor",
-            strokeWidth: 0.8
+            strokeWidth: 0.8,
+            "data-lily-element": "lyric-extender"
           }, undefined, `lye-${rowKey}-${si}`));
         }
       }
@@ -70566,6 +72042,17 @@ function lilyElementAttrs(element, mi, ni, eventId2, suffix) {
   };
 }
 
+// src/music-rendering/textFontFaces.ts
+var SCHOLA_FAMILY = "TeX Gyre Schola";
+var ROMAN_TEXT_STACK = `"${SCHOLA_FAMILY}", serif`;
+var SCHOLA_FACES = [
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Regular.woff2" },
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Bold.woff2", weight: "bold" },
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Italic.woff2", style: "italic" },
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-BoldItalic.woff2", weight: "bold", style: "italic" }
+];
+var SCHOLA_FILES = SCHOLA_FACES.map((f) => f.file);
+
 // src/music-rendering/smufl/textFontForMusicFont.ts
 function textFontForMusicFont(musicFont, context = "general") {
   if (musicFont === "Petaluma") {
@@ -70574,7 +72061,7 @@ function textFontForMusicFont(musicFont, context = "general") {
   if (context === "chord-symbol") {
     return "sans-serif";
   }
-  return "serif";
+  return ROMAN_TEXT_STACK;
 }
 
 // src/music-rendering/renderer/staffRow/measureNotes/grobs.ts
@@ -72272,6 +73759,22 @@ function renderMeasureNotes(opts) {
       fontInfo,
       measureObjects
     })) {
+      if (note.noteText) {
+        renderMeasureNoteText({
+          els,
+          note,
+          mi,
+          ni,
+          nx,
+          ny,
+          yOffset,
+          topY,
+          btmY,
+          stemUp: false,
+          nhType: noteheadType(note.duration),
+          fontInfo
+        });
+      }
       continue;
     }
     const noteheadCtx = {
@@ -72610,14 +74113,17 @@ function placeSingleStaffNotes(input) {
     noteArea,
     systemShortestDur,
     showClefChange,
-    firstOrdinaryOffset
+    firstOrdinaryOffset,
+    chainLeadingGapW,
+    chainFullTail,
+    chainTerminalShortTail
   } = input;
   if (isPercentRepeatOnlyMeasure(measure2)) {
     const x = mx + repStartOffset + headerChangeW + noteArea * 0.5;
     return measure2.map(() => x);
   }
   let naturalTotal = 0;
-  const spacingEvents = spacingEventsForMeasure(measure2);
+  const spacingEvents = applyTerminalShortTail(spacingEventsForMeasure(measure2), systemShortestDur, chainTerminalShortTail);
   const realDurations = spacingEvents.map((event) => event.duration);
   const musicScales = spacingEvents.map((event) => event.musicScale ?? 1);
   for (let i = 0;i < realDurations.length; i++) {
@@ -72632,10 +74138,18 @@ function placeSingleStaffNotes(input) {
       continue;
     eventAccCols.push(noteAccCols[ni] ?? 0);
   }
-  const solvedWidths = solveSpringWidths(realDurations, systemShortestDur, noteArea, musicScales, spacingEvents.map((event, ei) => ({ ...event, accidentalColumns: eventAccCols[ei] ?? 0 })));
+  const fixedLead = chainFullTail && spacingEvents.length > 0 ? chainPlacementLead(spacingEvents, systemShortestDur, {
+    chainLeadingGapW,
+    useFirstOrdinaryRod: headerChangeW === 0 && !showClefChange,
+    firstOrdinaryOffset
+  }) : undefined;
+  const solveTarget = fixedLead != null ? Math.max(1, noteArea - fixedLead) : noteArea;
+  const solvedWidths = solveSpringWidths(realDurations, systemShortestDur, solveTarget, musicScales, spacingEvents.map((event, ei) => ({ ...event, accidentalColumns: eventAccCols[ei] ?? 0 })), chainFullTail === true);
   const attackOffsets = attackOffsetsForEvents(solvedWidths, spacingEvents, {
     useFirstOrdinaryRod: headerChangeW === 0 && !showClefChange,
     firstOrdinaryOffset,
+    chainLeadingGapW,
+    fixedFirstAttack: fixedLead,
     shortestDur: systemShortestDur,
     useExpandedAttackSprings: shouldUseExpandedAttackSprings(spacingEvents, solvedWidths, systemShortestDur)
   });
@@ -72657,7 +74171,7 @@ function placeSingleStaffNotes(input) {
     const spacingEvent = !n.isGrace && n.duration > 0 ? spacingEvents[widthIdx] : undefined;
     const currentStep = noteSteps?.[ni];
     const attackOffset = n.isGrace || n.duration <= 0 ? 0 : attackOffsets[widthIdx] ?? 0;
-    const appliedAccShift = accidentalAttackShiftAmount(accidentalShift, spacingEvent, systemShortestDur, { previousStep: previousVisibleStep, currentStep });
+    const appliedAccShift = chainFullTail ? 0 : accidentalAttackShiftAmount(accidentalShift, spacingEvent, systemShortestDur, { previousStep: previousVisibleStep, currentStep });
     noteXs[ni] = mx + repStartOffset + headerChangeW + cumGraceShift + cumInlineClefShift + cumAccShift + appliedAccShift + attackOffset;
     cumAccShift += appliedAccShift;
     if (!n.isGrace && n.duration > 0) {
@@ -72846,26 +74360,37 @@ function computeLayoutBeatMap(input) {
     systemShortestDur,
     showClefChange,
     firstOrdinaryOffset,
+    chainLeadingGapW,
+    chainFullTail,
+    chainTerminalShortTail,
     enforceMeasureBounds,
     noteAreaStartX,
     contentRightX,
     leftBoundaryCenterGap,
-    firstNoteGapOptions,
-    beamedIndices
+    firstNoteGapOptions
   } = input;
-  const layoutSpacingEvents = spacingEventsForMeasure(layoutMeasure);
+  const layoutSpacingEvents = applyTerminalShortTail(spacingEventsForMeasure(layoutMeasure), systemShortestDur, chainTerminalShortTail);
   const resolvedFirstNoteGapOptions = {
     ...firstNoteGapOptions,
+    chainLeadingGapW,
     firstAccidentalColumns: firstNoteGapOptions?.firstAccidentalColumns ?? firstVisibleAccidentalColumns(layoutMeasure, layoutNoteAccCols),
     firstAccidentalKind: firstNoteGapOptions?.firstAccidentalKind ?? firstVisibleAccidentalKind(layoutMeasure, layoutNoteAccCols, layoutNoteAccidentalKinds)
   };
   const layoutDurations = layoutSpacingEvents.map((event) => event.duration);
   const layoutMusicScales = layoutSpacingEvents.map((event) => event.musicScale ?? 1);
-  const layoutSolvedWidths = solveSpringWidths(layoutDurations, systemShortestDur, noteArea, layoutMusicScales, layoutSpacingEvents);
+  const layoutFixedLead = chainFullTail && layoutSpacingEvents.length > 0 ? chainPlacementLead(layoutSpacingEvents, systemShortestDur, {
+    chainLeadingGapW,
+    useFirstOrdinaryRod: headerChangeW === 0 && !showClefChange,
+    firstOrdinaryOffset
+  }) : undefined;
+  const layoutSolveTarget = layoutFixedLead != null ? Math.max(1, noteArea - layoutFixedLead) : noteArea;
+  const layoutSolvedWidths = solveSpringWidths(layoutDurations, systemShortestDur, layoutSolveTarget, layoutMusicScales, layoutSpacingEvents);
   const layoutFirstSpringW = layoutSolvedWidths[0];
   const layoutAttackOffsets = attackOffsetsForEvents(layoutSolvedWidths, layoutSpacingEvents, {
     useFirstOrdinaryRod: headerChangeW === 0 && !showClefChange,
     firstOrdinaryOffset,
+    chainLeadingGapW,
+    fixedFirstAttack: layoutFixedLead,
     shortestDur: systemShortestDur,
     useExpandedAttackSprings: shouldUseExpandedAttackSprings(layoutSpacingEvents, layoutSolvedWidths, systemShortestDur)
   });
@@ -72895,7 +74420,7 @@ function computeLayoutBeatMap(input) {
     const spacingEvent = layoutSpacingEvents[layoutWidthIdx];
     const currentStep = layoutNoteSteps?.[li];
     const attackOffset = layoutAttackOffsets[layoutWidthIdx] ?? 0;
-    const appliedAccShift = accidentalAttackShiftAmount(accidentalShift, spacingEvent, systemShortestDur, { previousStep: previousVisibleStep, currentStep });
+    const appliedAccShift = chainFullTail ? 0 : accidentalAttackShiftAmount(accidentalShift, spacingEvent, systemShortestDur, { previousStep: previousVisibleStep, currentStep });
     layoutBeats[li] = cumBeat;
     layoutNoteXs[li] = mx + repStartOffset + headerChangeW + cumGraceShift + cumInlineClefShift + cumAccShift + appliedAccShift + attackOffset;
     cumAccShift += appliedAccShift;
@@ -72922,12 +74447,7 @@ function computeLayoutBeatMap(input) {
       enforceBarlineLastNoteGap(layoutNoteXs, layoutMeasure, contentRightX, layoutRods, systemShortestDur);
     }
     enforceBarlineFirstNoteGap(layoutNoteXs, layoutMeasure, noteAreaStartX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, resolvedFirstNoteGapOptions);
-    const beforeBoundaryBalance = layoutNoteXs.slice();
-    layoutNoteXs = balanceMeasureBoundaryCenterSlack(layoutNoteXs, layoutMeasure, noteAreaStartX, contentRightX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, beamedIndices, resolvedFirstNoteGapOptions, layoutNoteSteps);
-    const boundaryBalanceMovedNotes = layoutNoteXs.some((x, i) => Math.abs(x - beforeBoundaryBalance[i]) > 0.5);
-    if (boundaryBalanceMovedNotes) {
-      enforceBarlineLastNoteGap(layoutNoteXs, layoutMeasure, contentRightX, layoutRods, systemShortestDur);
-    }
+    layoutNoteXs = enforceMeasureLeftBoundaryRod(layoutNoteXs, layoutMeasure, noteAreaStartX, contentRightX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, undefined, resolvedFirstNoteGapOptions);
     layoutNoteXs = fitBarlineBoundaryGaps(layoutNoteXs, layoutMeasure, noteAreaStartX, contentRightX, layoutRods, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, undefined, undefined, resolvedFirstNoteGapOptions);
     enforceRods(layoutNoteXs, layoutRods);
   }
@@ -72991,9 +74511,19 @@ function finalizeMeasureNoteXs(input) {
     hasRepeatStartBoundary,
     previousIsRepeatEnd,
     finishWithLeftHeaderBound,
+    plainMidlineBoundary,
     stepForPitch
   } = input;
   let { noteXs } = input;
+  const seamProbe = debugFlag("SEAM_PROBE") ? (() => {
+    const visible = measure2.map((n, i) => ({ n, i })).filter(({ n }) => !n.isGrace && n.duration > 0);
+    return {
+      first: visible.length ? noteXs[visible[0].i] : null,
+      last: visible.length ? noteXs[visible[visible.length - 1].i] : null,
+      firstIdx: visible.length ? visible[0].i : -1,
+      lastIdx: visible.length ? visible[visible.length - 1].i : -1
+    };
+  })() : null;
   for (let ni = 0;ni < measure2.length; ni++) {
     if (!measure2[ni].isGrace)
       continue;
@@ -73034,17 +74564,28 @@ function finalizeMeasureNoteXs(input) {
     noteXs = enforceBarlineFirstNoteGap(noteXs, measure2, noteAreaStartX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, firstNoteGapOptions);
     noteXs = finishWithLeftHeaderBound ? enforceBarlineFirstNoteGap(noteXs, measure2, noteAreaStartX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, firstNoteGapOptions) : enforceBarlineLastNoteGap(noteXs, measure2, contentRightX, measureRods, systemShortestDur, noteStepsForOpt, beamedSet);
     noteXs = enforceBarlineFirstNoteGap(noteXs, measure2, noteAreaStartX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, firstNoteGapOptions);
-    const beforeBoundaryBalance = noteXs.slice();
-    noteXs = balanceMeasureBoundaryCenterSlack(noteXs, measure2, noteAreaStartX, contentRightX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, beamedSet, firstNoteGapOptions, noteStepsForOpt);
-    const boundaryBalanceMovedNotes = noteXs.some((x, i) => Math.abs(x - beforeBoundaryBalance[i]) > 0.5);
-    if (boundaryBalanceMovedNotes) {
-      noteXs = enforceBarlineLastNoteGap(noteXs, measure2, contentRightX, measureRods, systemShortestDur, noteStepsForOpt, beamedSet);
-    }
-    if (hasRepeatStartBoundary || previousIsRepeatEnd || finishWithLeftHeaderBound) {
+    noteXs = enforceMeasureLeftBoundaryRod(noteXs, measure2, noteAreaStartX, contentRightX, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, beamedSet, firstNoteGapOptions, noteStepsForOpt, plainMidlineBoundary ?? false);
+    const hasLyricBoundaryFloor = measure2.some((n) => (n.lyricWidth ?? 0) > 0);
+    if (hasRepeatStartBoundary || previousIsRepeatEnd || finishWithLeftHeaderBound || hasLyricBoundaryFloor) {
       noteXs = fitBarlineBoundaryGaps(noteXs, measure2, noteAreaStartX, contentRightX, measureRods, systemShortestDur, leftBoundaryCenterGap, layoutFirstSpringW, noteStepsForOpt, beamedSet, firstNoteGapOptions);
     }
   }
   placeSecondaryVoiceNotes(measure2, noteXs);
+  if (seamProbe) {
+    process.stdout.write(`#SEAM ${JSON.stringify({
+      noteIdx,
+      sharedLayout: usesSharedLayout,
+      noteAreaStartX,
+      contentRightX,
+      prePost: [
+        seamProbe.first,
+        seamProbe.last,
+        seamProbe.firstIdx >= 0 ? noteXs[seamProbe.firstIdx] : null,
+        seamProbe.lastIdx >= 0 ? noteXs[seamProbe.lastIdx] : null
+      ]
+    })}
+`);
+  }
   return { noteXs };
 }
 
@@ -73151,10 +74692,24 @@ function buildMeasureRenderPlan(input) {
     currentClef: measureClef,
     nextMeasureStartsWithClefChange: clefChangeNoteIndices.has(noteIdx + measure2.length)
   });
-  const firstOrdinaryOffset = mi > 0 && headerChangeW === 0 && !showClefChange ? ORDINARY_POST_BARLINE_ATTACK_OFFSET : ORDINARY_FIRST_ATTACK_OFFSET;
+  const autoBeamEnabledAt = (ni) => autoBeamByNoteIndex?.[noteIdx + ni] ?? (measureAutoBeams?.[globalMi] ?? true);
+  const beamGroups = findResolvedBeamGroups(measure2, curTimeSig, autoBeamEnabledAt);
+  const beamedSet = new Set;
+  for (const group of beamGroups) {
+    for (const i of group.indices)
+      beamedSet.add(i);
+  }
+  const budgetFirstEvent = spacingEventsForMeasure(measure2)[0];
+  const firstOrdinaryOffset = mi > 0 && headerChangeW === 0 && !showClefChange ? budgetFirstEvent ? postBarlineFirstNoteGap(budgetFirstEvent, systemShortestDur, undefined, {
+    compactShortNoteBoundary: shouldUseCompactShortBoundaryGap(measure2, systemShortestDur, beamedSet)
+  }) : ORDINARY_POST_BARLINE_ATTACK_OFFSET : ORDINARY_FIRST_ATTACK_OFFSET;
   const spacingInput = {
     shortestDur: systemShortestDur,
     scale,
+    chainFullTail: input.chainFullTail,
+    chainTerminalShortTail: input.chainTerminalShortTail,
+    noteAreaOverrideW: input.chainNoteAreaW,
+    lyricSeamFloor: mi > 0 && headerChangeW === 0 && !showClefChange,
     keySet: measureKeySet,
     globalStartIndex: noteIdx,
     firstOrdinaryOffset,
@@ -73198,21 +74753,19 @@ function buildMeasureRenderPlan(input) {
   const previousIsRepeatEnd = mi > 0 && system.repeatEndAfter.has(mi - 1);
   const repeatEndBoundaryCenterGap = systemMeasurePlan?.repeatEndBoundaryCenterGap ?? (previousIsRepeatEnd ? POST_REPEAT_END_FIRST_NOTE_CENTER_GAP : 0);
   const leftBoundaryCenterGap = Math.max(finishWithLeftHeaderBound ? ORDINARY_FIRST_ATTACK_OFFSET : 0, repeatEndBoundaryCenterGap) || undefined;
-  const autoBeamEnabledAt = (ni) => autoBeamByNoteIndex?.[noteIdx + ni] ?? (measureAutoBeams?.[globalMi] ?? true);
-  const beamGroups = findResolvedBeamGroups(measure2, curTimeSig, autoBeamEnabledAt);
-  const beamedSet = new Set;
-  for (const group of beamGroups) {
-    for (const i of group.indices)
-      beamedSet.add(i);
-  }
   const noteSteps = computeNoteStepsForMeasure(measure2, noteIdx, stepForPitch);
   const layoutNoteSteps = layoutMeasure === measure2 ? noteSteps : computeNoteStepsForMeasure(layoutMeasure, noteIdx, stepForPitch);
   const firstNoteGapOptions = {
+    chainLeadingGapW: input.chainLeadingGapW,
+    lyricSeamFloor: mi > 0 && headerChangeW === 0 && !showClefChange,
     preserveSustainedNaturalGap: mi === renderMeasureCount - 1 && systemShortestDur >= 0.5,
     compactShortNoteBoundary: shouldUseCompactShortBoundaryGap(layoutMeasure, systemShortestDur, beamedSet),
     firstAccidentalColumns: firstVisibleAccidentalColumns2(layoutMeasure, layoutNoteAccCols),
     firstAccidentalKind: firstVisibleAccidentalKind2(layoutMeasure, layoutNoteAccCols, layoutSpacingPlan.noteAccidentalKinds)
   };
+  const chainLeadingGapW = input.chainLeadingGapW;
+  const chainFullTail = input.chainFullTail;
+  const chainTerminalShortTail = input.chainTerminalShortTail;
   const layoutBeatMapPlan = systemMeasurePlan ?? computeLayoutBeatMap({
     layoutMeasure,
     layoutNoteAccCols,
@@ -73227,6 +74780,9 @@ function buildMeasureRenderPlan(input) {
     systemShortestDur,
     showClefChange,
     firstOrdinaryOffset,
+    chainLeadingGapW,
+    chainFullTail,
+    chainTerminalShortTail,
     enforceMeasureBounds: false,
     noteAreaStartX,
     contentRightX,
@@ -73265,7 +74821,10 @@ function buildMeasureRenderPlan(input) {
     noteArea,
     systemShortestDur,
     showClefChange,
-    firstOrdinaryOffset
+    firstOrdinaryOffset,
+    chainLeadingGapW,
+    chainFullTail,
+    chainTerminalShortTail
   });
   ({ noteXs } = finalizeMeasureNoteXs({
     measure: measure2,
@@ -73284,6 +74843,7 @@ function buildMeasureRenderPlan(input) {
     hasRepeatStartBoundary,
     previousIsRepeatEnd,
     finishWithLeftHeaderBound,
+    plainMidlineBoundary: mi > 0 && !finishWithLeftHeaderBound && !hasRepeatStartBoundary && !previousIsRepeatEnd,
     stepForPitch
   }));
   const inlineClefChanges = [];
@@ -73715,6 +75275,238 @@ function renderSystemHeader(topY, btmY, yOffset, systemEndX, hdrW, indentX, syst
   }
   return els;
 }
+// src/music-rendering/layout/staffSpacingSpring.ts
+function staffSpacingSpecKey(breakDir) {
+  return breakDir === "center" ? "next-note" : "first-note";
+}
+function staffSpacingSpring(input) {
+  const [extLeft, extRight] = input.prefatoryExtent;
+  const extLength = extRight - extLeft;
+  const { type, distance } = input.spec;
+  let fixed = extRight;
+  let ideal = fixed + 1;
+  let isStretchable = true;
+  switch (type) {
+    case "fixed-space":
+      fixed += distance;
+      ideal = fixed;
+      break;
+    case "extra-space":
+      ideal = fixed + distance;
+      break;
+    case "semi-fixed-space":
+      fixed += distance / 2;
+      ideal = fixed + distance / 2;
+      break;
+    case "minimum-space":
+      ideal = extLeft + Math.max(extLength, distance);
+      break;
+    case "minimum-fixed-space":
+      fixed = extLeft + Math.max(extLength, distance);
+      ideal = fixed;
+      break;
+    case "shrink-space":
+      ideal = fixed + distance;
+      isStretchable = false;
+      break;
+    case "semi-shrink-space":
+      fixed += distance / 2;
+      ideal = fixed + distance / 2;
+      isStretchable = false;
+      break;
+  }
+  const stretchability = isStretchable ? ideal - fixed : 0;
+  ideal += input.situationalSpace ?? 0;
+  const optical = input.opticalCorrection ?? 0;
+  fixed += optical;
+  ideal += optical;
+  const minDist = input.minimumDistance;
+  const minDistCorrection = Math.max(0, 0.3 + minDist - fixed);
+  fixed += minDistCorrection;
+  ideal = Math.max(ideal, fixed);
+  return {
+    ideal,
+    minimum: minDist,
+    inverseStretch: Math.max(0, stretchability),
+    inverseCompress: Math.max(0, ideal - fixed),
+    fixed
+  };
+}
+var STAFF_SPACING_ALIST = {
+  barline: {
+    "first-note": { type: "semi-shrink-space", distance: 1.3 },
+    "next-note": { type: "semi-fixed-space", distance: 0.9 }
+  },
+  clef: {
+    "first-note": { type: "minimum-fixed-space", distance: 5 },
+    "next-note": { type: "extra-space", distance: 1 }
+  },
+  "key-signature": {
+    "first-note": { type: "shrink-space", distance: 2.5 },
+    "next-note": { type: "shrink-space", distance: 2.5 }
+  },
+  "key-cancellation": {
+    "first-note": { type: "shrink-space", distance: 2.5 },
+    "next-note": { type: "shrink-space", distance: 2.5 }
+  },
+  "time-signature": {
+    "first-note": { type: "semi-shrink-space", distance: 2 },
+    "next-note": { type: "semi-shrink-space", distance: 2 }
+  }
+};
+
+// src/music-rendering/layout/systemColumnChain.ts
+var BARLINE_PREFATORY_EXTENT = [0, 0.19];
+function barlineSeamSpring(input) {
+  const position = input.position ?? "midline";
+  const s = staffSpacingSpring({
+    prefatoryExtent: BARLINE_PREFATORY_EXTENT,
+    spec: STAFF_SPACING_ALIST.barline[staffSpacingSpecKey(position === "midline" ? "center" : "right")],
+    minimumDistance: input.minimumDistanceSs,
+    opticalCorrection: input.opticalCorrectionSs,
+    situationalSpace: input.situationalSpaceSs
+  });
+  return {
+    idealDistanceSs: s.ideal,
+    minDistanceSs: Math.max(0, s.minimum),
+    inverseStretchStrength: Math.max(0, s.inverseStretch),
+    inverseCompressStrength: Math.max(s.inverseCompress, 0.000000001)
+  };
+}
+function measureChainSpring(m) {
+  const idealSs = Math.max(m.baseW, 0) / LINE_SPACING;
+  const minSs = Math.min(Math.max(m.minW, 0), Math.max(m.baseW, 0)) / LINE_SPACING;
+  return {
+    idealDistanceSs: idealSs,
+    minDistanceSs: minSs,
+    inverseStretchStrength: Math.max(m.inverseStretch, 0.000000001),
+    inverseCompressStrength: Math.max(idealSs - minSs, 0.000000001)
+  };
+}
+function solveSystemColumnChain(input) {
+  const { measures, seams, targetW, uniformScale, isRagged } = input;
+  const fallback = () => ({
+    measureWs: measures.map((m) => m.baseW * uniformScale),
+    measureScales: measures.map(() => uniformScale),
+    seamWs: seams.map((s) => s.minW + (s.extraInkW ?? 0)),
+    force: null,
+    fellBack: true
+  });
+  if (measures.length === 0 || seams.length !== measures.length)
+    return fallback();
+  const chain = [];
+  const seamExtras = [];
+  for (let mi = 0;mi < measures.length; mi++) {
+    chain.push(measureChainSpring(measures[mi]));
+    const seam = seams[mi];
+    const extraSs = (seam.extraInkW ?? 0) / LINE_SPACING;
+    const bar = barlineSeamSpring({
+      minimumDistanceSs: Math.max(seam.minW, 0) / LINE_SPACING,
+      position: seam.position,
+      opticalCorrectionSs: (seam.opticalCorrectionSs ?? 0) + (seam.centreShiftSs ?? 0),
+      situationalSpaceSs: seam.situationalSpaceSs
+    });
+    seamExtras.push(extraSs);
+    const spentSs = Math.max(0, seam.alreadySpentW ?? 0) / LINE_SPACING;
+    chain.push({
+      idealDistanceSs: Math.max(0, bar.idealDistanceSs - spentSs) + extraSs,
+      minDistanceSs: Math.max(0, bar.minDistanceSs - spentSs) + extraSs,
+      inverseStretchStrength: bar.inverseStretchStrength,
+      inverseCompressStrength: bar.inverseCompressStrength
+    });
+  }
+  if (isRagged) {
+    const measureWs2 = [];
+    const measureScales2 = [];
+    const seamWs2 = [];
+    for (let mi = 0;mi < measures.length; mi++) {
+      const w = chain[mi * 2].idealDistanceSs * LINE_SPACING;
+      measureWs2.push(w);
+      measureScales2.push(w / Math.max(measures[mi].baseW, 1));
+      seamWs2.push(chain[mi * 2 + 1].idealDistanceSs * LINE_SPACING);
+    }
+    return { measureWs: measureWs2, measureScales: measureScales2, seamWs: seamWs2, force: 0, fellBack: false };
+  }
+  const solution = solveSpringChain(chain, targetW / LINE_SPACING);
+  if (solution.overConstrained)
+    return fallback();
+  const measureWs = [];
+  const measureScales = [];
+  const seamWs = [];
+  for (let mi = 0;mi < measures.length; mi++) {
+    const measureW = solution.lengthsSs[mi * 2] * LINE_SPACING;
+    measureWs.push(measureW);
+    measureScales.push(measureW / Math.max(measures[mi].baseW, 1));
+    seamWs.push(solution.lengthsSs[mi * 2 + 1] * LINE_SPACING);
+  }
+  return { measureWs, measureScales, seamWs, force: solution.force, fellBack: false };
+}
+function measureChainSeamFacts(input) {
+  const { measure: measure2, stepForPitch, noteAccCols, expectedDuration } = input;
+  const firstVisibleIdx = measure2.findIndex((note) => isSpacingVisibleNote(note));
+  const firstNote = firstVisibleIdx >= 0 ? measure2[firstVisibleIdx] : undefined;
+  const visibleCount = measure2.reduce((count, note) => count + (isSpacingVisibleNote(note) ? 1 : 0), 0);
+  return {
+    firstIsRest: Boolean(firstNote?.isRest),
+    postBarRodW: firstNote && !firstNote.isRest ? postBarlineSkylineRodPx({
+      note: firstNote,
+      chordSteps: [
+        stepForPitch(firstNote.noteName, firstNote.octave),
+        ...(firstNote.chordNotes ?? []).map((cn) => stepForPitch(cn.noteName, cn.octave))
+      ],
+      stemUp: firstNote.stemDirection != null ? firstNote.stemDirection === "up" : stepForPitch(firstNote.noteName, firstNote.octave) < 4,
+      accidentalWidthPx: (noteAccCols[firstVisibleIdx] ?? 0) * ACC_EXTRA_W * noteMusicScale(firstNote)
+    }) ?? 0 : 0,
+    fillsMeasure: visibleCount === 1 && firstNote != null && firstNote.duration > expectedDuration / 2
+  };
+}
+function planSystemChainSpacing(input) {
+  const {
+    active,
+    measureBaseWs,
+    measureAggregates,
+    measureTailWs,
+    measurePostBarRodWs,
+    measureFillsMeasure,
+    measureFirstIsRest,
+    firstOrdinaryOffsets,
+    availNotes,
+    uniformScale
+  } = input;
+  if (!active)
+    return { measureWs: null, solvedTailWs: null, chainLeadingGapWs: null, measureScales: null };
+  const tailWRow = measureTailWs.reduce((sum, tailW) => sum + tailW, 0);
+  const solution = solveSystemColumnChain({
+    measures: measureBaseWs.map((baseW, mi) => ({
+      baseW,
+      minW: measureAggregates[mi]?.minPx ?? 0,
+      inverseStretch: measureAggregates[mi]?.inverseStretch ?? 0
+    })),
+    seams: measureTailWs.map((tailW, mi) => {
+      if (mi === measureTailWs.length - 1) {
+        return { minW: 0, alreadySpentW: 1e6, position: "line-start" };
+      }
+      return {
+        minW: Math.max(tailW, measurePostBarRodWs?.[mi + 1] ?? 0),
+        alreadySpentW: firstOrdinaryOffsets[mi + 1] ?? 0,
+        situationalSpaceSs: measureFillsMeasure?.[mi + 1] ? 1 : 0,
+        centreShiftSs: measureFirstIsRest?.[mi + 1] ? 0.5 : 0
+      };
+    }),
+    targetW: Math.max(1, availNotes + tailWRow),
+    uniformScale,
+    isRagged: false
+  });
+  if (solution.fellBack)
+    return { measureWs: null, solvedTailWs: null, chainLeadingGapWs: null, measureScales: null };
+  return {
+    measureWs: solution.measureWs,
+    solvedTailWs: solution.seamWs,
+    chainLeadingGapWs: solution.seamWs.map((seamW, mi) => seamW + (firstOrdinaryOffsets[mi + 1] ?? 0)),
+    measureScales: solution.measureScales
+  };
+}
+
 // src/music-rendering/renderer/systemLayout/systemWidth.ts
 var HIGH_EXPANSION_STRETCH_THRESHOLD = 1.5;
 function measureDurationQN2(measure2) {
@@ -73817,10 +75609,14 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
     measureAutoBeams
   } = props;
   const resolvedContentWidth = contentWidth ?? 0;
+  const chainActive = !debugFlag("LILYJS_COLUMN_CHAIN_OFF") && !(raggedRight === true || isLast === true && raggedLast === true);
   let naturalSpringW = 0;
   let fixedReserveWRow = 0;
   let extraWRow = 0;
   const measureBaseWs = [];
+  const measureAggregates = [];
+  const measureTailWs = [];
+  const seamFactsPerMeasure = [];
   const measureExpectedDurations = [];
   const compactShortMeasureExponents = [];
   const voltaStretchBonuses = [];
@@ -73868,16 +75664,19 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
     const structurallyShortPickup = actualDuration > 0 && actualDuration < expectedDuration - 0.001 && system.isFirst && mi === 0;
     const structurallyShortVolta = actualDuration > 0 && actualDuration < expectedDuration - 0.001 && system.voltaAt.has(mi);
     const isVoltaMeasure = system.voltaAt.has(mi);
+    const stepFor = (noteName, octave) => staffStepForClef(noteStep(noteName, octave), measureClef);
     const spacingPlan = buildMeasureSpacingPlan({
       measure: m,
       shortestDur: systemShortestDur,
       keySet,
-      stepForPitch: (noteName, octave) => staffStepForClef(noteStep(noteName, octave), measureClef),
+      stepForPitch: stepFor,
       dynamicReserveW: measureDynamicReserveW(m),
       preBarlineReserveW,
       repStartOffset,
       isRepeatEnd,
-      firstOrdinaryOffset
+      firstOrdinaryOffset,
+      chainFullTail: chainActive,
+      lyricSeamFloor: mi > 0 && headerWidths.headerChangeW === 0 && !hasClefChange
     });
     measureFacts.push({
       keySet,
@@ -73894,6 +75693,15 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       dynamicReserveW: measureDynamicReserveW(m)
     });
     measureBaseWs.push(spacingPlan.reserves.baseW);
+    const events2 = spacingEventsForMeasure(m);
+    measureAggregates.push(measureSpringAggregate(events2.map((event) => event.duration), systemShortestDur, events2.map((event) => event.musicScale ?? 1), events2.map((event, ei) => ({ ...event, accidentalColumns: spacingPlan.noteAccCols[ei] ?? 0 }))));
+    measureTailWs.push(spacingPlan.reserves.tailW);
+    seamFactsPerMeasure.push(measureChainSeamFacts({
+      measure: m,
+      stepForPitch: stepFor,
+      noteAccCols: spacingPlan.noteAccCols,
+      expectedDuration
+    }));
     measureExpectedDurations.push(expectedDuration);
     compactShortMeasureExponents.push(structurallyShortPickup ? 2 : structurallyShortVolta ? 0.55 : 0);
     voltaStretchBonuses.push(isVoltaMeasure ? structurallyShortVolta ? 0.25 : 0.85 : 0);
@@ -73902,15 +75710,15 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
     measureNoteIndex += m.length;
   }
   const naturalW = naturalSpringW + fixedReserveWRow;
-  const barlineGapWRow = system.measures.reduce((s, _m, mi) => {
+  const wideBreakGapAfter = (mi) => {
     if (mi >= system.measures.length - 1)
-      return s;
+      return 0;
     const isRepEnd = system.repeatEndAfter.has(mi);
     const nextRepSt = !isRepEnd && system.repeatStartBefore.has(mi + 1);
     const override = system.measureBarlines?.get(mi);
-    const isWideBreak = !isRepEnd && !nextRepSt && (override === "double" || override === "final");
-    return s + (isWideBreak ? WIDE_BARLINE_W : 0);
-  }, 0);
+    return !isRepEnd && !nextRepSt && (override === "double" || override === "final") ? WIDE_BARLINE_W : 0;
+  };
+  const barlineGapWRow = system.measures.reduce((s, _m, mi) => s + wideBreakGapAfter(mi), 0);
   const lastMi = system.measures.length - 1;
   const endIsRepEnd = lastMi >= 0 && system.repeatEndAfter.has(lastMi);
   const endOverride = lastMi >= 0 ? system.measureBarlines?.get(lastMi) : undefined;
@@ -73922,7 +75730,20 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
   const scaleToFit = availNotes / Math.max(naturalSpringW, 1);
   const scale = isRagged ? Math.min(1, scaleToFit) : scaleToFit;
   const needsWeightedExpansion = scaleToFit > HIGH_EXPANSION_STRETCH_THRESHOLD || compactShortMeasureExponents.some((exponent) => exponent > 0) || voltaStretchBonuses.some((bonus) => bonus > 0);
-  const measureScales = !isRagged && needsWeightedExpansion ? expandedMeasureScales({
+  const chainPlan = planSystemChainSpacing({
+    active: chainActive,
+    measureBaseWs,
+    measureAggregates,
+    measureTailWs,
+    measurePostBarRodWs: seamFactsPerMeasure.map((facts) => facts.postBarRodW),
+    measureFillsMeasure: seamFactsPerMeasure.map((facts) => facts.fillsMeasure),
+    measureFirstIsRest: seamFactsPerMeasure.map((facts) => facts.firstIsRest),
+    firstOrdinaryOffsets: measureFacts.map((facts) => facts.firstOrdinaryOffset),
+    availNotes,
+    uniformScale: scale
+  });
+  const chainLeadingGapWs = chainPlan.chainLeadingGapWs;
+  const measureScales = chainPlan.measureScales ? chainPlan.measureScales : !isRagged && needsWeightedExpansion ? expandedMeasureScales({
     bases: measureBaseWs,
     measures: system.measures,
     expectedDurations: measureExpectedDurations,
@@ -73953,7 +75774,12 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       preBarlineReserveW: facts.preBarlineReserveW,
       repStartOffset: facts.repStartOffset,
       isRepeatEnd: facts.isRepeatEnd,
-      firstOrdinaryOffset: facts.firstOrdinaryOffset
+      firstOrdinaryOffset: facts.firstOrdinaryOffset,
+      tailW: undefined,
+      chainLeadingGapW: mi > 0 ? chainLeadingGapWs?.[mi - 1] : undefined,
+      chainFullTail: chainActive,
+      lyricSeamFloor: mi > 0 && facts.headerChangeW === 0 && !facts.showClefChange,
+      noteAreaOverrideW: chainPlan.measureWs ? chainPlan.measureWs[mi] + (mi > 0 ? chainPlan.solvedTailWs?.[mi - 1] ?? 0 : 0) : undefined
     });
     const { mw, noteArea } = spacingPlan;
     const contentRightX = measureNoteContentRightX({
@@ -73978,6 +75804,7 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
         beamedSet.add(index);
     }
     const layoutNoteSteps = measure2.map((note) => note.isRest ? 4 : staffStepForClef(noteStep(note.noteName, note.octave), facts.measureClef));
+    const measureChainLeadingGapW = mi > 0 && facts.headerChangeW === 0 && !facts.showClefChange ? chainLeadingGapWs?.[mi - 1] : undefined;
     const { beatToX, layoutFirstSpringW } = computeLayoutBeatMap({
       layoutMeasure: measure2,
       layoutNoteAccCols: spacingPlan.noteAccCols,
@@ -73992,12 +75819,16 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       systemShortestDur,
       showClefChange: facts.showClefChange,
       firstOrdinaryOffset: facts.firstOrdinaryOffset,
+      chainLeadingGapW: measureChainLeadingGapW,
+      chainFullTail: chainActive,
+      chainTerminalShortTail: chainActive && mi === system.measures.length - 1,
       enforceMeasureBounds: true,
       noteAreaStartX,
       contentRightX,
       leftBoundaryCenterGap,
       firstNoteGapOptions: {
-        preserveSustainedNaturalGap: mi === system.measures.length - 1 && systemShortestDur >= 0.5
+        preserveSustainedNaturalGap: mi === system.measures.length - 1 && systemShortestDur >= 0.5,
+        lyricSeamFloor: mi > 0 && facts.headerChangeW === 0 && !facts.showClefChange
       },
       beamedIndices: beamedSet
     });
@@ -74010,14 +75841,13 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       contentRightX,
       beatToX,
       layoutFirstSpringW,
-      repeatEndBoundaryCenterGap
+      repeatEndBoundaryCenterGap,
+      chainLeadingGapW: measureChainLeadingGapW,
+      chainFullTail: chainActive || undefined,
+      chainTerminalShortTail: chainActive && mi === system.measures.length - 1 || undefined
     });
     if (mi < system.measures.length - 1) {
-      const isRepEnd = system.repeatEndAfter.has(mi);
-      const nextRepSt = !isRepEnd && system.repeatStartBefore.has(mi + 1);
-      const override = system.measureBarlines?.get(mi);
-      const isWideBreak = !isRepEnd && !nextRepSt && (override === "double" || override === "final");
-      mx += mw + (isWideBreak ? WIDE_BARLINE_W : 0);
+      mx += mw + wideBreakGapAfter(mi);
     }
     renderMeasureNoteIndex += measure2.length;
   }
@@ -74373,8 +76203,8 @@ function buildSystemVerticalSkylinePlan(input) {
     clef: clef3,
     ottavaRegions
   } = props;
-  const aboveSkyline = new Skyline("above", topY);
-  const belowSkyline = new Skyline("below", btmY);
+  const aboveSkyline = new Skyline2("above", topY);
+  const belowSkyline = new Skyline2("below", btmY);
   const markCandidates = [];
   const measureBounds = [];
   let cursor2 = createMeasureCursor({
@@ -74402,6 +76232,10 @@ function buildSystemVerticalSkylinePlan(input) {
       measure: measure2,
       layoutMeasure,
       systemMeasurePlan: staffMeasures ? measurePlans?.[mi] : undefined,
+      chainLeadingGapW: measurePlans?.[mi]?.chainLeadingGapW,
+      chainFullTail: measurePlans?.[mi]?.chainFullTail,
+      chainTerminalShortTail: measurePlans?.[mi]?.chainTerminalShortTail,
+      chainNoteAreaW: measurePlans?.[mi]?.chainFullTail ? measurePlans?.[mi]?.noteArea : undefined,
       mi,
       mx: cursor2.mx,
       globalMi: cursor2.globalMi,
@@ -74648,7 +76482,7 @@ function renderSystemLayout(props) {
   const cx = headerPlan.contentStartX + contentInset;
   const rehearsalMarkTextStartX = LEFT_MARGIN + hdrW + indentX + contentInset + LINE_SPACING * 1.5;
   const systemShortestDur = systemSpacingReferenceDur(system.measures);
-  const belowSky = new Skyline("below", btmY);
+  const belowSky = new Skyline2("below", btmY);
   const dynEvents = [];
   const hairpinSpans = [];
   const hpState = { open: null };
@@ -74696,6 +76530,10 @@ function renderSystemLayout(props) {
       measure: measure2,
       layoutMeasure,
       systemMeasurePlan: staffMeasures ? widthPlan.measurePlans[mi] : undefined,
+      chainLeadingGapW: widthPlan.measurePlans[mi]?.chainLeadingGapW,
+      chainFullTail: widthPlan.measurePlans[mi]?.chainFullTail,
+      chainTerminalShortTail: widthPlan.measurePlans[mi]?.chainTerminalShortTail,
+      chainNoteAreaW: widthPlan.measurePlans[mi]?.chainFullTail ? widthPlan.measurePlans[mi]?.noteArea : undefined,
       mi,
       mx,
       globalMi,
@@ -74806,8 +76644,11 @@ function renderSystemLayout(props) {
   }
   if (lyricLines?.length && noteXByGlobalIdx.size > 0) {
     const textFont = 'Georgia, "Times New Roman", serif';
+    const belowInkY = belowSky.query(0, Number.MAX_SAFE_INTEGER);
+    const lyricAscent = LYRIC_FONT_SIZE * 0.8;
+    const firstBaselineY = Math.max(btmY + LYRIC_FIRST_OFFSET, belowInkY + LINE_SPACING * 0.5 + lyricAscent);
     lyricLines.forEach((line, li) => {
-      const baselineY = btmY + LYRIC_FIRST_OFFSET + LYRIC_ROW_H * li;
+      const baselineY = firstBaselineY + LYRIC_ROW_H * li;
       els.push(...renderLyricsRow(line, noteXByGlobalIdx, baselineY, textFont, `${yOffset}-${li}`, lyricFontSizeDelta));
     });
   }
@@ -74915,6 +76756,9 @@ function graceTypeForEvent(event) {
   const value = event.__lilyGraceType;
   return value === "grace" || value === "acciaccatura" || value === "appoggiatura" || value === "slashedGrace" ? value : undefined;
 }
+function lilyIsSpacerForEvent(event) {
+  return event.__lilyIsSpacer === true;
+}
 function lilyLayoutDurationForEvent(event) {
   const value = event.__lilyLayoutDuration;
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -74942,12 +76786,14 @@ function lilyParsedRenderingMetadataForEvent(event) {
   const tagged = event;
   const fingering2 = typeof tagged.__lilyFingering === "number" && Number.isFinite(tagged.__lilyFingering) ? tagged.__lilyFingering : undefined;
   const glissandoStyle = tagged.__lilyGlissandoStyle === "solid" || tagged.__lilyGlissandoStyle === "dashed-line" ? tagged.__lilyGlissandoStyle : undefined;
+  const forceAccidental = tagged.__lilyForceAccidental === "forced" || tagged.__lilyForceAccidental === "cautionary" ? tagged.__lilyForceAccidental : undefined;
   return {
     ...fingering2 != null ? { fingering: fingering2 } : {},
     ...tagged.__lilyFingeringBelow ? { fingeringBelow: true } : {},
     ...tagged.__lilyGlissando ? { glissando: true } : {},
     ...glissandoStyle ? { glissandoStyle } : {},
-    ...tagged.__lilyFingerGlideStart ? { fingerGlideStart: true } : {}
+    ...tagged.__lilyFingerGlideStart ? { fingerGlideStart: true } : {},
+    ...forceAccidental ? { forceAccidental } : {}
   };
 }
 function lyricLinesFromScore(score2, noteIndexByEventId) {
@@ -74976,6 +76822,25 @@ function lyricLinesFromScore(score2, noteIndexByEventId) {
     }];
   });
   return lines.length ? lines : undefined;
+}
+function attachLyricWidths(notes, lyricLines, lyricFontSizeDelta) {
+  if (!lyricLines?.length)
+    return;
+  const step = lyricFontSizeDelta ?? LP_LYRIC_DEFAULT_STEP;
+  const fontSize = LYRIC_FONT_SIZE_BASE * Math.pow(2, step / 6);
+  for (const line of lyricLines) {
+    for (const syl of line.syllables) {
+      const text = syl.text?.trim();
+      if (!text)
+        continue;
+      const note = notes[syl.noteIndex];
+      if (!note)
+        continue;
+      const w = estimateMarkupAdvanceWidthPx(text, fontSize);
+      if (w > (note.lyricWidth ?? 0))
+        note.lyricWidth = w;
+    }
+  }
 }
 function pedalEventsFromScore(score2, noteIndexByEventId) {
   if (!score2.pedalEvents.length)
@@ -75078,12 +76943,14 @@ function scoreToRenderModel(score2) {
   const globalStaffSize = typeof info?.globalStaffSize === "number" ? info.globalStaffSize : undefined;
   const debugSkylines = typeof info?.debugSkylines === "boolean" ? info.debugSkylines : undefined;
   const printInitialRepeatBar = info?.printInitialRepeatBar === true ? true : undefined;
+  const instrumentName = typeof info?.instrumentName === "string" ? info.instrumentName : undefined;
   const barNumberSelfAlignmentX = info?.barNumberSelfAlignmentX === "left" || info?.barNumberSelfAlignmentX === "center" || info?.barNumberSelfAlignmentX === "right" ? info.barNumberSelfAlignmentX : undefined;
   const barNumberDirection = info?.barNumberDirection === "up" || info?.barNumberDirection === "down" ? info.barNumberDirection : undefined;
   const barNumberVisibility = info?.barNumberVisibility === "all" ? "all" : undefined;
   const annotateSpacing = typeof info?.annotateSpacing === "boolean" ? info.annotateSpacing : undefined;
   const pageBreaking = pageBreakingModeFromInfo(info?.pageBreaking);
   const lyricFontSizeDelta = typeof info?.lyricFontSizeDelta === "number" ? info.lyricFontSizeDelta : undefined;
+  const baseShortestDurationQN = typeof info?.baseShortestDurationQN === "number" ? info.baseShortestDurationQN : undefined;
   const embeddedStructuralEvents = score2.__lilyStructuralEvents ?? info?.structuralEvents ?? [];
   const embeddedPercentRepeatRegions = score2.__lilyPercentRepeatRegions;
   const sourceRangeByEventId = score2.__lilySourceRangeByEventId ?? new Map;
@@ -75099,6 +76966,7 @@ function scoreToRenderModel(score2) {
       ...globalStaffSize != null ? { globalStaffSize } : {},
       ...debugSkylines != null ? { debugSkylines } : {},
       ...printInitialRepeatBar ? { printInitialRepeatBar } : {},
+      ...instrumentName ? { instrumentName } : {},
       ...barNumberSelfAlignmentX ? { barNumberSelfAlignmentX } : {},
       ...barNumberDirection ? { barNumberDirection } : {},
       ...barNumberVisibility ? { barNumberVisibility } : {},
@@ -75109,6 +76977,7 @@ function scoreToRenderModel(score2) {
   const notes = [];
   const noteIndexByEventId = new Map;
   const systemBreaks = [];
+  const pendingSlurs = [];
   const repeatRegions = [];
   const voltaRegions = [];
   const ottavaRegions = [];
@@ -75181,6 +77050,7 @@ function scoreToRenderModel(score2) {
           tupletFactors,
           isRest: true,
           ...isFullMeasureRestEvent(event) ? { isFullMeasureRest: true } : {},
+          ...lilyIsSpacerForEvent(event) ? { isSpacer: true } : {},
           ...mmRestBars != null ? { mmRestBars } : {},
           stemDirection
         };
@@ -75281,14 +77151,8 @@ function scoreToRenderModel(score2) {
         }
       }
     }
-    for (const slur of measure2.slurs) {
-      const startIdx = noteIndexByEventId.get(slur.startEventId);
-      const endIdx = noteIndexByEventId.get(slur.endEventId);
-      if (startIdx != null)
-        notes[startIdx].slurStart = true;
-      if (endIdx != null)
-        notes[endIdx].slurEnd = true;
-    }
+    for (const slur of measure2.slurs)
+      pendingSlurs.push(slur);
     for (const tie of measure2.ties) {
       const startIdx = noteIndexByEventId.get(tie.fromNoteId);
       const endIdx = noteIndexByEventId.get(tie.toNoteId);
@@ -75416,6 +77280,20 @@ function scoreToRenderModel(score2) {
     }
     measureStartQN += measureQN;
   }
+  for (let si = 0;si < pendingSlurs.length; si++) {
+    const slur = pendingSlurs[si];
+    const startIdx = noteIndexByEventId.get(slur.startEventId);
+    const endIdx = noteIndexByEventId.get(slur.endEventId);
+    const id = `${slur.startEventId}~${si}`;
+    if (startIdx != null) {
+      notes[startIdx].slurStart = true;
+      (notes[startIdx].slurStartIds ??= []).push(id);
+    }
+    if (endIdx != null) {
+      notes[endIdx].slurEnd = true;
+      (notes[endIdx].slurEndIds ??= []).push(id);
+    }
+  }
   if (pendingVolta) {
     voltaRegions.push({
       start: pendingVolta.start,
@@ -75539,6 +77417,7 @@ function scoreToRenderModel(score2) {
   const staffClef = part2.staves?.[0]?.clef;
   const clef3 = staffClef?.sign === "F" ? "bass" : staffClef?.sign === "C" ? "alto" : staffClef?.sign === "G" ? "treble" : undefined;
   const lyricLines = lyricLinesFromScore(score2, noteIndexByEventId);
+  attachLyricWidths(notes, lyricLines, lyricFontSizeDelta);
   const pedalEvents = pedalEventsFromScore(score2, noteIndexByEventId);
   return {
     lilypondVersion,
@@ -75548,12 +77427,14 @@ function scoreToRenderModel(score2) {
     ...globalStaffSize != null ? { globalStaffSize } : {},
     ...debugSkylines != null ? { debugSkylines } : {},
     ...printInitialRepeatBar ? { printInitialRepeatBar } : {},
+    ...instrumentName ? { instrumentName } : {},
     ...barNumberSelfAlignmentX ? { barNumberSelfAlignmentX } : {},
     ...barNumberDirection ? { barNumberDirection } : {},
     ...barNumberVisibility ? { barNumberVisibility } : {},
     ...annotateSpacing != null ? { annotateSpacing } : {},
     ...pageBreaking ? { pageBreaking } : {},
     ...lyricFontSizeDelta != null ? { lyricFontSizeDelta } : {},
+    ...baseShortestDurationQN != null ? { baseShortestDurationQN } : {},
     key,
     timeSig: timeSig2,
     clef: clef3,
@@ -76026,6 +77907,7 @@ function buildScoreSystemPlan(input) {
     barNumberBase: mrStart + 1 - (effectivePartial != null ? 1 : 0),
     measureExpectedDurations,
     measureClefs,
+    baseShortestDurationQN: activeTune.baseShortestDurationQN,
     ...perSystemPenalty != null ? { perSystemPenalty } : {}
   };
   const buildSystems = (traceOut) => computeLineBreaks(measures, activeTune.key, measureRange ? undefined : activeTune.systemBreaks, measureRange ? undefined : activeTune.repeatRegions, measureRange ? undefined : activeTune.voltaRegions, firstIndent ?? activeTune.firstIndent, measureBarlines, measureKeySigs, lineBreakContentWidth, firstSystemContentInset, traceOut, lineBreakOptions);
@@ -76122,8 +78004,8 @@ function buildScoreSystemPlan(input) {
     return entries;
   };
   const realNoteEntries = collectRealNoteEntries(0, measures.length);
-  const firstSystem = systems[0];
-  const firstSystemRealNoteEntries = firstSystem ? collectRealNoteEntries(firstSystem.measureOffset, firstSystem.measureOffset + firstSystem.measures.length) : realNoteEntries;
+  const perSystemRealNoteEntries = systems.map((sys) => collectRealNoteEntries(sys.measureOffset, sys.measureOffset + sys.measures.length));
+  const firstSystemRealNoteEntries = perSystemRealNoteEntries[0] ?? realNoteEntries;
   const measureQNOffsets = [];
   let qn = 0;
   for (const m of allMeasures) {
@@ -76164,6 +78046,7 @@ function buildScoreSystemPlan(input) {
     badMeasures,
     realNoteEntries,
     firstSystemRealNoteEntries,
+    perSystemRealNoteEntries,
     measureQNOffsets,
     mrStart
   };
@@ -76250,12 +78133,13 @@ function computeHeaderRows(opts) {
       }]
     });
   }
-  if (opts.meter && opts.composer) {
+  const composerRowLeft = opts.meter ?? opts.poet;
+  if (composerRowLeft && opts.composer) {
     rows.push({
       kind: "meterComposer",
       cells: [{
         key: "meter-0",
-        text: opts.meter,
+        text: composerRowLeft,
         align: "left",
         fontSize: HEADER_COMPOSER_FONT_SIZE
       }, {
@@ -76266,12 +78150,12 @@ function computeHeaderRows(opts) {
         fontStyle: "italic"
       }]
     });
-  } else if (opts.meter) {
+  } else if (composerRowLeft) {
     rows.push({
       kind: "meter",
       cells: [{
         key: "meter-0",
-        text: opts.meter,
+        text: composerRowLeft,
         align: "left",
         fontSize: HEADER_COMPOSER_FONT_SIZE
       }]
@@ -76358,6 +78242,7 @@ function computeScoreVerticalLayout(opts) {
     activeTune,
     realNoteEntries,
     firstSystemRealNoteEntries,
+    perSystemRealNoteEntries,
     hasChordSymbols,
     showTitle,
     contentWidth,
@@ -76373,6 +78258,7 @@ function computeScoreVerticalLayout(opts) {
   const hasNonFirstSystemTempoMark = (activeTune.tempoMarks ?? []).some((mark) => !firstSystemNoteIndices.has(mark.noteIndex));
   const computeContentExtents = (entries, includeTempoMarks, opts2 = {}) => {
     const includeRehearsalMarks = opts2.includeRehearsalMarks ?? true;
+    const groupStemUp = opts2.groupStemUp;
     const useRenderedStemExtents = showTitle;
     let topContentY2 = STAFF_TOP - chordNameHeadroom;
     const entriesHaveTempoMark = includeTempoMarks && entries.some(({ noteIndex }) => tempoNoteIndices.has(noteIndex));
@@ -76415,7 +78301,8 @@ function computeScoreVerticalLayout(opts) {
     if (voltaTopContentY !== undefined) {
       topContentY2 = Math.min(topContentY2, voltaTopContentY);
     }
-    for (const { note: n, step } of entries) {
+    for (let ei = 0;ei < entries.length; ei++) {
+      const { note: n, step } = entries[ei];
       const musicScale = useRenderedStemExtents ? noteMusicScale(n) : 1;
       const chordSteps = n.chordNotes?.map((cn) => noteStep(cn.noteName, cn.octave)) ?? [];
       const chordTopStep = Math.max(step, ...chordSteps);
@@ -76424,7 +78311,8 @@ function computeScoreVerticalLayout(opts) {
       const chordBottomY = stepY(chordBottomStep);
       const noteheadHalfHeight = LINE_SPACING * 0.45 * musicScale;
       const stemH = (n.duration < 1 ? STEM_H_FLAG : STEM_H) * musicScale;
-      const stemUp = useRenderedStemExtents ? n.stemDirection ? n.stemDirection === "up" : step < 4 : step < 4;
+      const groupDir = groupStemUp?.get(ei);
+      const stemUp = groupDir !== undefined ? groupDir : useRenderedStemExtents ? n.stemDirection ? n.stemDirection === "up" : step < 4 : step < 4;
       contentBottom2 = Math.max(contentBottom2, chordBottomY + (useRenderedStemExtents ? noteheadHalfHeight : 0));
       if (hasChordSymbols) {
         topContentY2 = Math.min(topContentY2, chordTopY - SCORE_VERTICAL_SPACING.chordNameStaffGapPx);
@@ -76562,12 +78450,74 @@ function computeScoreVerticalLayout(opts) {
   const systemGap = Math.max(SCORE_VERTICAL_SPACING.minSystemGapPx, SCORE_VERTICAL_SPACING.systemGapAboveTopContentPx - interSystemExtents.topContentY);
   const paperSpacing = spacingWithOverrides(paperDefaultsForVersion(activeTune.lilypondVersion).spacing, activeTune.verticalSpacing);
   const systemReferenceDistancePx = Math.max(paperSpacing["system-system-spacing"].basicDistance, paperSpacing["system-system-spacing"].minimumDistance ?? Number.NEGATIVE_INFINITY) * LINE_SPACING;
+  const systemMinimumDistancePx = (paperSpacing["system-system-spacing"].minimumDistance ?? 8) * LINE_SPACING;
   const lyricLineCount = activeTune.lyricLines?.length ?? 0;
   const lyricH = lyricLineCount > 0 ? LYRIC_FIRST_OFFSET + (lyricLineCount - 1) * LYRIC_ROW_H + LYRIC_ROW_H : 0;
   const pageBreakSystemH = contentBottom + systemGap + lyricH;
   const systemH = Math.max(pageBreakSystemH, systemReferenceDistancePx);
   const renderedSystemsH = systemsLength === 0 ? 0 : (systemsLength - 1) * systemH + contentBottom + lyricH;
   const naturalH = titleH + renderedSystemsH;
+  let perSystemAdvances;
+  if (perSystemRealNoteEntries && perSystemRealNoteEntries.length === systemsLength && systemsLength > 0) {
+    const perSystemInk = perSystemRealNoteEntries.map((entries) => computeContentExtents(entries, true));
+    const perSystemBeam = perSystemRealNoteEntries.map((entries) => {
+      const groupStemUp = new Map;
+      for (const group of findBeamGroupsFromIds(entries.map((e) => e.note))) {
+        let up;
+        for (const idx of group.indices) {
+          const dir = entries[idx].note.stemDirection;
+          if (dir) {
+            up = dir === "up";
+            break;
+          }
+        }
+        if (up === undefined) {
+          up = beamStemUpForSteps(group.indices.map((idx) => entries[idx].step));
+        }
+        for (const idx of group.indices)
+          groupStemUp.set(idx, up);
+      }
+      return computeContentExtents(entries, true, { groupStemUp });
+    });
+    const pageBreak = [];
+    const natural = [];
+    const tallness = [];
+    const fullHeight = [];
+    const contentBottoms = perSystemInk.map((ext) => ext.contentBottom + lyricH);
+    for (let i = 0;i < systemsLength; i++) {
+      const ownHeight = perSystemBeam[i].contentBottom - perSystemBeam[i].topContentY + lyricH;
+      fullHeight.push(ownHeight);
+      if (i === systemsLength - 1) {
+        const last = perSystemBeam[i].contentBottom + lyricH;
+        pageBreak.push(last);
+        natural.push(last);
+        tallness.push(last);
+        continue;
+      }
+      const nextTop = perSystemBeam[i + 1].topContentY;
+      const gapI = Math.max(SCORE_VERTICAL_SPACING.minSystemGapPx, SCORE_VERTICAL_SPACING.systemGapAboveTopContentPx - nextTop);
+      const advI = perSystemBeam[i].contentBottom + gapI + lyricH;
+      const systemHI = Math.max(advI, systemReferenceDistancePx);
+      pageBreak.push(Math.max(advI, systemMinimumDistancePx));
+      natural.push(Math.max(advI, systemHI - LINE_SPACING * 0.1));
+      tallness.push(advI);
+    }
+    const invStretchPerGapPx = (paperSpacing["system-system-spacing"].stretchability ?? 60) * LINE_SPACING;
+    const spacePx = (paperSpacing["system-system-spacing"].basicDistance ?? 12) * LINE_SPACING;
+    const topWhitespacePx = (paperSpacing["top-system-spacing"]?.padding ?? 1) * LINE_SPACING;
+    const bottomWhitespacePx = (paperSpacing["last-bottom-spacing"]?.padding ?? 1) * LINE_SPACING;
+    perSystemAdvances = {
+      pageBreak,
+      natural,
+      contentBottoms,
+      invStretchPerGapPx,
+      tallness,
+      fullHeight,
+      spacePx,
+      topWhitespacePx,
+      bottomWhitespacePx
+    };
+  }
   return {
     headerLayout,
     contentBottom,
@@ -76577,7 +78527,8 @@ function computeScoreVerticalLayout(opts) {
     lyricH,
     systemH,
     pageBreakSystemH,
-    naturalH
+    naturalH,
+    ...perSystemAdvances ? { perSystemAdvances } : {}
   };
 }
 
@@ -77536,20 +79487,62 @@ function labelForSystem(label, systemIndex) {
     return;
   return systemIndex === 0 ? label.instrumentName : label.shortInstrumentName;
 }
-function staffLabelGutterWidth(labels) {
-  const names = (labels ?? []).flatMap((label) => [label.instrumentName, label.shortInstrumentName]).filter((name) => Boolean(name));
+function resolveStaffLabels(staffLabels, tuneInstrumentName) {
+  return staffLabels ?? (tuneInstrumentName ? [{ instrumentName: tuneInstrumentName }] : undefined);
+}
+function resolveStaffLabelLayout(staffLabels, tuneInstrumentName, firstIndent) {
+  const labels = resolveStaffLabels(staffLabels, tuneInstrumentName);
+  const gutter = staffLabelGutterWidth(labels);
+  return {
+    labels,
+    gutter,
+    effectiveFirstIndent: gutter > 0 ? Math.max(firstIndent ?? 0, gutter / LINE_SPACING) : firstIndent
+  };
+}
+function staffLabelGutterPx(effectiveFirstIndent, gutter) {
+  return effectiveFirstIndent != null ? effectiveFirstIndent * LINE_SPACING : gutter;
+}
+function staffLabelGutterWidth(labels, groupLabels) {
+  const names = [...labels ?? [], ...groupLabels ?? []].flatMap((label) => [label.instrumentName, label.shortInstrumentName]).filter((name) => Boolean(name));
   if (!names.length)
     return 0;
   const maxChars = Math.max(...names.map((name) => name.length));
   return Math.ceil(Math.max(LINE_SPACING * 4, maxChars * STAFF_LABEL_FONT_SIZE * 0.58 + STAFF_LABEL_GAP));
 }
 function renderStaffSystemLabels(input) {
-  const { labels, staffSystemYOffsets, gutterWidth, staffStackYOffsets, fontFamily = "serif" } = input;
-  if (gutterWidth <= 0 || !(labels ?? []).some(hasStaffLabel))
+  const { labels, staffSystemYOffsets, gutterWidth, staffStackYOffsets, fontFamily = ROMAN_TEXT_STACK, groupLabels } = input;
+  const hasGroupLabels = (groupLabels ?? []).some(hasStaffLabel);
+  if (gutterWidth <= 0 || !(labels ?? []).some(hasStaffLabel) && !hasGroupLabels)
     return [];
   const systemCount = Math.max(0, ...staffSystemYOffsets.map((offsets) => offsets?.length ?? 0));
   const elements = [];
   for (let systemIndex = 0;systemIndex < systemCount; systemIndex++) {
+    for (let groupIndex = 0;groupIndex < (groupLabels?.length ?? 0); groupIndex++) {
+      const group = groupLabels[groupIndex];
+      const text = labelForSystem(group, systemIndex);
+      if (!text)
+        continue;
+      const firstStaff = group.start;
+      const lastStaff = group.end - 1;
+      const topOffset = staffSystemYOffsets[firstStaff]?.[systemIndex];
+      const bottomOffset = staffSystemYOffsets[lastStaff]?.[systemIndex];
+      if (topOffset == null || bottomOffset == null)
+        continue;
+      const topY = (staffStackYOffsets?.[firstStaff] ?? 0) + topOffset + STAFF_TOP;
+      const bottomY = (staffStackYOffsets?.[lastStaff] ?? 0) + bottomOffset + BOTTOM_LINE_Y;
+      elements.push(el("text", {
+        x: gutterWidth - STAFF_LABEL_GAP,
+        y: (topY + bottomY) / 2,
+        fontSize: STAFF_LABEL_FONT_SIZE,
+        fontFamily,
+        textAnchor: "end",
+        dominantBaseline: "central",
+        "data-lily-element": "staff-label",
+        "data-lily-group-index": groupIndex,
+        "data-lily-system-index": systemIndex,
+        "data-lily-label-kind": systemIndex === 0 ? "instrumentName" : "shortInstrumentName"
+      }, text, `staff-group-label-${groupIndex}-${systemIndex}`));
+    }
     for (let staffIndex = 0;staffIndex < (labels?.length ?? 0); staffIndex++) {
       const text = labelForSystem(labels?.[staffIndex], systemIndex);
       if (!text)
@@ -77577,6 +79570,69 @@ function renderStaffSystemLabels(input) {
 
 // src/music-rendering/layout/paginateSystems.ts
 var CONTINUATION_PAGE_CONTENT_Y = LINE_SPACING * 1.218;
+function forceDpPageStarts(input, dp, budget) {
+  const continuationTopInset = input.continuationTopInset ?? CONTINUATION_PAGE_CONTENT_Y;
+  const reserved = input.firstPageReservedHeight ?? 0;
+  const { pageBreak: minAdv, natural: natAdv, contentBottoms: bottoms } = dp;
+  const n = minAdv.length;
+  const BAD = 1e9;
+  const { tallness, fullHeight, spacePx, bottomWhitespacePx } = dp;
+  const pageCost = (a, b, isLast) => {
+    const startY = a === 0 ? input.titleH + reserved : continuationTopInset;
+    const height = budget - startY - bottomWhitespacePx;
+    let rodH = fullHeight[a];
+    let springLen = 0;
+    let invK = fullHeight[a] + spacePx;
+    for (let i = a;i < b; i++) {
+      rodH += tallness[i];
+      springLen += Math.max(0, spacePx - tallness[i]);
+      invK += fullHeight[i + 1] + spacePx;
+    }
+    if (rodH >= height)
+      return BAD + (rodH - height);
+    let force = (height - rodH - springLen) / Math.max(LINE_SPACING * 0.1, invK);
+    if (isLast && force > 0)
+      force = 0;
+    return force * force;
+  };
+  const best = new Array(n + 1).fill(Number.POSITIVE_INFINITY);
+  const prev = new Array(n + 1).fill(0);
+  best[0] = 0;
+  for (let j = 1;j <= n; j++) {
+    for (let a = 0;a < j; a++) {
+      if (!Number.isFinite(best[a]))
+        continue;
+      const cost = best[a] + pageCost(a, j - 1, j === n);
+      if (cost < best[j]) {
+        best[j] = cost;
+        prev[j] = a;
+      }
+    }
+  }
+  const starts = [];
+  for (let j = n;j > 0; j = prev[j])
+    starts.push(prev[j]);
+  starts.reverse();
+  if (debugFlag("LILYJS_PAGE_DP_DEBUG")) {
+    const bounds = [...starts, n];
+    const rows = [];
+    for (let p = 0;p + 1 < bounds.length; p++) {
+      const a = bounds[p], b = bounds[p + 1] - 1;
+      const startY = a === 0 ? input.titleH + reserved : continuationTopInset;
+      const avail = budget - startY;
+      let rodH = bottoms[b], natH = bottoms[b];
+      for (let i = a;i < b; i++) {
+        rodH += minAdv[i];
+        natH += natAdv[i];
+      }
+      rows.push(`  page${p}: sys ${a}..${b} (${b - a + 1}) avail=${avail.toFixed(0)} natH=${natH.toFixed(0)} rodH=${rodH.toFixed(0)} deficit=${(avail - natH).toFixed(0)}`);
+    }
+    console.error(`[PAGE_DP] budget=${budget.toFixed(0)} invStretch/gap=${dp.invStretchPerGapPx.toFixed(0)} nat[0..3]=${natAdv.slice(0, 4).map((v) => v.toFixed(0)).join(",")} min[0..3]=${minAdv.slice(0, 4).map((v) => v.toFixed(0)).join(",")}
+${rows.join(`
+`)}`);
+  }
+  return starts;
+}
 function paginateSystems(input) {
   const { systemHeights, titleH } = input;
   const continuationTopInset = input.continuationTopInset ?? CONTINUATION_PAGE_CONTENT_Y;
@@ -77593,13 +79649,22 @@ function paginateSystems(input) {
     }
     return { pageCount: 1, pageOfSystem, yWithinPage };
   }
+  const dpStarts = input.forceDp && input.forceDp.pageBreak.length === systemHeights.length ? forceDpPageStarts(input, input.forceDp, budget) : undefined;
+  const dpPageOfSystem = dpStarts ? systemHeights.map((_h, i) => {
+    let p = 0;
+    while (p + 1 < dpStarts.length && dpStarts[p + 1] <= i)
+      p++;
+    return p;
+  }) : undefined;
   let page = 0;
   let y = titleH;
   let breakCursor = titleH + firstPageReservedHeight;
+  const placementHeights = systemHeights;
   for (let i = 0;i < systemHeights.length; i++) {
-    const h = systemHeights[i];
+    const h = placementHeights[i];
     const atPageStart = i === 0 || pageOfSystem[i - 1] !== page;
-    if (!atPageStart && breakCursor + h > budget) {
+    const breakHere = dpPageOfSystem ? dpPageOfSystem[i] > page : !atPageStart && breakCursor + h > budget;
+    if (breakHere) {
       page++;
       y = continuationTopInset;
       breakCursor = continuationTopInset;
@@ -77621,16 +79686,22 @@ function paginateSystems(input) {
         continue;
       const last = idxs[idxs.length - 1];
       const reserved = p === 0 ? firstPageReservedHeight : 0;
-      const contentBottom = reserved + yWithinPage[last] + systemHeights[last];
+      const lastOwnHeight = input.forceDp?.contentBottoms[last] ?? placementHeights[last];
+      const contentBottom = reserved + yWithinPage[last] + lastOwnHeight;
       const slack = budget - contentBottom;
-      if (slack <= 0)
-        continue;
       const gaps = idxs.length - 1;
-      const perGap = Math.min(maxStretchPerGap, slack / gaps);
-      if (perGap <= 0)
-        continue;
-      for (let k = 1;k < idxs.length; k++) {
-        yWithinPage[idxs[k]] += perGap * k;
+      if (slack > 0) {
+        const perGap = Math.min(maxStretchPerGap, slack / gaps);
+        if (perGap <= 0)
+          continue;
+        for (let k = 1;k < idxs.length; k++) {
+          yWithinPage[idxs[k]] += perGap * k;
+        }
+      } else if (slack < 0) {
+        const perGap = slack / gaps;
+        for (let k = 1;k < idxs.length; k++) {
+          yWithinPage[idxs[k]] += perGap * k;
+        }
       }
     }
   }
@@ -77643,7 +79714,7 @@ function paginateSystems(input) {
     }
     if (idxs.length >= 2) {
       const last = idxs[idxs.length - 1];
-      const slack = budget - (yWithinPage[last] + systemHeights[last]);
+      const slack = budget - (yWithinPage[last] + placementHeights[last]);
       if (slack > 0) {
         const cumulativeShifts = Array.from({ length: idxs.length }, () => 0);
         for (let k = 1;k < idxs.length; k++) {
@@ -77711,8 +79782,10 @@ function renderScoreToSvgModel(options) {
     onSlurTrace,
     debugBeatLines = false,
     debugAboveStaffSkyline,
+    showMeasureWarnings,
     compactVertical = false
   } = options;
+  const { labels: resolvedStaffLabels, gutter: staffLabelGutter, effectiveFirstIndent } = resolveStaffLabelLayout(staffLabels, tune?.instrumentName, firstIndent);
   const buildPlan = (perSystemPenalty) => buildScoreSystemPlan({
     tune,
     score: score2,
@@ -77725,7 +79798,7 @@ function renderScoreToSvgModel(options) {
     lineBreakContentWidthOverride,
     pageBreaking,
     firstSystemContentInset,
-    firstIndent,
+    firstIndent: effectiveFirstIndent,
     globalStaffSize,
     raggedRight,
     partialDuration,
@@ -77832,6 +79905,7 @@ function renderScoreToSvgModel(options) {
     badMeasures,
     realNoteEntries,
     firstSystemRealNoteEntries,
+    perSystemRealNoteEntries,
     measureQNOffsets,
     mrStart
   } = systemPlan;
@@ -77842,6 +79916,7 @@ function renderScoreToSvgModel(options) {
     activeTune,
     realNoteEntries,
     firstSystemRealNoteEntries,
+    perSystemRealNoteEntries,
     hasChordSymbols: Boolean(chordSymbols?.length),
     showTitle,
     contentWidth,
@@ -77858,7 +79933,8 @@ function renderScoreToSvgModel(options) {
     naturalH,
     contentBottom,
     lyricH,
-    systemGap
+    systemGap,
+    perSystemAdvances
   } = verticalLayout;
   const autoHeightBreaking = isAutoHeightPageBreaking(activeTune.pageBreaking);
   const autoWidthBreaking = isAutoWidthPageBreaking(activeTune.pageBreaking);
@@ -77867,6 +79943,7 @@ function renderScoreToSvgModel(options) {
   const pageBreakSystemAdvances = systems.map((_s, ri) => ri === systems.length - 1 ? lastSystemAdvance : pageBreakSystemH);
   const visibleSystemAdvance = Math.max(pageBreakSystemH, systemH - LINE_SPACING * 0.1);
   const naturalSystemAdvances = systems.map((_s, ri) => ri === systems.length - 1 ? lastSystemAdvance : visibleSystemAdvance);
+  const pageForceDp = debugFlag("LILYJS_PAGE_FORCE_DP_OFF") ? undefined : perSystemAdvances;
   const pagePlan = !singlePageBreaking && pageHeightBudget != null && Number.isFinite(pageHeightBudget) && pageHeightBudget > 0 && naturalH + pageZeroReservedHeight > pageHeightBudget ? paginateSystems({
     systemHeights: pageBreakSystemAdvances,
     titleH,
@@ -77875,15 +79952,15 @@ function renderScoreToSvgModel(options) {
     fillPages: true,
     maxStretchPerGap: systemGap + systemH * 0.6,
     naturalSystemAdvances,
-    stretchLastPageToNatural: true
+    stretchLastPageToNatural: true,
+    ...pageForceDp ? { forceDp: pageForceDp } : {}
   }) : undefined;
   const isPaginated = pagePlan != null && pagePlan.pageCount > 1;
   const pageHeights = [];
   if (isPaginated) {
     for (let ri = 0;ri < systems.length; ri++) {
       const p = pagePlan.pageOfSystem[ri];
-      const bottom = pagePlan.yWithinPage[ri] + lastSystemAdvance;
-      pageHeights[p] = Math.max(pageHeights[p] ?? 0, bottom);
+      pageHeights[p] = Math.max(pageHeights[p] ?? 0, pagePlan.yWithinPage[ri] + (perSystemAdvances ? perSystemAdvances.contentBottoms[ri] : lastSystemAdvance));
     }
   }
   const tallestPageH = isPaginated ? Math.max(...pageHeights) : naturalH;
@@ -77941,7 +80018,7 @@ function renderScoreToSvgModel(options) {
       inlineClefChanges,
       keySet,
       bravura: fontReady,
-      badMeasures,
+      badMeasures: showMeasureWarnings === true ? badMeasures : new Set,
       selectedEventIds,
       rehearsalMarks: rehearsalMarkMap.size > 0 ? rehearsalMarkMap : undefined,
       tempoMarks: tempoMarkMap.size > 0 ? tempoMarkMap : undefined,
@@ -77953,7 +80030,7 @@ function renderScoreToSvgModel(options) {
       isLast: ri === systems.length - 1,
       raggedLast: raggedLast ?? activeTune.raggedLast,
       raggedRight: effectiveRaggedRight,
-      firstIndent: firstIndent ?? activeTune.firstIndent,
+      firstIndent: effectiveFirstIndent ?? activeTune.firstIndent,
       firstSystemContentInset,
       fontFamily: activeFont,
       chordSymbols,
@@ -78010,16 +80087,13 @@ function renderScoreToSvgModel(options) {
       byLocation: sourceRangeByLocation
     }, sourceId);
   }
-  const staffLabelGutter = staffLabelGutterWidth(staffLabels);
-  const labeledEls = staffLabelGutter > 0 ? [
-    ...renderStaffSystemLabels({
-      labels: staffLabels,
-      staffSystemYOffsets: [renderedSystemYOffsets],
-      gutterWidth: staffLabelGutter,
-      fontFamily: textFont
-    }),
-    el("g", { transform: `translate(${staffLabelGutter}, 0)` }, allEls, "staff-label-score-offset")
-  ] : allEls;
+  const labelEls = staffLabelGutter > 0 ? renderStaffSystemLabels({
+    labels: resolvedStaffLabels,
+    staffSystemYOffsets: [renderedSystemYOffsets],
+    gutterWidth: staffLabelGutterPx(effectiveFirstIndent, staffLabelGutter),
+    fontFamily: textFont
+  }) : [];
+  const labeledEls = [...labelEls, ...allEls];
   const applyStaffSizeScale = !deferGlobalStaffSizeScale && staffSizeScale !== 1;
   const scaledEls = !applyStaffSizeScale ? labeledEls : [
     el("g", {
@@ -78131,6 +80205,7 @@ function buildStaffGroupLayoutMeasure(staffMeasuresAtIndex, keySet) {
   const maxAccColsAtBeat = new Map;
   const maxGraceSpaceAtBeat = new Map;
   const maxInlineClefSpaceAtBeat = new Map;
+  const maxLyricWidthAtBeat = new Map;
   let measureEnd = 0;
   for (const measure2 of staffMeasuresAtIndex) {
     const accCols = accidentalColsForMeasure(measure2, keySet);
@@ -78150,6 +80225,7 @@ function buildStaffGroupLayoutMeasure(staffMeasuresAtIndex, keySet) {
       maxAccColsAtBeat.set(beat, Math.max(maxAccColsAtBeat.get(beat) ?? 0, accCols[ni] ?? 0));
       maxGraceSpaceAtBeat.set(beat, Math.max(maxGraceSpaceAtBeat.get(beat) ?? 0, graceSpaceBefore.get(ni) ?? 0));
       maxInlineClefSpaceAtBeat.set(beat, Math.max(maxInlineClefSpaceAtBeat.get(beat) ?? 0, note.layoutInlineClefSpaceBefore ?? 0));
+      maxLyricWidthAtBeat.set(beat, Math.max(maxLyricWidthAtBeat.get(beat) ?? 0, note.lyricWidth ?? 0));
       beat += note.duration;
     }
     measureEnd = Math.max(measureEnd, beat);
@@ -78184,9 +80260,36 @@ function buildStaffGroupLayoutMeasure(staffMeasuresAtIndex, keySet) {
       voiceOffsetQN: undefined,
       layoutAccidentalCols: maxAccColsAtBeat.get(start) ?? 0,
       layoutGraceSpaceBefore: maxGraceSpaceAtBeat.get(start) ?? 0,
-      layoutInlineClefSpaceBefore: maxInlineClefSpaceAtBeat.get(start) ?? 0
+      layoutInlineClefSpaceBefore: maxInlineClefSpaceAtBeat.get(start) ?? 0,
+      lyricWidth: maxLyricWidthAtBeat.get(start) || undefined
     };
   });
+}
+function sharedStaffSystemYOffsets(staffSystemYOffsets) {
+  const systemCount = Math.max(0, ...staffSystemYOffsets.map((offsets) => offsets?.length ?? 0));
+  const sharedAdvances = [];
+  for (let ri = 0;ri + 1 < systemCount; ri++) {
+    let advance2 = 0;
+    for (const offsets of staffSystemYOffsets) {
+      if (!offsets || offsets[ri] === undefined || offsets[ri + 1] === undefined)
+        continue;
+      advance2 = Math.max(advance2, offsets[ri + 1] - offsets[ri]);
+    }
+    sharedAdvances.push(advance2);
+  }
+  let changed = false;
+  const offsetsByStaff = staffSystemYOffsets.map((offsets) => {
+    if (!offsets?.length)
+      return [];
+    const shared = [offsets[0]];
+    for (let ri = 0;ri + 1 < offsets.length; ri++) {
+      shared.push(shared[ri] + (sharedAdvances[ri] ?? offsets[ri + 1] - offsets[ri]));
+    }
+    if (shared.some((value, ri) => Math.abs(value - offsets[ri]) > 0.01))
+      changed = true;
+    return shared;
+  });
+  return { offsetsByStaff, changed };
 }
 function computeStaffGroupSystems(input) {
   const { renderTunes, contentWidth, firstIndent, firstSystemContentInset, traceOut } = input;
@@ -78222,11 +80325,12 @@ function computeStaffGroupSystems(input) {
   });
   const repeatRegions = projectRegionsToSharedMeasures(measureFlowMeasures, mergedMeasures, measureFlowTune.repeatRegions);
   const voltaRegions = projectRegionsToSharedMeasures(measureFlowMeasures, mergedMeasures, measureFlowTune.voltaRegions);
-  return computeLineBreaks(mergedMeasures, primaryTune.key, primaryTune.systemBreaks, repeatRegions, voltaRegions, firstIndent, undefined, undefined, contentWidth, firstSystemContentInset, traceOut, {
+  return computeLineBreaks(mergedMeasures, primaryTune.key, primaryTune.systemBreaks, repeatRegions, voltaRegions, firstIndent, measureFlowTune.measureBarlines, undefined, contentWidth, firstSystemContentInset, traceOut, {
     printInitialRepeatBar: measureFlowTune.printInitialRepeatBar,
     barNumberBase: primaryTune.partialDuration != null ? 0 : 1,
     measureExpectedDurations,
-    measureClefs: primaryMeasureClefs
+    measureClefs: primaryMeasureClefs,
+    baseShortestDurationQN: primaryTune.baseShortestDurationQN
   });
 }
 
@@ -78604,11 +80708,13 @@ var STAFF_SPACES_PER_EM2 = 4;
 var STAFF_GROUP_LEFT_X = 0;
 var STAFF_GROUP_BRACE_TO_BARLINE_GAP = LINE_SPACING * 0.25;
 function computePianoBraceGeometry(input) {
-  const { yOffsets, systemBeatXs, lastStaffSystemYOffsets, fontInfo, systemIndex = 0 } = input;
-  const trebleTitleH = systemBeatXs[systemIndex]?.yOffset ?? lastStaffSystemYOffsets[systemIndex] ?? STAFF_TOP;
-  const bassTitleH = lastStaffSystemYOffsets[systemIndex] ?? (systemBeatXs[systemIndex]?.yOffset ?? STAFF_TOP);
-  const braceTopY = yOffsets[0] + trebleTitleH + STAFF_TOP;
-  const braceBottomY = yOffsets[yOffsets.length - 1] + bassTitleH + BOTTOM_LINE_Y;
+  const { yOffsets, systemBeatXs, lastStaffSystemYOffsets, fontInfo, systemIndex = 0, staffRange, staffSystemYOffsets, leftX = STAFF_GROUP_LEFT_X } = input;
+  const firstStaff = Math.max(0, staffRange?.start ?? 0);
+  const lastStaff = Math.min(yOffsets.length - 1, (staffRange?.end ?? yOffsets.length) - 1);
+  const trebleTitleH = staffSystemYOffsets?.[firstStaff]?.[systemIndex] ?? systemBeatXs[systemIndex]?.yOffset ?? lastStaffSystemYOffsets[systemIndex] ?? STAFF_TOP;
+  const bassTitleH = staffSystemYOffsets?.[lastStaff]?.[systemIndex] ?? lastStaffSystemYOffsets[systemIndex] ?? (systemBeatXs[systemIndex]?.yOffset ?? STAFF_TOP);
+  const braceTopY = yOffsets[firstStaff] + trebleTitleH + STAFF_TOP;
+  const braceBottomY = yOffsets[lastStaff] + bassTitleH + BOTTOM_LINE_Y;
   const braceSpanPx = braceBottomY - braceTopY;
   const braceMetrics = fontInfo.metadata.glyphs.brace;
   const braceBBox = braceMetrics?.bbox;
@@ -78618,10 +80724,91 @@ function computePianoBraceGeometry(input) {
   const braceFontSize = Math.round(braceSpanPx * STAFF_SPACES_PER_EM2 / braceHeightStaffSpaces);
   const braceStaffSpacePx = braceFontSize / STAFF_SPACES_PER_EM2;
   const barlineHalfWidth = fontInfo.engravingPx("thinBarlineThickness", 0.16) / 2;
-  const braceRightEdgeX = STAFF_GROUP_LEFT_X - barlineHalfWidth - STAFF_GROUP_BRACE_TO_BARLINE_GAP;
+  const braceRightEdgeX = leftX - barlineHalfWidth - STAFF_GROUP_BRACE_TO_BARLINE_GAP;
   const braceX = braceRightEdgeX - braceBBoxNE[0] * braceStaffSpacePx;
   const braceY = braceBottomY + braceBBoxSW[1] * braceStaffSpacePx;
-  return { braceTopY, braceBottomY, braceFontSize, braceX, braceY, barlineX: STAFF_GROUP_LEFT_X };
+  return { braceTopY, braceBottomY, braceFontSize, braceX, braceY, barlineX: leftX };
+}
+function barlineGapRects(input) {
+  const { kind, anchorX, anchor, fontInfo, fontFamily } = input;
+  const thin = fontInfo.engravingPx("thinBarlineThickness", 0.16);
+  const fallback = [{ x: anchorX - thin / 2, width: thin }];
+  const glyphName = kind === "final" ? "barlineFinal" : kind === "double" ? "barlineDouble" : "barlineSingle";
+  const table = smuflGlyphPathTableForFont(fontFamily);
+  const glyph = table?.glyphs[glyphName];
+  if (!table || !glyph)
+    return fallback;
+  const fontSize = musicGlyphFontSizes(fontFamily).music;
+  const scale = fontSize / table.unitsPerEm;
+  const advancePx = (glyph.advanceWidth ?? 0) * (fontSize / STAFF_SPACES_PER_EM2);
+  const anchorShift = anchor === "middle" ? -advancePx / 2 : anchor === "end" ? -advancePx : 0;
+  const rects = extractFullStaffBarRects(glyph.d).map((rect) => ({
+    x: anchorX + anchorShift + rect.x1Units * scale,
+    width: (rect.x2Units - rect.x1Units) * scale
+  }));
+  return rects.length ? rects : fallback;
+}
+function renderSpanBarGapSegments(input) {
+  const {
+    systemIndex,
+    system,
+    measureBounds,
+    yOffsets,
+    staffSystemYOffsets,
+    lastStaffSystemYOffsets,
+    spanRange,
+    fontInfo,
+    fontFamily
+  } = input;
+  if (!system || !measureBounds || spanRange.end - spanRange.start < 2)
+    return [];
+  const systemOffsetOf = (staffIndex) => {
+    const perStaff = staffSystemYOffsets?.[staffIndex]?.[systemIndex];
+    if (perStaff != null)
+      return perStaff;
+    if (staffIndex === 0)
+      return measureBounds.yOffset;
+    if (staffIndex === yOffsets.length - 1)
+      return lastStaffSystemYOffsets[systemIndex];
+    return;
+  };
+  const elements = [];
+  for (let mi = 0;mi < measureBounds.bounds.length; mi++) {
+    if (system.repeatEndAfter.has(mi) || system.repeatStartBefore.has(mi + 1))
+      continue;
+    const barX = measureBounds.bounds[mi].rightX;
+    const kindRaw = system.measureBarlines?.get(mi);
+    if (kindRaw === "repeatStart" || kindRaw === "repeatEnd")
+      continue;
+    const kind = kindRaw === "final" || kindRaw === "double" ? kindRaw : "normal";
+    const isLastInRow = mi === measureBounds.bounds.length - 1;
+    const anchor = kind === "normal" ? "middle" : isLastInRow ? "end" : "start";
+    const rects = barlineGapRects({ kind, anchorX: barX, anchor, fontInfo, fontFamily });
+    for (let staffIndex = spanRange.start;staffIndex < spanRange.end - 1; staffIndex++) {
+      const topOffset = systemOffsetOf(staffIndex);
+      const bottomOffset = systemOffsetOf(staffIndex + 1);
+      if (topOffset == null || bottomOffset == null)
+        continue;
+      const gapTop = (yOffsets[staffIndex] ?? 0) + topOffset + BOTTOM_LINE_Y;
+      const gapBottom = (yOffsets[staffIndex + 1] ?? 0) + bottomOffset + STAFF_TOP;
+      if (gapBottom - gapTop <= 0)
+        continue;
+      for (const [rectIndex, rect] of rects.entries()) {
+        elements.push(el("rect", {
+          x: rect.x,
+          y: gapTop,
+          width: rect.width,
+          height: gapBottom - gapTop,
+          fill: "currentColor",
+          "data-lily-element": "piano-span-barline",
+          "data-lily-grob-type": "SpanBar",
+          "data-lily-grob-parent-id": `grob:SpanBar:measure:${systemIndex}:${mi}`,
+          "data-lily-grob-piece": "gap-segment"
+        }, undefined, `span-bar-${systemIndex}-${mi}-${staffIndex}-${rectIndex}`));
+      }
+    }
+  }
+  return elements;
 }
 function renderPianoGrandStaffFrame(input) {
   const {
@@ -78634,23 +80821,50 @@ function renderPianoGrandStaffFrame(input) {
     fontInfo,
     fontFamily,
     firstSystemContentInset,
-    debugBeatLines = false
+    debugBeatLines = false,
+    braceStaffRange,
+    staffSystemYOffsets,
+    firstIndentPx = 0
   } = input;
   const barlineStrokeWidth = fontInfo.engravingPx("thinBarlineThickness", 0.16);
   const frameElements = [];
+  const spanRange = braceStaffRange ?? { start: 0, end: yOffsets.length };
   for (let systemIndex = 0;systemIndex < systemCount; systemIndex++) {
-    const { braceTopY, braceBottomY, braceFontSize, braceX, braceY, barlineX } = computePianoBraceGeometry({
+    frameElements.push(...renderSpanBarGapSegments({
+      systemIndex,
+      system: sharedSystems?.[systemIndex],
+      measureBounds: systemMeasureBounds?.[systemIndex],
+      yOffsets,
+      staffSystemYOffsets,
+      lastStaffSystemYOffsets,
+      spanRange,
+      fontInfo,
+      fontFamily
+    }));
+    const systemLeftX = systemIndex === 0 ? firstIndentPx : 0;
+    const full = computePianoBraceGeometry({
       yOffsets,
       systemBeatXs,
       lastStaffSystemYOffsets,
       fontInfo,
-      systemIndex
+      systemIndex,
+      leftX: systemLeftX
     });
+    const brace = braceStaffRange ? computePianoBraceGeometry({
+      yOffsets,
+      systemBeatXs,
+      lastStaffSystemYOffsets,
+      fontInfo,
+      systemIndex,
+      staffRange: braceStaffRange,
+      staffSystemYOffsets,
+      leftX: systemLeftX
+    }) : full;
     frameElements.push(el("line", {
-      x1: barlineX,
-      y1: braceTopY,
-      x2: barlineX,
-      y2: braceBottomY,
+      x1: full.barlineX,
+      y1: full.braceTopY,
+      x2: full.barlineX,
+      y2: full.braceBottomY,
       stroke: "currentColor",
       strokeWidth: barlineStrokeWidth,
       "data-lily-element": "piano-barline",
@@ -78658,9 +80872,9 @@ function renderPianoGrandStaffFrame(input) {
       "data-lily-grob-parent-id": `grob:SpanBar:normal:${systemIndex}`,
       "data-lily-grob-piece": "normal-span"
     }), el("text", {
-      x: braceX,
-      y: braceY,
-      fontSize: braceFontSize,
+      x: brace.braceX,
+      y: brace.braceY,
+      fontSize: brace.braceFontSize,
       fontFamily,
       textAnchor: "start",
       dominantBaseline: "auto",
@@ -78925,6 +81139,40 @@ function firstStaffLineExtents(doc) {
     return;
   return { top: ys[0], bottom: ys[4] };
 }
+var LYRIC_DESCENT_EM = 0.3;
+var LYRIC_UNRELATED_STAFF_PADDING = LINE_SPACING * 1.5;
+function collectLyricBottoms(nodes, yOffset = 0, out = []) {
+  for (const node of nodes) {
+    const nextYOffset = yOffset + nodeTranslateY(node);
+    if (node.type === "text" && node.props?.["data-lily-element"] === "lyric-text") {
+      const y = Number(node.props.y ?? 0);
+      const fontSize = Number(node.props.fontSize ?? node.props["font-size"] ?? 0);
+      if (Number.isFinite(y))
+        out.push(nextYOffset + y + fontSize * LYRIC_DESCENT_EM);
+    }
+    const children = node.children?.filter(isSvgNode) ?? [];
+    if (children.length)
+      collectLyricBottoms(children, nextYOffset, out);
+  }
+  return out;
+}
+function belowStaffLyricOverflow(doc) {
+  const lineYs = [...new Set(collectFullStaffLineYs(doc.elements))].sort((a, b) => a - b);
+  if (lineYs.length < 5)
+    return 0;
+  const bandBottoms = [];
+  for (let i = 0;i + 4 < lineYs.length; i += 5)
+    bandBottoms.push(lineYs[i + 4]);
+  const lyricBottoms = collectLyricBottoms(doc.elements);
+  let overflow = 0;
+  for (const lyricBottom of lyricBottoms) {
+    const owner = [...bandBottoms].reverse().find((bottom) => bottom <= lyricBottom + 0.001);
+    if (owner === undefined)
+      continue;
+    overflow = Math.max(overflow, lyricBottom - owner);
+  }
+  return overflow;
+}
 function computeStaffGroupStack(staffDocs) {
   const yOffsets = [];
   let totalHeight = 0;
@@ -78932,15 +81180,16 @@ function computeStaffGroupStack(staffDocs) {
   for (let i = 0;i < staffDocs.length; i++) {
     const doc = staffDocs[i];
     const extents = firstStaffLineExtents(doc);
-    const yOffset = previousStaff && extents ? previousStaff.yOffset + previousStaff.bottom + INTER_STAFF_GAP - extents.top : totalHeight;
+    const yOffset = previousStaff && extents ? previousStaff.yOffset + previousStaff.bottom + previousStaff.gapBelow - extents.top : totalHeight;
     yOffsets.push(yOffset);
     totalHeight = Math.max(totalHeight, yOffset + doc.height);
+    const gapBelow = Math.max(INTER_STAFF_GAP, belowStaffLyricOverflow(doc) + LYRIC_UNRELATED_STAFF_PADDING);
     if (extents) {
-      previousStaff = { yOffset, bottom: extents.bottom, height: doc.height };
+      previousStaff = { yOffset, bottom: extents.bottom, height: doc.height, gapBelow };
     } else {
-      previousStaff = { yOffset, bottom: BOTTOM_LINE_Y, height: doc.height };
+      previousStaff = { yOffset, bottom: BOTTOM_LINE_Y, height: doc.height, gapBelow };
       if (i < staffDocs.length - 1)
-        totalHeight = yOffset + BOTTOM_LINE_Y + INTER_STAFF_GAP;
+        totalHeight = yOffset + BOTTOM_LINE_Y + gapBelow;
     }
   }
   return { yOffsets, totalHeight };
@@ -78996,7 +81245,7 @@ function clamp01(value) {
   return value;
 }
 function xForPedalEvent(event, systems, timings) {
-  const EPS2 = 0.000001;
+  const EPS3 = 0.000001;
   for (let systemIndex = 0;systemIndex < systems.length; systemIndex++) {
     const system = systems[systemIndex];
     if (!system)
@@ -79009,10 +81258,10 @@ function xForPedalEvent(event, systems, timings) {
         continue;
       const endQN = timing.startQN + timing.durationQN;
       const isLastBound = systemIndex === systems.length - 1 && localMi === system.bounds.length - 1;
-      if (event.offsetQN + EPS2 < timing.startQN || event.offsetQN >= endQN - EPS2 && !isLastBound) {
+      if (event.offsetQN + EPS3 < timing.startQN || event.offsetQN >= endQN - EPS3 && !isLastBound) {
         continue;
       }
-      const t = timing.durationQN > EPS2 ? clamp01((event.offsetQN - timing.startQN) / timing.durationQN) : 0;
+      const t = timing.durationQN > EPS3 ? clamp01((event.offsetQN - timing.startQN) / timing.durationQN) : 0;
       return {
         x: bounds.leftX + (bounds.rightX - bounds.leftX) * t,
         systemIndex
@@ -79247,6 +81496,10 @@ function grandStaffSystemClearance(tune) {
   const inkClearance = Math.max(padding, minimumDistance / 2 - padding * 0.55);
   return inkClearance * LINE_SPACING;
 }
+function grandStaffSystemBasicDistancePx(tune) {
+  const paperSpacing = spacingWithOverrides(paperDefaultsForVersion(tune?.lilypondVersion).spacing, tune?.verticalSpacing);
+  return (paperSpacing["system-system-spacing"].basicDistance ?? 12) * LINE_SPACING;
+}
 function computeGrandStaffSystemShifts(input) {
   const {
     systemCount,
@@ -79256,6 +81509,7 @@ function computeGrandStaffSystemShifts(input) {
     yOffsets,
     pedalElements,
     clearance,
+    basicDistancePx,
     fontFamily
   } = input;
   if (systemCount <= 1)
@@ -79279,7 +81533,9 @@ function computeGrandStaffSystemShifts(input) {
     const lastStaffBottom = lastStaffOffset + (lastStaffBottoms[ri] ?? lastStaffSystemYOffsets[ri] ?? 0);
     const bottom = Math.max(lastStaffBottom, pedalBottoms[ri] ?? Number.NEGATIVE_INFINITY);
     const nextTop = (topStaffSystemYOffsets[ri + 1] ?? 0) + cumulativeShift + STAFF_TOP;
-    const neededShift = bottom + cumulativeShift + clearance - nextTop;
+    const inkShift = bottom + cumulativeShift + clearance - nextTop;
+    const refpointShift = basicDistancePx === undefined ? Number.NEGATIVE_INFINITY : lastStaffOffset + (lastStaffSystemYOffsets[ri] ?? 0) + basicDistancePx - (topStaffSystemYOffsets[ri + 1] ?? 0);
+    const neededShift = Math.max(inkShift, refpointShift);
     if (neededShift > 0)
       cumulativeShift += neededShift;
   }
@@ -79369,6 +81625,7 @@ function paginateStaffGroup(input) {
     yOffsets: gridStack.yOffsets,
     pedalElements: gridPedals,
     clearance: grandStaffSystemClearance(renderTunes[0]),
+    basicDistancePx: grandStaffSystemBasicDistancePx(renderTunes[0]),
     fontFamily
   });
   const clearedTops = gridShifts ? applySystemShifts(commonTops, gridShifts) : commonTops;
@@ -79390,7 +81647,7 @@ function paginateStaffGroup(input) {
     fillPages: true,
     maxStretchPerGap: (rowAdvances[0] ?? 0) * 0.6
   });
-  if (process.env.LILY_DEBUG_PIANO_PAGINATION) {
+  if (debugFlag("LILY_DEBUG_PIANO_PAGINATION")) {
     console.error("[piano-pagination]", JSON.stringify({
       pageHeightBudget,
       pageZeroReservedHeight,
@@ -79402,7 +81659,7 @@ function paginateStaffGroup(input) {
       yWithinPage: plan.yWithinPage.map((v) => Math.round(v))
     }));
   }
-  if (plan.pageCount <= 1)
+  if (plan.pageCount < 1)
     return;
   const pageRowTops = clearedTops.map((_, ri) => plan.yWithinPage[ri] - stackTopOffset);
   const pagePass = renderStaffPass(staffTargetsFor(pageRowTops), plan.pageOfSystem);
@@ -79531,6 +81788,27 @@ function staffLabelsFromContextTree(contextTree) {
     ...staff2.shortInstrumentName ? { shortInstrumentName: staff2.shortInstrumentName } : {}
   })) ?? [];
 }
+function groupLabelsFromContextTree(contextTree) {
+  return (contextTree?.nestedGroups ?? []).filter((group) => group.instrumentName).map((group) => ({
+    start: group.start,
+    end: group.end,
+    instrumentName: group.instrumentName
+  }));
+}
+function braceStaffRangeFromContextTree(contextTree, staffCount) {
+  const groups = contextTree?.nestedGroups ?? [];
+  if (groups.length !== 1)
+    return;
+  const group = groups[0];
+  const braced = group.groupType === "PianoStaff" || group.groupType === "GrandStaff";
+  if (!braced)
+    return;
+  if (group.end - group.start < 2)
+    return;
+  if (group.start === 0 && group.end >= staffCount)
+    return;
+  return { start: group.start, end: group.end };
+}
 function renderStaffGroupContextToSvgModel(opts) {
   const {
     staves,
@@ -79589,12 +81867,16 @@ function renderStaffGroupContextToSvgModel(opts) {
   const contentWidth = Number.isFinite(contentWidthOverride) && (contentWidthOverride ?? 0) > 0 ? Number(contentWidthOverride) : defaultContentWidth;
   const lineBreakContentWidth = Number.isFinite(lineBreakContentWidthOverride) && (lineBreakContentWidthOverride ?? 0) > 0 ? Number(lineBreakContentWidthOverride) : contentWidth;
   const firstSystemContentInset = firstSystemContentInsetOpt ?? PIANO_FIRST_SYSTEM_CONTENT_INSET;
+  const staffLabels = staffLabelsFromContextTree(contextTree);
+  const groupLabels = groupLabelsFromContextTree(contextTree);
+  const staffLabelGutter = staffLabelGutterWidth(staffLabels, groupLabels);
+  const effectiveFirstIndent = staffLabelGutter > 0 ? Math.max(firstIndent ?? 0, staffLabelGutter / LINE_SPACING) : firstIndent;
   const contextSystemPlan = computeContextTreeSystems({
     tree: contextTree,
     renderTunes,
     contentWidth: lineBreakContentWidth,
     raggedLast,
-    firstIndent,
+    firstIndent: effectiveFirstIndent,
     firstSystemContentInset
   });
   const sharedSystems = contextSystemPlan.systems;
@@ -79631,7 +81913,7 @@ function renderStaffGroupContextToSvgModel(opts) {
         paperFont,
         raggedLast,
         raggedRight,
-        firstIndent: idx === 0 ? firstIndent : 0,
+        firstIndent: effectiveFirstIndent,
         firstSystemContentInset,
         globalStaffSize,
         deferGlobalStaffSizeScale: true,
@@ -79671,32 +81953,37 @@ function renderStaffGroupContextToSvgModel(opts) {
     };
   };
   const initialPass = renderStaffPass();
-  const initialValidDocs = initialPass.staffDocs.filter((d) => d !== null);
-  if (initialValidDocs.length === 0)
+  if (initialPass.staffDocs.filter((d) => d !== null).length === 0)
     return null;
-  const initialStack = computeStaffGroupStack(initialValidDocs);
-  const initialPedals = renderPianoPedals({
+  const sharedGrid = sharedStaffSystemYOffsets(initialPass.staffSystemYOffsets);
+  const alignedPass = sharedGrid.changed ? renderStaffPass(sharedGrid.offsetsByStaff) : initialPass;
+  const alignedValidDocs = alignedPass.staffDocs.filter((d) => d !== null);
+  if (alignedValidDocs.length === 0)
+    return null;
+  const alignedStack = computeStaffGroupStack(alignedValidDocs);
+  const alignedPedals = renderPianoPedals({
     pedalEvents: renderTunes[0]?.pedalEvents,
     sharedSystems,
-    systemMeasureBounds: initialPass.systemMeasureBounds,
-    lastStaffSystemYOffsets: initialPass.lastStaffSystemYOffsets,
-    lastStaffElements: initialValidDocs[initialValidDocs.length - 1]?.elements,
-    yOffsets: initialStack.yOffsets,
+    systemMeasureBounds: alignedPass.systemMeasureBounds,
+    lastStaffSystemYOffsets: alignedPass.lastStaffSystemYOffsets,
+    lastStaffElements: alignedValidDocs[alignedValidDocs.length - 1]?.elements,
+    yOffsets: alignedStack.yOffsets,
     fontFamily,
     musicGlyphMode,
     sourceId: renderTunes[0]?.title || "score"
   });
   const systemShifts = computeGrandStaffSystemShifts({
     systemCount: sharedSystems.length,
-    topStaffSystemYOffsets: initialPass.staffSystemYOffsets[0] ?? [],
-    lastStaffSystemYOffsets: initialPass.lastStaffSystemYOffsets,
-    lastStaffElements: initialValidDocs[initialValidDocs.length - 1]?.elements ?? [],
-    yOffsets: initialStack.yOffsets,
-    pedalElements: initialPedals,
+    topStaffSystemYOffsets: alignedPass.staffSystemYOffsets[0] ?? [],
+    lastStaffSystemYOffsets: alignedPass.lastStaffSystemYOffsets,
+    lastStaffElements: alignedValidDocs[alignedValidDocs.length - 1]?.elements ?? [],
+    yOffsets: alignedStack.yOffsets,
+    pedalElements: alignedPedals,
     clearance: grandStaffSystemClearance(renderTunes[0]),
+    basicDistancePx: grandStaffSystemBasicDistancePx(renderTunes[0]),
     fontFamily
   });
-  const finalPass = systemShifts ? renderStaffPass(initialPass.staffSystemYOffsets.map((offsets) => applySystemShifts(offsets, systemShifts))) : initialPass;
+  const finalPass = systemShifts ? renderStaffPass(alignedPass.staffSystemYOffsets.map((offsets) => applySystemShifts(offsets, systemShifts))) : alignedPass;
   const validDocs = finalPass.staffDocs.filter((d) => d !== null);
   if (validDocs.length === 0)
     return null;
@@ -79723,7 +82010,7 @@ function renderStaffGroupContextToSvgModel(opts) {
   const paginatedDoc = paginateStaffGroup({
     pageHeightBudget,
     pageZeroReservedHeight,
-    hasStaffLabels: staffLabelGutterWidth(staffLabelsFromContextTree(contextTree)) > 0,
+    hasStaffLabels: staffLabelGutterWidth(staffLabelsFromContextTree(contextTree), groupLabelsFromContextTree(contextTree)) > 0,
     initialPass,
     finalPass,
     sharedSystems,
@@ -79754,22 +82041,24 @@ function renderStaffGroupContextToSvgModel(opts) {
       fontInfo,
       fontFamily,
       firstSystemContentInset,
-      debugBeatLines
+      debugBeatLines,
+      braceStaffRange: braceStaffRangeFromContextTree(contextTree, yOffsets.length),
+      staffSystemYOffsets: finalPass.staffSystemYOffsets,
+      firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING
     }),
     ...pedalElements,
     ...renderStackedStaffGroupContent({ staffDocs: validDocs, yOffsets })
   ];
-  const staffLabels = staffLabelsFromContextTree(contextTree);
-  const staffLabelGutter = staffLabelGutterWidth(staffLabels);
   const labeledElements = staffLabelGutter > 0 ? [
     ...renderStaffSystemLabels({
       labels: staffLabels,
       staffSystemYOffsets: finalPass.staffSystemYOffsets,
       staffStackYOffsets: yOffsets,
-      gutterWidth: staffLabelGutter,
-      fontFamily: fontInfo.textFontFor("header")
+      gutterWidth: staffLabelGutterPx(effectiveFirstIndent, staffLabelGutter),
+      fontFamily: fontInfo.textFontFor("header"),
+      groupLabels
     }),
-    el("g", { transform: `translate(${staffLabelGutter}, 0)` }, allElements, "staff-label-group-offset")
+    ...allElements
   ] : allElements;
   const styleText = validDocs[0]?.styleText ?? "text{paint-order:stroke;}";
   const applyStaffSizeScale = !deferGlobalStaffSizeScale && staffSizeScale !== 1;
@@ -80007,7 +82296,7 @@ function renderableStaffContext(input) {
   const id = context?.id ?? fallbackId;
   const name = context?.name ?? staff2?.name;
   const staffTune = tune ?? staff2?.tune;
-  const instrumentName = staffInstrumentName(staff2, context, ancestorOperations);
+  const instrumentName = staffInstrumentName(staff2, context, ancestorOperations) ?? (typeof staffTune?.instrumentName === "string" ? staffTune.instrumentName : undefined);
   const shortInstrumentName = staffShortInstrumentName(staff2, context, ancestorOperations);
   const voices = context?.voices?.length ? context.voices.map((voice, voiceIndex) => renderableVoiceContext(voice, `${id}:voice_${voiceIndex}`, voiceIndex, events2)) : [{
     kind: "Voice",
@@ -80109,7 +82398,7 @@ function scoreChildrenFromParsedContext(context, tune, events2) {
   return children;
 }
 function renderableStaffGroupContext(input) {
-  const { context, staves, fallbackId, order, groupType, ancestorOperations, events: events2 } = input;
+  const { context, staves, fallbackId, order, groupType, nestedGroups, ancestorOperations, events: events2 } = input;
   const normalizedGroupType = normalizeStaffGroupKind(context?.groupType ?? groupType);
   const staffChildren2 = (context?.staves?.length ? context.staves : undefined)?.map((staffContext, index) => renderableStaffContext({
     staff: staves[index],
@@ -80141,6 +82430,7 @@ function renderableStaffGroupContext(input) {
     spanBars: true,
     staves,
     children,
+    ...nestedGroups?.length ? { nestedGroups } : {},
     ...context?.range ? { sourceRange: context.range } : {},
     ...context?.operations?.length ? { operations: context.operations } : {},
     ...order !== undefined ? { order } : {}
@@ -80174,24 +82464,37 @@ function buildStaffGroupContextTree(input) {
     staves: input.staves,
     fallbackId: input.id ?? input.context?.id ?? groupType,
     groupType,
+    ...input.nestedGroups?.length ? { nestedGroups: input.nestedGroups } : {},
     events: input.engravingEvents
   });
 }
 // src/music-rendering/renderer/renderDocumentModel.ts
+function headerField(tune, key) {
+  const t = tune;
+  if (!t)
+    return;
+  for (const value of [t[key], t.header?.[key], t.info?.[key], t.info?.header?.[key]]) {
+    if (typeof value === "string" && value.trim())
+      return value;
+  }
+  return;
+}
 function documentInfoFromTune(tune) {
   if (!tune)
     return;
-  const headerMeter = typeof tune.info?.meter === "string" ? tune.info.meter : typeof tune.info?.genre === "string" ? tune.info.genre : undefined;
+  const headerMeter = headerField(tune, "meter") ?? headerField(tune, "genre");
   return {
     lilypondVersion: tune.lilypondVersion,
-    title: tune.title,
-    subtitle: typeof tune.info?.subtitle === "string" ? tune.info.subtitle : undefined,
-    subsubtitle: typeof tune.info?.subsubtitle === "string" ? tune.info.subsubtitle : undefined,
-    composer: tune.composer,
+    title: headerField(tune, "title"),
+    subtitle: headerField(tune, "subtitle"),
+    subsubtitle: headerField(tune, "subsubtitle"),
+    composer: headerField(tune, "composer"),
     meter: headerMeter,
-    piece: typeof tune.info?.piece === "string" ? tune.info.piece : undefined,
-    opus: typeof tune.info?.opus === "string" ? tune.info.opus : undefined,
-    tagline: tune.info?.tagline,
+    poet: headerField(tune, "poet"),
+    piece: headerField(tune, "piece"),
+    opus: headerField(tune, "opus"),
+    tagline: tune.info?.tagline ?? tune.header?.tagline,
+    taglineBox: tune.info?.taglineBox ?? tune.header?.taglineBox,
     raggedLast: tune.raggedLast,
     raggedRight: tune.raggedRight,
     firstIndent: tune.firstIndent,
@@ -80215,10 +82518,8 @@ function documentInfoFromTune(tune) {
 var MARKUP_STAFF_SPACE_PX = CANONICAL_STAFF_SPACE_PX;
 
 // src/music-rendering/renderer/renderHeaderToSvgModel.ts
-function textFontForMusicFont2(musicFont) {
-  if (musicFont === "Petaluma")
-    return "Petaluma Script, serif";
-  return "serif";
+function headerTextFont(musicFont) {
+  return textFontForMusicFont(musicFont, "header");
 }
 function renderHeaderToSvgModel(opts) {
   const {
@@ -80227,6 +82528,7 @@ function renderHeaderToSvgModel(opts) {
     subsubtitle,
     composer,
     meter,
+    poet,
     piece,
     opus,
     musicFontFamily,
@@ -80237,15 +82539,16 @@ function renderHeaderToSvgModel(opts) {
     scoreReferenceBaseline,
     topMarkupSpacing
   } = opts;
-  if (!title && !subtitle && !subsubtitle && !composer && !meter && !piece && !opus)
+  if (!title && !subtitle && !subsubtitle && !composer && !meter && !poet && !piece && !opus)
     return null;
-  const textFont = textFontForMusicFont2(musicFontFamily);
+  const textFont = headerTextFont(musicFontFamily);
   const layout = computeHeaderLayout({
     title,
     subtitle,
     subsubtitle,
     composer,
     meter,
+    poet,
     piece,
     opus,
     contentWidth,
@@ -80969,7 +83272,7 @@ function buildMarkupLinesFromRunsWithGaps(runs, opts) {
 }
 function computeMarkupFrameHeight(lines, opts) {
   const hasInlineShapeRuns = lines.some((line) => line.some((run) => run.boxed || run.boxedGroup !== undefined || run.roundedGroup !== undefined || run.circledGroup !== undefined));
-  const isCompactExampleLabel = lines.length === 1 && !opts.boxed && !opts.code && opts.bold && opts.fontSizeScale == null;
+  const isCompactExampleLabel = lines.length === 1 && !opts.boxed && !opts.code && opts.bold;
   let h = opts.padY * 2 + lines.length * opts.lineHeight;
   if (opts.boxed && opts.code && lines.length === 2) {
     h -= Math.round(MARKUP_STAFF_SPACE_PX * 0.6);
@@ -82127,6 +84430,7 @@ function renderDocumentHeaderBlock(input) {
     subsubtitle: documentInfo.subsubtitle,
     composer: documentInfo.composer,
     meter: documentInfo.meter,
+    poet: documentInfo.poet,
     piece: documentInfo.piece,
     opus: documentInfo.opus,
     musicFontFamily: fontFamily,
@@ -82232,6 +84536,7 @@ function renderPianoScoreBlock(input) {
     musicGlyphMode,
     debugBeatLines,
     debugAboveStaffSkyline,
+    showMeasureWarnings,
     deferGlobalStaffSizeScale,
     renderingPreferences: renderingPreferences2,
     selectedEventIds,
@@ -82245,7 +84550,8 @@ function renderPianoScoreBlock(input) {
       groupType: block.groupType,
       staves: block.staves,
       context: groupContext?.type === "StaffGroup" ? groupContext : undefined,
-      engravingEvents: block.engravingEvents
+      engravingEvents: block.engravingEvents,
+      nestedGroups: block.nestedGroups
     }), {
       staffGroup: {
         fontFamily,
@@ -82262,6 +84568,7 @@ function renderPianoScoreBlock(input) {
         deferGlobalStaffSizeScale,
         debugBeatLines,
         debugAboveStaffSkyline,
+        showMeasureWarnings,
         renderingPreferences: renderingPreferences2,
         selectedEventIds,
         eventIdScoreIndexStart,
@@ -82292,6 +84599,7 @@ function renderScoreBlock(input) {
     deferGlobalStaffSizeScale,
     debugBeatLines,
     debugAboveStaffSkyline,
+    showMeasureWarnings,
     renderingPreferences: renderingPreferences2,
     onBeamTrace,
     onSlurTrace,
@@ -82335,6 +84643,7 @@ function renderScoreBlock(input) {
         deferGlobalStaffSizeScale,
         debugBeatLines,
         debugAboveStaffSkyline,
+        showMeasureWarnings,
         compactVertical,
         onBeamTrace,
         onSlurTrace,
@@ -82459,8 +84768,102 @@ function computeDocumentContentHeight(input) {
   }
   return contentHeight;
 }
+// package.json
+var package_default = {
+  name: "lily-js",
+  version: "0.4.0",
+  type: "module",
+  exports: {
+    ".": {
+      import: "./dist/lilyjs.esm.js",
+      script: "./dist/lilyjs.min.js",
+      default: "./dist/lilyjs.min.js"
+    },
+    "./style.css": "./src/music-rendering/renderer-style.css"
+  },
+  scripts: {
+    test: "bun test",
+    "test:watch": "bun test --watch",
+    cli: "bun run src/cli/lilyjs.ts",
+    "cli:build": "bun build --compile --target=bun --outfile dist/bin/lilyjs src/cli/lilyjs.ts",
+    "cli:test": "bun run cli:build && ./dist/bin/lilyjs examples/demo/barlines_demo.ly dist/lilyjs-compiled-test.svg",
+    dev: "bun run dev:bun",
+    "dev:bun": "lsof -ti:5556 | xargs kill -9 2>/dev/null; bun --hot tools/serve/server.ts",
+    "parity:sidebyside": "bun run tools/compare/batch_side_by_side.ts",
+    "parity:regression": "bun run tools/compare/corpus_regression.ts",
+    "snapshot:update": "bun run tools/snapshot/demo_snapshots.ts update",
+    "snapshot:check": "bun run tools/snapshot/demo_snapshots.ts check",
+    "snapshot:baseline:report": "bun run tools/snapshot/demo_snapshots.ts diff --mode hash --report tests/snapshots/demos/regression-report.json",
+    "snapshot:baseline:update": "bun run tools/snapshot/demo_snapshots.ts baseline-update",
+    "parser:compare": "bun run tools/parser/comparison.ts",
+    "parser:no-regex": "bun run tools/parser/no_regex_guard.ts",
+    "parser:render-check": "bun run tools/parser/render-check.ts",
+    "parser:benchmark": "bun run tools/parser/benchmark.ts",
+    "parser:snapshot:update": "bun run tools/snapshot/snapshot-test.ts --update",
+    "parser:snapshot:verify": "bun run tools/snapshot/snapshot-test.ts --verify",
+    "snapshot:diff": "bun run tools/signature/demo_signature_diff.ts --report tests/snapshots/demos/signature-report.json && bun run tools/snapshot/demo_snapshots.ts diff --mode all --report tests/snapshots/demos/diff-report.json --max-spacing-delta-ss 0.9 --max-beam-slope-delta 0.12 --max-shape-mismatch-percent 2.5",
+    parity: "bun run tools/compare/run_parity_corpus.ts --tier primary --out-dir tests/snapshots/parity",
+    "parity:examples": "bun run tools/compare/all_examples_side_by_side.ts --out-dir examples/comparison",
+    "smufl:metadata": "bun run tools/fonts/build-smufl-metadata.js",
+    "smufl:paths": "python3 tools/fonts/build-smufl-paths.py --all-supported",
+    typecheck: "bunx tsc -p tsconfig.json && bunx tsc -p tsconfig.scripts.json && bunx tsc -p tsconfig.tests.json",
+    "typecheck:tests": "bunx tsc -p tsconfig.tests.json",
+    "build:web": "bun run tools/build/build-web.ts",
+    "build:sync-renderer-style": "bun run tools/build/sync-renderer-style.ts",
+    "build:lilyjs": "bun run tools/build/build-lilyjs.ts",
+    "build:lily-parser": "bun run tools/build/build-lily-parser.ts",
+    build: "bun run build:web && bun run build:lilyjs",
+    preview: "bun run tools/serve/preview.ts",
+    web: "bun run tools/serve/web-preview.ts",
+    "web:preview": "bun run tools/serve/web-preview.ts"
+  },
+  dependencies: {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "6.41.1",
+    react: "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  overrides: {
+    "@codemirror/view": "6.41.1"
+  },
+  devDependencies: {
+    "@types/bun": "latest",
+    "@types/node": "^25.5.2",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "fast-check": "^4.7.0",
+    typescript: "~5.7.2"
+  }
+};
+
+// src/appMeta.ts
+var APP_NAME = package_default.name ?? "lily-viewer";
+var APP_VERSION = package_default.version ?? "0.0.0";
 
 // src/music-rendering/renderer/document/tagline.ts
+var TAGLINE_FRAME_THICKNESS_SS = 0.1;
+var TAGLINE_LINE_HEIGHT_EM = 1.35;
+var TAGLINE_ASCENT_EM = 0.76;
+var TAGLINE_DESCENT_EM = 0.24;
+function wrapTaglineLines(text, fontSize, maxWidthPx) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && estimateMarkupAdvanceWidthPx(candidate, fontSize) > maxWidthPx) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line)
+    lines.push(line);
+  return lines.length ? lines : [text];
+}
 function resolveTaglineText(tagline, _lilypondVersion) {
   if (tagline === false)
     return null;
@@ -82468,14 +84871,15 @@ function resolveTaglineText(tagline, _lilypondVersion) {
     const text = tagline.trim();
     return text ? text : null;
   }
-  return "Music engraving by LilyJS 0.1.0—www.lilyJS.org";
+  return `Music engraving by LilyJS ${APP_VERSION}—www.lilyJS.org`;
 }
 function buildDocumentTagline(input) {
-  const { taglineText, totalWidth, totalHeight, staffSizeScale = 1, bottomOffsetPx } = input;
+  const { taglineText, taglineBox, totalWidth, totalHeight, staffSizeScale = 1, bottomOffsetPx, wrapWidthPx, bottomMarginPx } = input;
   if (!taglineText)
     return { elements: [], grobs: [] };
   const fontSize = TAGLINE_FONT_SIZE * staffSizeScale;
-  const bottomOffset = bottomOffsetPx ?? TAGLINE_BOTTOM_OFFSET * staffSizeScale;
+  const boxPaddingPx = (taglineBox?.padding ?? 0) * LINE_SPACING * staffSizeScale;
+  const bottomOffset = taglineBox && bottomMarginPx != null ? bottomMarginPx + boxPaddingPx + fontSize * TAGLINE_DESCENT_EM : bottomOffsetPx ?? TAGLINE_BOTTOM_OFFSET * staffSizeScale;
   const anchor = {
     x: totalWidth / 2,
     y: totalHeight - bottomOffset
@@ -82486,18 +84890,49 @@ function buildDocumentTagline(input) {
     width: Math.max(taglineText.length * fontSize * 0.56, fontSize * 2),
     height: fontSize * 1.15
   };
+  const paddingPx = boxPaddingPx;
+  const maxLineWidthPx = Math.max(fontSize * 4, (wrapWidthPx ?? totalWidth * 0.86) - paddingPx * 2);
+  const lines = taglineBox?.wordwrap ? wrapTaglineLines(taglineText, fontSize, maxLineWidthPx) : [taglineText];
+  const lineHeight = fontSize * TAGLINE_LINE_HEIGHT_EM;
+  const baselines = lines.map((_, index) => anchor.y - (lines.length - 1 - index) * lineHeight);
+  const textElements = lines.map((line, index) => el("text", {
+    x: anchor.x,
+    y: baselines[index],
+    fontSize,
+    fontFamily: ROMAN_TEXT_STACK,
+    textAnchor: "middle",
+    fill: "currentColor",
+    ...taglineBox ? {
+      textLength: estimateMarkupAdvanceWidthPx(line, fontSize),
+      lengthAdjust: "spacingAndGlyphs"
+    } : {},
+    "data-lily-element": "tagline"
+  }, line, lines.length > 1 ? `tagline-${index}` : "tagline"));
+  const frameElements = [];
+  if (taglineBox) {
+    const widestLinePx = Math.max(...lines.map((line) => estimateMarkupAdvanceWidthPx(line, fontSize)));
+    const thickness = TAGLINE_FRAME_THICKNESS_SS * LINE_SPACING * staffSizeScale;
+    const left = anchor.x - widestLinePx / 2 - paddingPx;
+    const right = anchor.x + widestLinePx / 2 + paddingPx;
+    const top = baselines[0] - fontSize * TAGLINE_ASCENT_EM - paddingPx;
+    const bottom = anchor.y + fontSize * TAGLINE_DESCENT_EM + paddingPx;
+    const strut = (x, y, w, h, piece) => el("rect", {
+      x,
+      y,
+      width: w,
+      height: h,
+      fill: "currentColor",
+      "data-lily-element": "tagline-frame",
+      "data-lily-frame-piece": piece
+    }, undefined, `tagline-frame-${piece}`);
+    frameElements.push(strut(left, top, right - left, thickness, "top"), strut(left, bottom - thickness, right - left, thickness, "bottom"), strut(left, top, thickness, bottom - top, "left"), strut(right - thickness, top, thickness, bottom - top, "right"));
+    box.x = left;
+    box.y = top;
+    box.width = right - left;
+    box.height = bottom - top;
+  }
   return {
-    elements: [
-      el("text", {
-        x: anchor.x,
-        y: anchor.y,
-        fontSize,
-        fontFamily: "serif",
-        textAnchor: "middle",
-        fill: "currentColor",
-        "data-lily-element": "tagline"
-      }, taglineText, "tagline")
-    ],
+    elements: [...frameElements, ...textElements],
     grobs: [{
       id: "document:tagline:0",
       type: "text",
@@ -82794,6 +85229,11 @@ function firstScoreHeaderHandoffLift(documentInfo, firstBlock) {
   }
   if (hasTitle && hasMetadataRow && !hasOtherHeader)
     return LINE_SPACING * 4.09;
+  const hasSubtitle = Boolean(documentInfo?.subtitle);
+  const hasPieceOrOpus = Boolean(documentInfo?.piece) || Boolean(documentInfo?.opus);
+  if (hasTitle && hasMetadataRow && hasPieceOrOpus && !hasSubtitle) {
+    return LINE_SPACING * 0.75;
+  }
   if (hasOtherHeader)
     return -deepestHeaderFontSizePx(documentInfo) * 0.1;
   return LINE_SPACING;
@@ -82809,17 +85249,26 @@ function onePagePianoHeaderBaselineCorrectionPx(documentInfo, firstBlock) {
   }
   return LINE_SPACING * 0.28;
 }
+var DEFAULT_MARKUP_SYSTEM_BASIC_DISTANCE = 5;
+var MARKUP_SYSTEM_VISIBLE_FRACTION = 0.55;
+function markupSystemSpacingOverrideExtraPx(documentInfo) {
+  const basic = documentInfo?.verticalSpacing?.["markup-system-spacing"]?.basicDistance;
+  if (basic == null)
+    return 0;
+  return Math.max(0, basic - DEFAULT_MARKUP_SYSTEM_BASIC_DISTANCE) * LINE_SPACING * MARKUP_SYSTEM_VISIBLE_FRACTION;
+}
 function headerToScoreStaffTopGapPx(documentInfo) {
   const hasTitle = Boolean(documentInfo?.title);
   const hasComposer = Boolean(documentInfo?.composer);
   const hasMeter = Boolean(documentInfo?.meter);
   const hasMetadataRow = hasComposer || hasMeter;
   const hasOtherHeader = Boolean(documentInfo?.subtitle) || Boolean(documentInfo?.piece) || Boolean(documentInfo?.opus);
+  const overrideExtra = markupSystemSpacingOverrideExtraPx(documentInfo);
   if (hasTitle && hasMetadataRow && !hasOtherHeader) {
-    return CANONICAL_STAFF_SPACE_PX * (hasMeter ? 2.58 : 2.49);
+    return CANONICAL_STAFF_SPACE_PX * (hasMeter ? 2.58 : 2.49) + overrideExtra;
   }
   const fontSize = deepestHeaderFontSizePx(documentInfo);
-  return fontSize * 0.28 + LINE_SPACING * 0.95;
+  return fontSize * 0.28 + LINE_SPACING * 0.95 + overrideExtra;
 }
 
 // src/music-rendering/renderer/document/flowRules.ts
@@ -83023,6 +85472,15 @@ function textContent2(node) {
 }
 var TEXT_DESCENT_RATIO = 0.28;
 var TEXT_ASCENT_RATIO = 0.75;
+var STRONG_DESCENDERS = new Set(["g", "j", "p", "q", "y"]);
+var MILD_DESCENDERS = new Set(["(", ")", "[", "]", "{", "}", ",", ";", "@"]);
+function glyphDescentRatio(ch) {
+  if (STRONG_DESCENDERS.has(ch))
+    return TEXT_DESCENT_RATIO;
+  if (MILD_DESCENDERS.has(ch))
+    return TEXT_DESCENT_RATIO * 0.5;
+  return 0;
+}
 function collectTextSkylineBoxes(nodes, edge, ty, out) {
   for (const node of nodes) {
     if (!node || typeof node !== "object")
@@ -83045,8 +85503,19 @@ function collectTextSkylineBoxes(nodes, edge, ty, out) {
       const anchor = element.props.textAnchor;
       const x1 = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
       const baseline = ny + Number(element.props.y);
-      const y = edge === "bottom" ? baseline + fontSize * TEXT_DESCENT_RATIO : baseline - fontSize * TEXT_ASCENT_RATIO;
-      out.push({ x1, x2: x1 + width, y });
+      if (edge === "top") {
+        out.push({ x1, x2: x1 + width, y: baseline - fontSize * TEXT_ASCENT_RATIO });
+      } else {
+        let prevW = 0;
+        for (let i = 0;i < text.length; i++) {
+          const w = estimateMarkupAdvanceWidthPx(text.slice(0, i + 1), fontSize);
+          const ch = text[i];
+          if (ch !== " ") {
+            out.push({ x1: x1 + prevW, x2: x1 + w, y: baseline + fontSize * glyphDescentRatio(ch) });
+          }
+          prevW = w;
+        }
+      }
       continue;
     }
     if (Array.isArray(element.children)) {
@@ -83343,7 +85812,9 @@ function finalizeDocumentSvgModel(input) {
     width,
     musicGlyphMode,
     taglineText,
+    taglineBox,
     taglineBottomOffsetPx,
+    taglineBottomMarginPx,
     targetPageIndex,
     maxPageIndexReached,
     continuationPageContentY
@@ -83365,10 +85836,13 @@ function finalizeDocumentSvgModel(input) {
   const isLastDocumentPage = targetPageIndex >= maxPageIndexReached;
   const tagline = isLastDocumentPage ? buildDocumentTagline({
     taglineText: taglineText ?? null,
+    taglineBox,
     totalWidth,
     totalHeight,
     staffSizeScale,
-    bottomOffsetPx: taglineBottomOffsetPx
+    bottomOffsetPx: taglineBottomOffsetPx,
+    bottomMarginPx: taglineBottomMarginPx,
+    wrapWidthPx: totalWidth - marginLeftPx * 2
   }) : { elements: [], grobs: [] };
   signatureGrobs.push(...tagline.grobs);
   const contentTransform = staffSizeScale === 1 ? `translate(${marginLeftPx}, ${effectiveMarginTopPx})` : `translate(${marginLeftPx}, ${effectiveMarginTopPx}) scale(${staffSizeScale})`;
@@ -83620,11 +86094,12 @@ function renderDocumentToSvgModel(opts) {
     }));
   };
   if (targetPageIndex > 0) {
+    const pageNumberMarginLift = Math.min(CANONICAL_STAFF_SPACE_PX * 1.4, Math.max(0, marginTopPx - CANONICAL_STAFF_SPACE_PX));
     elements.push(el("text", {
       x: -0.29,
-      y: CANONICAL_STAFF_SPACE_PX * 1.44,
+      y: -pageNumberMarginLift,
       fontSize: CANONICAL_STAFF_SPACE_PX * 2.2,
-      fontFamily: "serif",
+      fontFamily: ROMAN_TEXT_STACK,
       textAnchor: "start",
       fill: "var(--lily-note)",
       "data-lily-element": "page-number"
@@ -83667,6 +86142,7 @@ function renderDocumentToSvgModel(opts) {
             baselineY: visualY + headerDeepestBaseline,
             staffTopGapPx: headerToScoreStaffTopGapPx(documentInfo),
             bottomY: visualY + headerDeepestBaseline,
+            bottomInkBoxes: textBottomSkylineBoxes(headerDoc.elements, visualY),
             clearScoreTopInk: true,
             topInkClearancePx: LINE_SPACING * 0.3,
             ...headerBottomRowXRange ? { bottomXRange: headerBottomRowXRange } : {}
@@ -83790,7 +86266,7 @@ function renderDocumentToSvgModel(opts) {
       const pianoPageHeightBudget = pageBreaking !== "one-page" && pageHeightBudget != null ? (pageHeightBudget + pianoPageFillExtra) / scoreScale2 : undefined;
       const renderPianoDoc = (budget, reservedHeight) => renderPianoScoreBlock({
         block,
-        documentInfo,
+        documentInfo: documentInfoWithDefaultFirstIndent(documentInfo),
         contentWidth: documentScoreContentWidth(contentWidth) + STAFF_RIGHT_EDGE_OPTICAL_OUTSET / scoreScale2,
         lineBreakContentWidth: contentWidth,
         fontFamily,
@@ -83918,8 +86394,7 @@ function renderDocumentToSvgModel(opts) {
     const scorePageHeightBudget = pageBreaking !== "one-page" && pageHeightBudget != null ? (pageHeightBudget + pageFillExtra) / scoreScale : undefined;
     const scorePageZeroReservedHeight = scorePageHeightBudget != null ? yOffset / scoreScale : undefined;
     const scoreDocumentInfo = documentInfoWithDefaultFirstIndent(documentInfo);
-    const cachedScoreDoc = scoreRenderCache?.get(scoreIdx);
-    const scoreDoc = cachedScoreDoc !== undefined ? cachedScoreDoc : renderScoreBlock({
+    const scoreBlockOptions = {
       block,
       tune,
       score: score2,
@@ -83942,7 +86417,9 @@ function renderDocumentToSvgModel(opts) {
       onSlurTrace,
       pageHeightBudget: scorePageHeightBudget,
       pageZeroReservedHeight: scorePageZeroReservedHeight
-    });
+    };
+    const cachedScoreDoc = scoreRenderCache?.get(scoreIdx);
+    let scoreDoc = cachedScoreDoc !== undefined ? cachedScoreDoc : renderScoreBlock(scoreBlockOptions);
     if (scoreRenderCache && cachedScoreDoc === undefined) {
       scoreRenderCache.set(scoreIdx, scoreDoc);
     }
@@ -83964,6 +86441,21 @@ function renderDocumentToSvgModel(opts) {
       }) : undefined;
       const preScoreGap = springStaffTopY !== undefined ? Math.max(0, springStaffTopY - (yOffset + firstStaffTop * scoreScale)) : preScoreGapFromHandoff(pendingMarkupToScoreHandoff, yOffset, firstStaffTop, scoreScale, pendingMarkupToScoreHandoff?.bottomXRange ? topSignatureInkYInXRange(scoreDoc.signature, pendingMarkupToScoreHandoff.bottomXRange[0] / scoreScale, pendingMarkupToScoreHandoff.bottomXRange[1] / scoreScale) : topSignatureInkY(scoreDoc.signature));
       const gap = !nextBlock || nextBlock.type === "error" || nextBlock.type === "warning" ? 0 : nextBlock.type === "markup" ? scoreToMarkupGapFor(nextBlock, scoreIdx) : scoreToScoreGap;
+      if (!(scoreDoc.pagination && scoreDoc.pagination.pageCount > 1) && scorePageHeightBudget != null && pageHeightBudget != null && pageContentCount > 0) {
+        const neededHeight = preScoreGap + scoreDoc.height * scoreScale + gap;
+        const overflowPx = yOffset + neededHeight - pageHeightBudget;
+        const tallerThanPage = neededHeight > pageHeightBudget - continuationPageContentY;
+        if (overflowPx > 0 && !tallerThanPage) {
+          const retriedScoreDoc = renderScoreBlock({
+            ...scoreBlockOptions,
+            pageZeroReservedHeight: (scorePageZeroReservedHeight ?? 0) + overflowPx / scoreScale + 1
+          });
+          if (retriedScoreDoc?.pagination && retriedScoreDoc.pagination.pageCount > 1) {
+            scoreDoc = retriedScoreDoc;
+            scoreRenderCache?.set(scoreIdx, retriedScoreDoc);
+          }
+        }
+      }
       const scorePaginated = Boolean(scoreDoc.pagination && scoreDoc.pagination.pageCount > 1);
       const placementHeight = scorePaginated ? (scoreDoc.pagination.pageHeights[0] ?? 0) * scoreScale : scaledScoreHeight;
       const pageBeforePlacement = currentPageIndex;
@@ -84081,7 +86573,9 @@ function renderDocumentToSvgModel(opts) {
     width,
     musicGlyphMode,
     taglineText,
+    taglineBox: documentInfo?.taglineBox,
     taglineBottomOffsetPx: taglineBottomOffsetForPage,
+    taglineBottomMarginPx: mmToPx(documentInfo?.bottomMarginMm ?? 10),
     targetPageIndex,
     maxPageIndexReached,
     continuationPageContentY
@@ -84099,9 +86593,11 @@ function documentInfoFromMusicDocumentInfo(info) {
     subsubtitle: typeof info.header?.subsubtitle === "string" ? info.header.subsubtitle : undefined,
     composer: info.header?.composer,
     meter: headerMeter,
+    poet: typeof info.header?.poet === "string" ? info.header.poet : undefined,
     piece: info.header?.piece,
     opus: info.header?.opus,
     tagline: info.header?.tagline,
+    taglineBox: info.header?.taglineBox,
     raggedLast: info.raggedLast,
     raggedRight: info.raggedRight,
     firstIndent: info.firstIndent,
@@ -84182,6 +86678,7 @@ function blockFromScore(score2) {
   const partScores = score2.parts.map((part2) => scoreForPart(scoreWithMetadata, part2));
   const renderTunes = partScores.map((partScore) => scoreToRenderModel(partScore));
   const groupType = scoreWithMetadata.__lilyStaffGroupType ?? "PianoStaff";
+  const nestedGroups = scoreWithMetadata.__lilyNestedStaffGroups;
   const staves = renderTunes.map((tune, index) => ({
     name: staffNameForPart(score2.parts[index], index),
     tune
@@ -84191,7 +86688,8 @@ function blockFromScore(score2) {
       type: "pianoScore",
       groupType,
       staves,
-      meta: renderTunes[0]
+      meta: renderTunes[0],
+      ...nestedGroups?.length ? { nestedGroups } : {}
     }],
     renderTunes,
     scores: partScores
@@ -84232,7 +86730,8 @@ function projectMusicDocumentBlock(block) {
         thickness: block.thickness,
         cornerRadius: block.cornerRadius,
         smallCaps: block.smallCaps,
-        align: block.align
+        align: block.align,
+        compactLineGap: block.compactLineGap
       }],
       renderTunes: [],
       scores: []
@@ -84423,10 +86922,15 @@ var TEXT_FONT_DEFS = {
   Academico: { name: "Academico", url: resolveFontUrl("Academico.woff2") },
   PetalumaScript: { name: "Petaluma Script", url: resolveFontUrl("PetalumaScript.woff2") }
 };
+var DOCUMENT_TEXT_FONT = {
+  name: "TeX Gyre Schola",
+  url: resolveFontUrl("TeXGyreSchola-Regular.woff2")
+};
 var DEFAULT_MUSIC_FONT = "Bravura";
 var FONT_DEFS2 = [
   ...MUSIC_FONT_DEFS,
-  ...Object.values(TEXT_FONT_DEFS)
+  ...Object.values(TEXT_FONT_DEFS),
+  DOCUMENT_TEXT_FONT
 ];
 function normalizeMusicFontName(fontFamily) {
   const firstFamily = fontFamily?.split(",")[0]?.trim().replace(/^["']|["']$/g, "");
@@ -84454,6 +86958,7 @@ function fontDefinitionsForNames(names) {
       addFontDef(defs, companion);
     }
   }
+  addFontDef(defs, DOCUMENT_TEXT_FONT);
   return [...defs.values()];
 }
 function selectedMusicFontNames(fontFamilies) {
@@ -84572,6 +87077,1757 @@ var RENDERER_STYLE_TEXT = `/* music-renderer styles — auto-injected by the sta
   transition: fill 80ms linear, stroke 80ms linear;
 }
 `;
+// src/music-playback/types.ts
+function tempoSegmentQuarterBpm(segment) {
+  return segment.bpm * (segment.beatUnit.num / segment.beatUnit.den);
+}
+var DEFAULT_QUARTER_BPM = 120;
+var DEFAULT_VELOCITY = 80;
+// src/music-playback/pitch.ts
+var STEP_SEMITONES3 = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11
+};
+var MIDI_OCTAVE_OFFSET = 2;
+function pitchToMidi(pitch3) {
+  const semitone = STEP_SEMITONES3[pitch3.step] ?? 0;
+  return (pitch3.octave + MIDI_OCTAVE_OFFSET) * 12 + semitone + pitch3.alter;
+}
+// src/music-playback/tempoMap.ts
+var NOTE_VALUE_DENOMINATOR = {
+  whole: 1,
+  half: 2,
+  quarter: 4,
+  eighth: 8,
+  "16th": 16,
+  "32nd": 32,
+  "64th": 64
+};
+function beatUnitDenominator(beatUnit) {
+  if (beatUnit === undefined)
+    return 4;
+  return NOTE_VALUE_DENOMINATOR[beatUnit];
+}
+function beatUnitQN(beatUnit, beatUnitDots = 0) {
+  const den = beatUnitDenominator(beatUnit);
+  const dots = Math.max(0, beatUnitDots);
+  const dotNum = (1 << dots + 1) - 1;
+  const dotDen = 1 << dots;
+  const num3 = 4 * dotNum;
+  const g = gcdInt(num3, den * dotDen);
+  return { num: num3 / g, den: den * dotDen / g };
+}
+function gcdInt(a, b) {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y !== 0) {
+    const t = x % y;
+    x = y;
+    y = t;
+  }
+  return x || 1;
+}
+function toQuarterBpm(bpm, beatUnit, beatUnitDots = 0) {
+  const unit = beatUnitQN(beatUnit, beatUnitDots);
+  return bpm * (unit.num / unit.den);
+}
+function buildTempoRegions(changes, defaultQuarterBpm = DEFAULT_QUARTER_BPM) {
+  const sorted = [...changes].sort((a, b) => a.startQN - b.startQN);
+  const hasZero = sorted.length > 0 && sorted[0].startQN <= 0;
+  const seeded = hasZero ? sorted : [{ startQN: 0, quarterBpm: defaultQuarterBpm }, ...sorted];
+  const regions = [];
+  let prevSec = 0;
+  let prevQN = 0;
+  let prevBpm = seeded[0].quarterBpm;
+  for (let i = 0;i < seeded.length; i++) {
+    const change = seeded[i];
+    const next = seeded[i + 1];
+    if (next && next.startQN === change.startQN)
+      continue;
+    const startQN = Math.max(0, change.startQN);
+    let startSec;
+    if (regions.length === 0) {
+      startSec = 0;
+    } else {
+      const dq = startQN - prevQN;
+      startSec = prevSec + dq * 60 / prevBpm;
+    }
+    if (regions.length > 0 && change.quarterBpm === prevBpm) {
+      prevQN = startQN;
+      prevSec = startSec;
+      continue;
+    }
+    regions.push({ startQN, startSec, quarterBpm: change.quarterBpm });
+    prevQN = startQN;
+    prevSec = startSec;
+    prevBpm = change.quarterBpm;
+  }
+  return regions;
+}
+function qnToSeconds(qn, regions) {
+  if (regions.length === 0) {
+    return qn * 60 / DEFAULT_QUARTER_BPM;
+  }
+  let region = regions[0];
+  for (const r of regions) {
+    if (r.startQN <= qn)
+      region = r;
+    else
+      break;
+  }
+  const dq = qn - region.startQN;
+  return region.startSec + dq * 60 / region.quarterBpm;
+}
+function tempoRegionsFromConductor(map) {
+  const regions = [];
+  let prevSec = 0;
+  let prevQN = 0;
+  let prevBpm = DEFAULT_QUARTER_BPM;
+  for (const segment of map.tempo) {
+    const startQN = rationalToNumber(segment.startQN);
+    const startSec = regions.length === 0 ? 0 : prevSec + (startQN - prevQN) * 60 / prevBpm;
+    const quarterBpm = tempoSegmentQuarterBpm(segment);
+    regions.push({ startQN, startSec, quarterBpm });
+    prevQN = startQN;
+    prevSec = startSec;
+    prevBpm = quarterBpm;
+  }
+  return regions;
+}
+function quarterNoteToSeconds(map, at) {
+  return qnToSeconds(rationalToNumber(at), tempoRegionsFromConductor(map));
+}
+function secondsToQuarterNote(map, seconds) {
+  const regions = tempoRegionsFromConductor(map);
+  let qn;
+  if (regions.length === 0) {
+    qn = seconds * DEFAULT_QUARTER_BPM / 60;
+  } else {
+    let region = regions[0];
+    for (const r of regions) {
+      if (r.startSec <= seconds)
+        region = r;
+      else
+        break;
+    }
+    qn = region.startQN + (seconds - region.startSec) * region.quarterBpm / 60;
+  }
+  return rationalFromNumber(Math.round(qn * 960) / 960, 960);
+}
+// src/music-playback/conductorMap.ts
+function timeSignatureQN(beats, beatUnit) {
+  return normalizeRational({ num: 4 * beats, den: beatUnit });
+}
+function buildTempoSegments(changes, defaultQuarterBpm, durationQN) {
+  const sorted = [...changes].sort((a, b) => compareRational(a.startQN, b.startQN));
+  const hasZero = sorted.length > 0 && compareRational(sorted[0].startQN, RATIONAL_ZERO) <= 0;
+  const seeded = hasZero ? sorted : [
+    { startQN: RATIONAL_ZERO, bpm: defaultQuarterBpm, beatUnit: "quarter", beatUnitDots: 0 },
+    ...sorted
+  ];
+  const segments = [];
+  for (let i = 0;i < seeded.length; i++) {
+    const change = seeded[i];
+    const next = seeded[i + 1];
+    if (next && compareRational(next.startQN, change.startQN) === 0)
+      continue;
+    const startQN = maxRational(RATIONAL_ZERO, change.startQN);
+    const segment = {
+      id: `tempo-${segments.length}`,
+      startQN,
+      endQN: startQN,
+      bpm: change.bpm,
+      beatUnit: beatUnitQN(change.beatUnit, change.beatUnitDots),
+      ...change.text !== undefined ? { text: change.text } : {}
+    };
+    const previous = segments[segments.length - 1];
+    if (previous && tempoSegmentQuarterBpm(previous) === tempoSegmentQuarterBpm(segment))
+      continue;
+    segments.push(segment);
+  }
+  for (let i = 0;i < segments.length; i++) {
+    const next = segments[i + 1];
+    segments[i].endQN = next ? next.startQN : maxRational(segments[i].startQN, durationQN);
+  }
+  return segments;
+}
+function buildConductorMap(args) {
+  const defaultQuarterBpm = args.defaultQuarterBpm ?? DEFAULT_QUARTER_BPM;
+  const tempo = buildTempoSegments(args.tempoChanges, defaultQuarterBpm, args.durationQN);
+  const meter = [];
+  const key = [];
+  const bars = [];
+  let pickupQN;
+  const passCountByMeasure = new Map;
+  let previousMeter = null;
+  let previousFifths = null;
+  for (let barIndex = 0;barIndex < args.bars.length; barIndex++) {
+    const input = args.bars[barIndex];
+    const measure2 = args.conductorPart?.measures[input.measureIndex];
+    if (!measure2)
+      continue;
+    const passIndex = passCountByMeasure.get(input.measureIndex) ?? 0;
+    passCountByMeasure.set(input.measureIndex, passIndex + 1);
+    const expectedDurationQN = timeSignatureQN(measure2.timeSignature.beats, measure2.timeSignature.beatUnit);
+    const declaredPickup = barIndex === 0 && measure2.expectedDurationQN !== null;
+    const shortOpening = barIndex === 0 && compareRational(input.actualDurationQN, RATIONAL_ZERO) > 0 && compareRational(input.actualDurationQN, expectedDurationQN) < 0;
+    const isPickup = declaredPickup || shortOpening;
+    if (isPickup && pickupQN === undefined)
+      pickupQN = input.actualDurationQN;
+    const sourceMeasureId = `measure-${input.measureIndex}`;
+    bars.push({
+      measureId: passIndex > 0 ? `${sourceMeasureId}#${passIndex}` : sourceMeasureId,
+      sourceMeasureId,
+      number: measure2.number,
+      passIndex,
+      startQN: input.startQN,
+      endQN: addRational(input.startQN, input.actualDurationQN),
+      expectedDurationQN,
+      actualDurationQN: input.actualDurationQN,
+      ...isPickup ? { isPickup: true } : {}
+    });
+    const { beats, beatUnit } = measure2.timeSignature;
+    if (!previousMeter || previousMeter.numerator !== beats || previousMeter.denominator !== beatUnit) {
+      meter.push({
+        id: `meter-${meter.length}`,
+        startQN: input.startQN,
+        numerator: beats,
+        denominator: beatUnit
+      });
+      previousMeter = { numerator: beats, denominator: beatUnit };
+    }
+    const signature = measure2.keySignature;
+    if (signature) {
+      const fifths = signature.type === "sharp" ? signature.count : signature.type === "flat" ? -signature.count : 0;
+      if (previousFifths === null || previousFifths !== fifths) {
+        key.push({ id: `key-${key.length}`, startQN: input.startQN, fifths });
+        previousFifths = fifths;
+      }
+    }
+  }
+  return {
+    tempo,
+    meter,
+    key,
+    bars,
+    ...pickupQN !== undefined ? { pickupQN } : {}
+  };
+}
+// src/music-playback/rawEvents.ts
+var QN_PER_WHOLE = { num: 4, den: 1 };
+function durationToQN3(event) {
+  return multiplyRational(event.duration.sounding, QN_PER_WHOLE);
+}
+function isGraceEvent(event) {
+  return (event instanceof Note || event instanceof Chord) && event.isGrace;
+}
+function embeddedVoiceOffsetQN(event) {
+  const offset = event.__lilyVoiceOffsetQN;
+  if (typeof offset !== "number" || !Number.isFinite(offset))
+    return null;
+  return rationalFromNumber(offset);
+}
+function voiceStreamsOf(measure2) {
+  if (measure2.staffMeasures.length > 0) {
+    const streams = [];
+    let voiceIndex = 0;
+    for (const sm of measure2.staffMeasures) {
+      for (const vc of sm.voices) {
+        streams.push({ voiceIndex, voiceId: vc.voiceId, staffId: sm.staffId, events: vc.events });
+        voiceIndex++;
+      }
+    }
+    if (streams.length > 0)
+      return streams;
+  }
+  return [{ voiceIndex: 0, events: measure2.events }];
+}
+function buildRawEvents(score2) {
+  const raw = [];
+  const measures = [];
+  let scoreEndQN = RATIONAL_ZERO;
+  for (let partIndex = 0;partIndex < score2.parts.length; partIndex++) {
+    const part2 = score2.parts[partIndex];
+    let measureStartQN = RATIONAL_ZERO;
+    let visualEventIndex = 0;
+    let islandStartQN = null;
+    let lastPrimaryStartQN = RATIONAL_ZERO;
+    for (let measureIndex = 0;measureIndex < part2.measures.length; measureIndex++) {
+      const measure2 = part2.measures[measureIndex];
+      let measureLenQN = RATIONAL_ZERO;
+      for (const { voiceIndex, voiceId, staffId, events: events2 } of voiceStreamsOf(measure2)) {
+        let voiceQN = RATIONAL_ZERO;
+        for (let noteIndex = 0;noteIndex < events2.length; noteIndex++) {
+          const event = events2[noteIndex];
+          const grace = isGraceEvent(event);
+          const durQN = grace ? RATIONAL_ZERO : durationToQN3(event);
+          const embeddedOffset = grace ? null : embeddedVoiceOffsetQN(event);
+          if (embeddedOffset !== null) {
+            if (compareRational(embeddedOffset, RATIONAL_ZERO) === 0) {
+              islandStartQN = lastPrimaryStartQN;
+            }
+            const startQN2 = addRational(islandStartQN ?? lastPrimaryStartQN, embeddedOffset);
+            raw.push({
+              event,
+              partIndex,
+              partId: part2.id,
+              measureIndex,
+              voiceIndex: voiceIndex + 1,
+              ...voiceId !== undefined ? { voiceId } : {},
+              ...staffId !== undefined ? { staffId } : {},
+              noteIndex,
+              visualEventIndex: visualEventIndex++,
+              occurrenceIndex: 0,
+              startQN: startQN2,
+              durationQN: durQN
+            });
+            measureLenQN = maxRational(measureLenQN, subtractRational(addRational(startQN2, durQN), measureStartQN));
+            continue;
+          }
+          const startQN = addRational(measureStartQN, voiceQN);
+          if (!grace)
+            lastPrimaryStartQN = startQN;
+          raw.push({
+            event,
+            partIndex,
+            partId: part2.id,
+            measureIndex,
+            voiceIndex,
+            ...voiceId !== undefined ? { voiceId } : {},
+            ...staffId !== undefined ? { staffId } : {},
+            noteIndex,
+            visualEventIndex: visualEventIndex++,
+            occurrenceIndex: 0,
+            startQN,
+            durationQN: durQN
+          });
+          voiceQN = addRational(voiceQN, durQN);
+        }
+        measureLenQN = maxRational(measureLenQN, voiceQN);
+      }
+      measures.push({
+        partIndex,
+        measureIndex,
+        startQN: measureStartQN,
+        durationQN: measureLenQN
+      });
+      measureStartQN = addRational(measureStartQN, measureLenQN);
+      scoreEndQN = maxRational(scoreEndQN, measureStartQN);
+    }
+  }
+  return { raw, measures, durationQN: scoreEndQN };
+}
+
+// src/music-playback/structure.ts
+function firstVoltaNumber(measure2) {
+  for (const bracket of measure2.voltaBrackets) {
+    const match2 = bracket.label.match(/\d+/);
+    if (!match2)
+      continue;
+    return Number(match2[0]);
+  }
+  return null;
+}
+function startsVolta(measure2) {
+  return measure2.voltaBrackets.some((bracket) => bracket.position === "start");
+}
+function buildAlternativeGroups(measures, startIndex, endIndexInclusive) {
+  const groups = [];
+  let current2 = null;
+  for (let i = startIndex;i <= endIndexInclusive; i++) {
+    const measure2 = measures[i];
+    if (startsVolta(measure2) || current2 === null) {
+      const volta = firstVoltaNumber(measure2) ?? groups.length + 1;
+      current2 = { volta, measureIndices: [] };
+      groups.push(current2);
+    }
+    current2.measureIndices.push(i);
+  }
+  return groups;
+}
+function playbackMeasureEntriesForPart(part2) {
+  const entries = [];
+  const measures = part2.measures;
+  let playbackQN = RATIONAL_ZERO;
+  let i = 0;
+  const appendMeasure = (measureIndex) => {
+    entries.push({ measureIndex, startQN: playbackQN });
+    playbackQN = addRational(playbackQN, measurePlaybackDuration(measures[measureIndex]));
+  };
+  while (i < measures.length) {
+    const measure2 = measures[i];
+    if (!measure2.repeatStart) {
+      appendMeasure(i);
+      i++;
+      continue;
+    }
+    const repeatStart = i;
+    let repeatEnd = measures.findIndex((candidate, index) => index >= repeatStart && candidate.repeatEnd);
+    if (repeatEnd < repeatStart)
+      repeatEnd = repeatStart;
+    const firstVolta = measures.findIndex((candidate, index) => index > repeatStart && index <= repeatEnd && startsVolta(candidate));
+    if (firstVolta > repeatStart) {
+      const body = measures.slice(repeatStart, firstVolta).map((_candidate, offset) => repeatStart + offset);
+      const alternatives = buildAlternativeGroups(measures, firstVolta, repeatEnd);
+      const repeatCount = Math.max(2, ...alternatives.map((group) => group.volta));
+      for (let pass = 1;pass <= repeatCount; pass++) {
+        for (const measureIndex of body)
+          appendMeasure(measureIndex);
+        const alternative = alternatives.find((group) => group.volta === pass) ?? alternatives[alternatives.length - 1];
+        if (alternative) {
+          for (const measureIndex of alternative.measureIndices)
+            appendMeasure(measureIndex);
+        }
+      }
+    } else {
+      for (let pass = 0;pass < 2; pass++) {
+        for (let measureIndex = repeatStart;measureIndex <= repeatEnd; measureIndex++) {
+          appendMeasure(measureIndex);
+        }
+      }
+    }
+    i = repeatEnd + 1;
+  }
+  return entries;
+}
+function measurePlaybackDuration(measure2) {
+  let measureLenQN = RATIONAL_ZERO;
+  for (const { events: events2 } of voiceStreamsOf(measure2)) {
+    let voiceQN = RATIONAL_ZERO;
+    let islandStartQN = null;
+    let lastPrimaryStartQN = RATIONAL_ZERO;
+    for (const event of events2) {
+      if (isGraceEvent(event))
+        continue;
+      const embeddedOffset = embeddedVoiceOffsetQN(event);
+      if (embeddedOffset !== null) {
+        if (compareRational(embeddedOffset, RATIONAL_ZERO) === 0) {
+          islandStartQN = lastPrimaryStartQN;
+        }
+        const endQN = addRational(addRational(islandStartQN ?? lastPrimaryStartQN, embeddedOffset), durationToQN3(event));
+        measureLenQN = maxRational(measureLenQN, endQN);
+        continue;
+      }
+      lastPrimaryStartQN = voiceQN;
+      voiceQN = addRational(voiceQN, durationToQN3(event));
+    }
+    measureLenQN = maxRational(measureLenQN, voiceQN);
+  }
+  return measureLenQN;
+}
+function expandRepeats(raw, measures, score2) {
+  const hasPlaybackRepeats = score2.parts.some((part2) => part2.measures.some((measure2) => measure2.repeatStart || measure2.repeatEnd || measure2.voltaBrackets.length > 0));
+  if (!hasPlaybackRepeats) {
+    let durationQN2 = RATIONAL_ZERO;
+    for (const measure2 of measures) {
+      durationQN2 = maxRational(durationQN2, addRational(measure2.startQN, measure2.durationQN));
+    }
+    return { raw, durationQN: durationQN2 };
+  }
+  const rawByMeasure = new Map;
+  for (const event of raw) {
+    const key = `${event.partIndex}:${event.measureIndex}`;
+    const events2 = rawByMeasure.get(key) ?? [];
+    events2.push(event);
+    rawByMeasure.set(key, events2);
+  }
+  const visualMeasureStart = new Map;
+  for (const measure2 of measures) {
+    visualMeasureStart.set(`${measure2.partIndex}:${measure2.measureIndex}`, measure2.startQN);
+  }
+  const out = [];
+  let durationQN = RATIONAL_ZERO;
+  for (let partIndex = 0;partIndex < score2.parts.length; partIndex++) {
+    const part2 = score2.parts[partIndex];
+    const entries = playbackMeasureEntriesForPart(part2);
+    const occurrenceByEvent = new Map;
+    for (const entry of entries) {
+      const events2 = rawByMeasure.get(`${partIndex}:${entry.measureIndex}`) ?? [];
+      for (const event of events2) {
+        const eventKey = `${partIndex}:${event.event.id}`;
+        const occurrenceIndex = occurrenceByEvent.get(eventKey) ?? 0;
+        occurrenceByEvent.set(eventKey, occurrenceIndex + 1);
+        const measureStart = visualMeasureStart.get(`${partIndex}:${entry.measureIndex}`) ?? RATIONAL_ZERO;
+        out.push({
+          ...event,
+          occurrenceIndex,
+          startQN: addRational(entry.startQN, subtractRational(event.startQN, measureStart))
+        });
+      }
+      durationQN = maxRational(durationQN, addRational(entry.startQN, measurePlaybackDuration(part2.measures[entry.measureIndex])));
+    }
+  }
+  return { raw: out, durationQN };
+}
+
+// src/music-playback/expression.ts
+function occurrencesByAnchor(events2) {
+  const byAnchor = new Map;
+  for (const event of events2) {
+    const key = `${event.partIndex}:${event.eventId}`;
+    const list = byAnchor.get(key) ?? [];
+    list.push({
+      occurrenceIndex: event.occurrenceIndex,
+      startQN: event.startQN,
+      endQN: addRational(event.startQN, event.durationQN)
+    });
+    byAnchor.set(key, list);
+  }
+  for (const list of byAnchor.values()) {
+    list.sort((a, b) => a.occurrenceIndex - b.occurrenceIndex);
+  }
+  return byAnchor;
+}
+function occurrenceOf(byAnchor, partIndex, eventId2, occurrenceIndex) {
+  return byAnchor.get(`${partIndex}:${eventId2}`)?.find((occurrence) => occurrence.occurrenceIndex === occurrenceIndex);
+}
+function buildTimelineExpression(score2, events2) {
+  const byAnchor = occurrencesByAnchor(events2);
+  const dynamics = [];
+  const hairpins = [];
+  const slurs = [];
+  const ottavas = [];
+  const rehearsalMarks = [];
+  for (let partIndex = 0;partIndex < score2.parts.length; partIndex++) {
+    const part2 = score2.parts[partIndex];
+    const partEvents = events2.filter((event) => event.partIndex === partIndex);
+    for (const measure2 of part2.measures) {
+      for (const dynamic of measure2.dynamics) {
+        for (const occurrence of byAnchor.get(`${partIndex}:${dynamic.eventId}`) ?? []) {
+          dynamics.push({
+            id: `dynamic-${dynamics.length}`,
+            partIndex,
+            occurrenceIndex: occurrence.occurrenceIndex,
+            eventId: dynamic.eventId,
+            startQN: occurrence.startQN,
+            value: dynamic.value.trim().replace(/^\\/, "")
+          });
+        }
+      }
+    }
+    for (const measure2 of part2.measures) {
+      for (const hairpin of measure2.hairpins) {
+        for (const start of byAnchor.get(`${partIndex}:${hairpin.startEventId}`) ?? []) {
+          const explicitEnd = hairpin.endEventId ? occurrenceOf(byAnchor, partIndex, hairpin.endEventId, start.occurrenceIndex) : undefined;
+          const nextDynamicQN = explicitEnd ? undefined : dynamics.find((dynamic) => dynamic.partIndex === partIndex && dynamic.occurrenceIndex === start.occurrenceIndex && compareRational(dynamic.startQN, start.startQN) > 0)?.startQN;
+          const end = explicitEnd && compareRational(explicitEnd.startQN, start.startQN) >= 0 ? explicitEnd.startQN : nextDynamicQN ?? partEvents.find((candidate) => candidate.occurrenceIndex === start.occurrenceIndex && compareRational(candidate.startQN, start.startQN) > 0)?.startQN;
+          if (!end || compareRational(end, start.startQN) <= 0)
+            continue;
+          hairpins.push({
+            id: `hairpin-${hairpins.length}`,
+            partIndex,
+            occurrenceIndex: start.occurrenceIndex,
+            type: hairpin.type,
+            startEventId: hairpin.startEventId,
+            endEventId: hairpin.endEventId,
+            startQN: start.startQN,
+            endQN: end
+          });
+        }
+      }
+      for (const slur of measure2.slurs) {
+        for (const start of byAnchor.get(`${partIndex}:${slur.startEventId}`) ?? []) {
+          const end = occurrenceOf(byAnchor, partIndex, slur.endEventId, start.occurrenceIndex);
+          if (!end)
+            continue;
+          slurs.push({
+            id: `slur-${slurs.length}`,
+            partIndex,
+            occurrenceIndex: start.occurrenceIndex,
+            startEventId: slur.startEventId,
+            endEventId: slur.endEventId,
+            startQN: start.startQN,
+            endQN: end.endQN
+          });
+        }
+      }
+      for (const ottava of measure2.ottavas) {
+        for (const start of byAnchor.get(`${partIndex}:${ottava.startEventId}`) ?? []) {
+          const end = occurrenceOf(byAnchor, partIndex, ottava.endEventId, start.occurrenceIndex);
+          if (!end)
+            continue;
+          ottavas.push({
+            id: `ottava-${ottavas.length}`,
+            partIndex,
+            occurrenceIndex: start.occurrenceIndex,
+            startEventId: ottava.startEventId,
+            endEventId: ottava.endEventId,
+            level: ottava.level,
+            startQN: start.startQN,
+            endQN: end.endQN
+          });
+        }
+      }
+      for (const mark of measure2.rehearsalMarks) {
+        for (const occurrence of byAnchor.get(`${partIndex}:${mark.eventId}`) ?? []) {
+          rehearsalMarks.push({
+            id: `mark-${rehearsalMarks.length}`,
+            partIndex,
+            occurrenceIndex: occurrence.occurrenceIndex,
+            eventId: mark.eventId,
+            startQN: occurrence.startQN,
+            text: mark.text,
+            ...mark.boxed ? { boxed: true } : {}
+          });
+        }
+      }
+    }
+  }
+  const byStart = (a, b) => compareRational(a.startQN, b.startQN);
+  dynamics.sort(byStart);
+  hairpins.sort(byStart);
+  slurs.sort(byStart);
+  ottavas.sort(byStart);
+  rehearsalMarks.sort(byStart);
+  return { dynamics, hairpins, slurs, ottavas, rehearsalMarks };
+}
+
+// src/music-playback/graceTiming.ts
+var GRACE_NOTE_DURATION_QN = { num: 1, den: 8 };
+var MAX_GRACE_RUN_QN = { num: 1, den: 2 };
+function isGraceEvent2(event) {
+  return (event instanceof Note || event instanceof Chord) && event.isGrace;
+}
+function isGracePlaybackEvent(event) {
+  return isGraceEvent2(event.soundingEvent ?? event.event);
+}
+function groupKey(event) {
+  return [
+    event.partIndex,
+    event.measureIndex,
+    event.voiceIndex,
+    event.occurrenceIndex
+  ].join(":");
+}
+function applyGraceRun(graceRun, anchor, previousSounding) {
+  if (graceRun.length === 0)
+    return;
+  const runLength = { num: graceRun.length, den: 1 };
+  const graceDurationQN = minRational(GRACE_NOTE_DURATION_QN, { num: MAX_GRACE_RUN_QN.num, den: MAX_GRACE_RUN_QN.den * graceRun.length });
+  const totalGraceQN = multiplyRational(graceDurationQN, runLength);
+  const runStartQN = subtractRational(anchor.startQN, totalGraceQN);
+  graceRun.forEach((event, index) => {
+    event.startQN = addRational(runStartQN, multiplyRational(graceDurationQN, { num: index, den: 1 }));
+    event.durationQN = graceDurationQN;
+    event.graceAnchorEventId = anchor.event.id;
+  });
+  if (!previousSounding)
+    return;
+  const previousEndQN = addRational(previousSounding.startQN, previousSounding.durationQN);
+  if (compareRational(previousSounding.startQN, runStartQN) < 0 && compareRational(previousEndQN, runStartQN) > 0) {
+    previousSounding.durationQN = subtractRational(runStartQN, previousSounding.startQN);
+  }
+}
+function applyGraceNoteTiming(raw) {
+  const out = raw.map((event) => ({ ...event }));
+  const byVoice = new Map;
+  for (const event of out) {
+    const events2 = byVoice.get(groupKey(event)) ?? [];
+    events2.push(event);
+    byVoice.set(groupKey(event), events2);
+  }
+  for (const events2 of byVoice.values()) {
+    events2.sort((a, b) => compareRational(a.startQN, b.startQN) || a.noteIndex - b.noteIndex);
+    let graceRun = [];
+    let previousSounding = null;
+    for (const event of events2) {
+      if (isGracePlaybackEvent(event)) {
+        graceRun.push(event);
+        continue;
+      }
+      if (graceRun.length > 0) {
+        applyGraceRun(graceRun, event, previousSounding);
+        graceRun = [];
+      }
+      previousSounding = event;
+    }
+  }
+  return out;
+}
+
+// src/music-playback/normalizeHarmony.ts
+var WHOLE_TO_QN = { num: 4, den: 1 };
+function toNormalizedEvent(slot, index) {
+  const chord = slot.chord;
+  const intervals = chord ? chordDescriptorIntervals(chord) : null;
+  return {
+    id: `harmony-${index}`,
+    startQN: multiplyRational(slot.offset, WHOLE_TO_QN),
+    durationQN: multiplyRational(slot.duration, WHOLE_TO_QN),
+    kind: slot.kind,
+    originalText: slot.text,
+    isNoChord: slot.kind === "no-chord",
+    chord,
+    intervals,
+    pitchClasses: chord ? chordDescriptorPitchClasses(chord) : null,
+    ...slot.source ? { source: slot.source } : {}
+  };
+}
+function normalizeHarmonyTrack(score2) {
+  const harmony2 = [];
+  const diagnostics = [];
+  for (let i = 0;i < score2.harmonyTrack.length; i++) {
+    const slot = score2.harmonyTrack[i];
+    const event = toNormalizedEvent(slot, i);
+    harmony2.push(event);
+    if (slot.chord && event.intervals === null) {
+      diagnostics.push({
+        code: "unresolved-chord-quality",
+        severity: "warning",
+        message: `Chord "${slot.text}" (quality "${slot.chord.quality}") has no derivable chord tones; it is kept structurally but generates no pitches.`,
+        eventId: event.id,
+        recoverable: true,
+        ...slot.source ? { source: slot.source } : {}
+      });
+    }
+    const previous = harmony2[harmony2.length - 2];
+    if (previous) {
+      const previousEnd = addRational(previous.startQN, previous.durationQN);
+      if (compareRational(event.startQN, previousEnd) < 0) {
+        diagnostics.push({
+          code: "overlapping-harmony-spans",
+          severity: "error",
+          message: `Harmony slot ${event.id} starts before ${previous.id} ends; chord timing would be ambiguous.`,
+          eventId: event.id,
+          recoverable: false,
+          ...slot.source ? { source: slot.source } : {}
+        });
+      }
+    }
+  }
+  return { harmony: harmony2, diagnostics };
+}
+
+// src/music-playback/percentRepeats.ts
+function percentRepeatRegionsOf(score2) {
+  return score2.__lilyPercentRepeatRegions ?? [];
+}
+function expandPercentRepeats(raw, score2) {
+  const regions = percentRepeatRegionsOf(score2);
+  if (regions.length === 0)
+    return raw;
+  const replacementByKey = new Map;
+  const partIndexes = new Set(raw.map((event) => event.partIndex));
+  for (const region of regions) {
+    for (const partIndex of partIndexes) {
+      const bodyEvents = raw.filter((event) => event.partIndex === partIndex && event.visualEventIndex >= region.bodyStart && event.visualEventIndex < region.bodyEnd);
+      if (bodyEvents.length === 0)
+        continue;
+      const bodyByOccurrence = new Map;
+      for (const event of bodyEvents) {
+        const events2 = bodyByOccurrence.get(event.occurrenceIndex) ?? [];
+        events2.push(event);
+        bodyByOccurrence.set(event.occurrenceIndex, events2);
+      }
+      for (const [occurrenceIndex, template] of bodyByOccurrence) {
+        template.sort((a, b) => a.visualEventIndex - b.visualEventIndex);
+        for (const occurrence of region.occurrences) {
+          for (let visualEventIndex = occurrence.placeholderStart;visualEventIndex < occurrence.placeholderEnd; visualEventIndex++) {
+            const offset = visualEventIndex - occurrence.placeholderStart;
+            const sounding = template[offset % template.length];
+            replacementByKey.set(`${partIndex}:${occurrenceIndex}:${visualEventIndex}`, sounding.soundingEvent ?? sounding.event);
+          }
+        }
+      }
+    }
+  }
+  const out = [];
+  for (const event of raw) {
+    const soundingEvent = replacementByKey.get(`${event.partIndex}:${event.occurrenceIndex}:${event.visualEventIndex}`);
+    out.push(soundingEvent ? { ...event, soundingEvent } : event);
+  }
+  return out;
+}
+
+// src/music-playback/pedals.ts
+function scorePedalMarks(score2) {
+  const pedalEvents = score2.pedalEvents.length ? score2.pedalEvents : score2.info?.pedalEvents;
+  if (!Array.isArray(pedalEvents))
+    return [];
+  const marks = [];
+  for (const event of pedalEvents) {
+    if (event == null || typeof event !== "object")
+      continue;
+    const pedal = event;
+    if (pedal.kind !== "sustain")
+      continue;
+    if (pedal.action !== "on" && pedal.action !== "off")
+      continue;
+    const offsetQN = pedal.offsetQN;
+    if (typeof offsetQN !== "number" || !Number.isFinite(offsetQN))
+      continue;
+    marks.push({
+      kind: pedal.kind,
+      action: pedal.action,
+      offsetQN: rationalFromNumber(offsetQN)
+    });
+  }
+  return marks;
+}
+function measureAtVisualOffset(measures, partIndex, offsetQN) {
+  const partMeasures = measures.filter((measure2) => measure2.partIndex === partIndex).sort((a, b) => compareRational(a.startQN, b.startQN));
+  if (partMeasures.length === 0)
+    return null;
+  let fallback = partMeasures[0];
+  for (const measure2 of partMeasures) {
+    const endQN = addRational(measure2.startQN, maxRational(RATIONAL_ZERO, measure2.durationQN));
+    if (compareRational(offsetQN, measure2.startQN) === 0)
+      return measure2;
+    if (compareRational(offsetQN, measure2.startQN) >= 0 && compareRational(offsetQN, endQN) < 0) {
+      return measure2;
+    }
+    if (compareRational(offsetQN, measure2.startQN) >= 0)
+      fallback = measure2;
+  }
+  return fallback;
+}
+function expandPedalMarks(score2, measures, playbackEntriesForPart) {
+  const marks = scorePedalMarks(score2);
+  if (marks.length === 0 || score2.parts.length === 0)
+    return [];
+  const partIndex = 0;
+  const part2 = score2.parts[partIndex];
+  const playbackEntries = playbackEntriesForPart(part2);
+  const entriesByMeasure = new Map;
+  for (const entry of playbackEntries) {
+    const entries = entriesByMeasure.get(entry.measureIndex) ?? [];
+    entries.push(entry);
+    entriesByMeasure.set(entry.measureIndex, entries);
+  }
+  const expanded = [];
+  for (let sourceIndex = 0;sourceIndex < marks.length; sourceIndex++) {
+    const mark = marks[sourceIndex];
+    const measure2 = measureAtVisualOffset(measures, partIndex, mark.offsetQN);
+    if (!measure2)
+      continue;
+    const localOffsetQN = maxRational(RATIONAL_ZERO, subtractRational(mark.offsetQN, measure2.startQN));
+    const entries = entriesByMeasure.get(measure2.measureIndex) ?? [];
+    for (let occurrenceIndex = 0;occurrenceIndex < entries.length; occurrenceIndex++) {
+      const entry = entries[occurrenceIndex];
+      expanded.push({
+        kind: mark.kind,
+        action: mark.action,
+        occurrenceIndex,
+        partIndex,
+        measureIndex: measure2.measureIndex,
+        offsetQN: addRational(entry.startQN, localOffsetQN),
+        sourceIndex
+      });
+    }
+  }
+  return expanded.sort((a, b) => compareRational(a.offsetQN, b.offsetQN) || a.sourceIndex - b.sourceIndex || a.occurrenceIndex - b.occurrenceIndex);
+}
+
+// src/music-playback/timeline.ts
+function playbackPitch(pitch3) {
+  return {
+    midi: pitchToMidi(pitch3),
+    spelling: { step: pitch3.step, alter: pitch3.alter, octave: pitch3.octave }
+  };
+}
+function pitchesOf(event) {
+  if (event instanceof Note)
+    return [playbackPitch(event.pitch)];
+  if (event instanceof Chord)
+    return event.pitches.map(playbackPitch);
+  return [];
+}
+function articulationsOf(event) {
+  if (event instanceof Note || event instanceof Chord) {
+    return event.articulations.map((articulation2) => articulation2.type);
+  }
+  return [];
+}
+function sourceRangeOf(event) {
+  return event.__lilySourceRange;
+}
+function collectTempoChanges(score2, raw) {
+  const onsetsByEventId = new Map;
+  const measureStartsByKey = new Map;
+  for (const r of raw) {
+    const eventKey = `${r.partIndex}:${r.event.id}`;
+    const onsets = onsetsByEventId.get(eventKey) ?? [];
+    onsets.push(r.startQN);
+    onsetsByEventId.set(eventKey, onsets);
+    const measureKey = `${r.partIndex}:${r.measureIndex}:${r.occurrenceIndex}`;
+    const start = subtractRational(r.startQN, measureLocalOffset(raw, r));
+    const starts = measureStartsByKey.get(measureKey) ?? [];
+    if (!starts.some((existing) => compareRational(existing, start) === 0))
+      starts.push(start);
+    measureStartsByKey.set(measureKey, starts);
+  }
+  const changes = [];
+  for (let partIndex = 0;partIndex < score2.parts.length; partIndex++) {
+    const part2 = score2.parts[partIndex];
+    for (let measureIndex = 0;measureIndex < part2.measures.length; measureIndex++) {
+      const measure2 = part2.measures[measureIndex];
+      for (const mark of measure2.tempoMarks) {
+        if (mark.bpm === undefined)
+          continue;
+        const change = {
+          bpm: mark.bpm,
+          beatUnit: mark.beatUnit,
+          beatUnitDots: mark.beatUnitDots ?? 0,
+          ...mark.text !== undefined ? { text: mark.text } : {}
+        };
+        if (mark.eventId !== undefined) {
+          const onsets = onsetsByEventId.get(`${partIndex}:${mark.eventId}`) ?? [];
+          for (const startQN of onsets)
+            changes.push({ startQN, ...change });
+          continue;
+        }
+        for (const [key, starts] of measureStartsByKey) {
+          if (!key.startsWith(`${partIndex}:${measureIndex}:`))
+            continue;
+          for (const startQN of starts)
+            changes.push({ startQN, ...change });
+        }
+      }
+    }
+  }
+  return changes;
+}
+function measureLocalOffset(raw, event) {
+  let measureStart = event.startQN;
+  for (const candidate of raw) {
+    if (candidate.partIndex === event.partIndex && candidate.measureIndex === event.measureIndex && candidate.occurrenceIndex === event.occurrenceIndex) {
+      measureStart = minRational(measureStart, candidate.startQN);
+    }
+  }
+  return subtractRational(event.startQN, measureStart);
+}
+function mergeTies(raw, score2) {
+  const tieTo = new Map;
+  for (const part2 of score2.parts) {
+    for (const measure2 of part2.measures) {
+      for (const tie of measure2.ties) {
+        tieTo.set(tie.fromNoteId, tie.toNoteId);
+      }
+    }
+  }
+  if (tieTo.size === 0)
+    return raw;
+  const byId = new Map;
+  for (const r of raw) {
+    if (!byId.has(r.event.id))
+      byId.set(r.event.id, r);
+  }
+  const absorbed = new Set;
+  for (const r of raw) {
+    if (absorbed.has(r.event.id))
+      continue;
+    let nextId = tieTo.get(r.event.id);
+    let totalDur = r.durationQN;
+    const visited = new Set([r.event.id]);
+    const segments = [
+      { eventId: r.event.id, durationQN: r.durationQN }
+    ];
+    while (nextId !== undefined && !visited.has(nextId)) {
+      const nextEvent = byId.get(nextId);
+      if (!nextEvent)
+        break;
+      totalDur = addRational(totalDur, nextEvent.durationQN);
+      segments.push({ eventId: nextId, durationQN: nextEvent.durationQN });
+      absorbed.add(nextId);
+      visited.add(nextId);
+      nextId = tieTo.get(nextId);
+    }
+    r.durationQN = totalDur;
+    if (segments.length > 1)
+      r.tieSegments = segments;
+  }
+  return raw.filter((r) => !absorbed.has(r.event.id));
+}
+function buildPlaybackTimelineFromScore(score2, options = {}) {
+  const defaultQuarterBpm = options.defaultQuarterBpm ?? DEFAULT_QUARTER_BPM;
+  const { raw, measures } = buildRawEvents(score2);
+  const expandedForTempo = expandPercentRepeats(expandRepeats(raw, measures, score2).raw, score2);
+  const merged = mergeTies(raw, score2);
+  const repeatExpanded = expandRepeats(merged, measures, score2);
+  const expandedRaw = applyGraceNoteTiming(expandPercentRepeats(repeatExpanded.raw, score2));
+  const conductorPart = score2.parts[0];
+  const conductorBars = conductorPart ? playbackMeasureEntriesForPart(conductorPart).map((entry) => ({
+    measureIndex: entry.measureIndex,
+    startQN: entry.startQN,
+    actualDurationQN: measurePlaybackDuration(conductorPart.measures[entry.measureIndex])
+  })) : [];
+  const conductor = buildConductorMap({
+    conductorPart,
+    bars: conductorBars,
+    tempoChanges: collectTempoChanges(score2, expandedForTempo),
+    defaultQuarterBpm,
+    durationQN: repeatExpanded.durationQN
+  });
+  const tempoRegions = tempoRegionsFromConductor(conductor);
+  let minStartQN = RATIONAL_ZERO;
+  for (const r of expandedRaw)
+    minStartQN = minRational(minStartQN, r.startQN);
+  const preRollQN = maxRational(RATIONAL_ZERO, subtractRational(RATIONAL_ZERO, minStartQN));
+  const preRollSec = compareRational(preRollQN, RATIONAL_ZERO) > 0 ? -qnToSeconds(-rationalToNumber(preRollQN), tempoRegions) : 0;
+  const pedalEvents = expandPedalMarks(score2, measures, playbackMeasureEntriesForPart).map((event) => ({
+    kind: event.kind,
+    action: event.action,
+    occurrenceIndex: event.occurrenceIndex,
+    partIndex: event.partIndex,
+    measureIndex: event.measureIndex,
+    offsetQN: event.offsetQN,
+    offsetSec: qnToSeconds(rationalToNumber(event.offsetQN), tempoRegions) + preRollSec
+  }));
+  const sourceMap = {};
+  const events2 = expandedRaw.map((r) => {
+    const soundingEvent = r.soundingEvent ?? r.event;
+    const isRest = soundingEvent instanceof Rest;
+    const startSec = qnToSeconds(rationalToNumber(r.startQN), tempoRegions) + preRollSec;
+    const endSec = qnToSeconds(rationalToNumber(addRational(r.startQN, r.durationQN)), tempoRegions) + preRollSec;
+    const sourceRange = sourceRangeOf(r.event);
+    if (sourceRange && !(r.event.id in sourceMap))
+      sourceMap[r.event.id] = sourceRange;
+    return {
+      eventId: r.event.id,
+      occurrenceIndex: r.occurrenceIndex,
+      partIndex: r.partIndex,
+      measureIndex: r.measureIndex,
+      voiceIndex: r.voiceIndex,
+      noteIndex: r.noteIndex,
+      startQN: r.startQN,
+      durationQN: r.durationQN,
+      startSec,
+      durationSec: endSec - startSec,
+      pitches: isRest ? [] : pitchesOf(soundingEvent),
+      isRest,
+      isGrace: isGraceEvent(soundingEvent),
+      partId: r.partId,
+      ...r.voiceId !== undefined ? { voiceId: r.voiceId } : {},
+      ...r.staffId !== undefined ? { staffId: r.staffId } : {},
+      articulations: articulationsOf(soundingEvent),
+      ...r.tieSegments ? { tieSegments: r.tieSegments } : {},
+      ...r.graceAnchorEventId !== undefined ? { graceAnchorEventId: r.graceAnchorEventId } : {}
+    };
+  }).sort((a, b) => compareRational(a.startQN, b.startQN) || a.voiceIndex - b.voiceIndex);
+  const parts = score2.parts.map((part2, index) => ({
+    id: part2.id,
+    ...part2.name ? { name: part2.name } : {},
+    index,
+    voices: part2.voices.map((voice) => ({
+      id: voice.id,
+      ...voice.staffId ? { staffId: voice.staffId } : {}
+    }))
+  }));
+  const expression = buildTimelineExpression(score2, events2);
+  const { harmony: harmony2, diagnostics } = normalizeHarmonyTrack(score2);
+  const durationQN = addRational(repeatExpanded.durationQN, preRollQN);
+  return {
+    events: events2,
+    ...pedalEvents.length ? { pedalEvents } : {},
+    harmony: harmony2,
+    diagnostics,
+    conductor,
+    parts,
+    expression,
+    sourceMap,
+    durationQN,
+    durationSec: qnToSeconds(rationalToNumber(repeatExpanded.durationQN), tempoRegions) + preRollSec
+  };
+}
+// src/music-playback/dynamicVelocity.ts
+var DYNAMIC_VELOCITIES = {
+  pppppp: 8,
+  ppppp: 12,
+  pppp: 20,
+  ppp: 28,
+  pp: 40,
+  p: 52,
+  mp: 64,
+  mf: 80,
+  f: 96,
+  ff: 108,
+  fff: 116,
+  ffff: 122,
+  fffff: 126,
+  ffffff: 127,
+  fp: 96,
+  fz: 104,
+  sf: 104,
+  sfz: 112,
+  sff: 116,
+  sffz: 120,
+  rf: 104,
+  rfz: 112,
+  sfp: 96,
+  sfpp: 96,
+  sp: 92,
+  spp: 88,
+  n: 80
+};
+var HAIRPIN_INFERRED_DELTA = 16;
+function clampVelocity(value) {
+  return Math.max(1, Math.min(127, Math.round(value)));
+}
+function dynamicToVelocity(value, fallback) {
+  const normalized = value.trim().replace(/^\\/, "");
+  return DYNAMIC_VELOCITIES[normalized] ?? clampVelocity(fallback);
+}
+function sortControls(controls) {
+  controls.sort((a, b) => a.partIndex - b.partIndex || a.occurrenceIndex - b.occurrenceIndex || compareRational(a.startQN, b.startQN) || Number(a.explicit) - Number(b.explicit));
+}
+function velocityAt(controls, partIndex, occurrenceIndex, startQN, fallback) {
+  let velocity = clampVelocity(fallback);
+  for (const control of controls) {
+    if (control.partIndex !== partIndex || control.occurrenceIndex !== occurrenceIndex)
+      continue;
+    if (compareRational(control.startQN, startQN) > 0)
+      continue;
+    velocity = control.velocity;
+  }
+  return velocity;
+}
+function hasExplicitControlAt(controls, partIndex, occurrenceIndex, startQN) {
+  return controls.some((control) => control.explicit && control.partIndex === partIndex && control.occurrenceIndex === occurrenceIndex && compareRational(control.startQN, startQN) === 0);
+}
+function eventVelocityKey(eventId2, occurrenceIndex) {
+  return `${eventId2}:${occurrenceIndex}`;
+}
+function computeEventVelocities(timeline, defaultVelocity = DEFAULT_VELOCITY) {
+  const controls = timeline.expression.dynamics.map((dynamic) => ({
+    partIndex: dynamic.partIndex,
+    occurrenceIndex: dynamic.occurrenceIndex,
+    startQN: dynamic.startQN,
+    velocity: dynamicToVelocity(dynamic.value, defaultVelocity),
+    explicit: true
+  }));
+  sortControls(controls);
+  const hairpins = [];
+  for (const hairpin of timeline.expression.hairpins) {
+    const startVelocity = velocityAt(controls, hairpin.partIndex, hairpin.occurrenceIndex, hairpin.startQN, defaultVelocity);
+    const hasEndDynamic = hasExplicitControlAt(controls, hairpin.partIndex, hairpin.occurrenceIndex, hairpin.endQN);
+    const endVelocity = hasEndDynamic ? velocityAt(controls, hairpin.partIndex, hairpin.occurrenceIndex, hairpin.endQN, defaultVelocity) : clampVelocity(startVelocity + (hairpin.type === "cresc" ? HAIRPIN_INFERRED_DELTA : -HAIRPIN_INFERRED_DELTA));
+    hairpins.push({
+      partIndex: hairpin.partIndex,
+      occurrenceIndex: hairpin.occurrenceIndex,
+      startQN: hairpin.startQN,
+      endQN: hairpin.endQN,
+      startVelocity,
+      endVelocity
+    });
+    if (!hasEndDynamic) {
+      controls.push({
+        partIndex: hairpin.partIndex,
+        occurrenceIndex: hairpin.occurrenceIndex,
+        startQN: hairpin.endQN,
+        velocity: endVelocity,
+        explicit: false
+      });
+      sortControls(controls);
+    }
+  }
+  const velocities = new Map;
+  for (const event of timeline.events) {
+    let velocity = velocityAt(controls, event.partIndex, event.occurrenceIndex, event.startQN, defaultVelocity);
+    for (const hairpin of hairpins) {
+      if (event.partIndex !== hairpin.partIndex || event.occurrenceIndex !== hairpin.occurrenceIndex)
+        continue;
+      if (compareRational(event.startQN, hairpin.startQN) < 0 || compareRational(event.startQN, hairpin.endQN) > 0)
+        continue;
+      const span = rationalToNumber(subtractRational(hairpin.endQN, hairpin.startQN));
+      if (span <= 0)
+        continue;
+      const t = rationalToNumber(subtractRational(event.startQN, hairpin.startQN)) / span;
+      velocity = clampVelocity(hairpin.startVelocity + (hairpin.endVelocity - hairpin.startVelocity) * t);
+    }
+    velocities.set(eventVelocityKey(event.eventId, event.occurrenceIndex), velocity);
+  }
+  return velocities;
+}
+// src/music-playback/scheduler.ts
+var DEFAULT_LOOKAHEAD_SEC = 0.1;
+var DEFAULT_TICK_INTERVAL_SEC = 0.025;
+function clampTime(value, durationSec) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.min(Math.max(0, value), Math.max(0, durationSec));
+}
+function scheduleKey(event, midi) {
+  return `${event.eventId}:${event.occurrenceIndex}:${event.startSec}:${midi}`;
+}
+function activeEventKey(event) {
+  return `${event.eventId}:${event.occurrenceIndex}`;
+}
+function createPlaybackScheduler(timeline, options) {
+  const lookaheadSec = options.lookaheadSec ?? DEFAULT_LOOKAHEAD_SEC;
+  const tickIntervalSec = options.tickIntervalSec ?? DEFAULT_TICK_INTERVAL_SEC;
+  const velocities = computeEventVelocities(timeline, options.defaultVelocity);
+  const scheduledKeys = new Set;
+  const runningVoices = [];
+  let stateValue = "idle";
+  let positionSec = 0;
+  let startedAtClockSec = 0;
+  let timerHandle;
+  let lastActiveKey = "";
+  function currentTimeSec() {
+    if (stateValue !== "playing")
+      return positionSec;
+    return clampTime(options.clock.now() - startedAtClockSec, timeline.durationSec);
+  }
+  function setState(next) {
+    if (stateValue === next)
+      return;
+    stateValue = next;
+    options.onStateChange?.(next);
+  }
+  function clearTimer() {
+    if (timerHandle === undefined)
+      return;
+    options.timer?.clearInterval(timerHandle);
+    timerHandle = undefined;
+  }
+  function startTimer() {
+    if (!options.timer || timerHandle !== undefined)
+      return;
+    timerHandle = options.timer.setInterval(() => {
+      tick();
+    }, tickIntervalSec);
+  }
+  function stopVoices() {
+    const now = options.clock.now();
+    for (const running of runningVoices.splice(0)) {
+      running.voice.stop?.(now);
+    }
+  }
+  function resetScheduled() {
+    scheduledKeys.clear();
+    stopVoices();
+  }
+  function activeEventsAt(seconds) {
+    return timeline.events.filter((event) => event.durationSec > 0 && event.startSec <= seconds && seconds < event.startSec + event.durationSec).map((event) => ({
+      eventId: event.eventId,
+      occurrenceIndex: event.occurrenceIndex,
+      event
+    }));
+  }
+  function emitActiveIfChanged(seconds) {
+    if (!options.onActiveEvents)
+      return;
+    const active = activeEventsAt(seconds);
+    const key = active.map((entry) => activeEventKey(entry.event)).join("|");
+    if (key === lastActiveKey)
+      return;
+    lastActiveKey = key;
+    options.onActiveEvents(active);
+  }
+  function emitNoActiveEvents() {
+    if (!options.onActiveEvents || lastActiveKey === "")
+      return;
+    lastActiveKey = "";
+    options.onActiveEvents([]);
+  }
+  function scheduleDueEvents(seconds) {
+    const windowEnd = Math.min(timeline.durationSec, seconds + lookaheadSec);
+    const clockNow = options.clock.now();
+    for (const event of timeline.events) {
+      if (event.isRest || event.durationSec <= 0)
+        continue;
+      if (event.startSec < seconds || event.startSec > windowEnd)
+        continue;
+      for (const pitch3 of event.pitches) {
+        const key = scheduleKey(event, pitch3.midi);
+        if (scheduledKeys.has(key))
+          continue;
+        scheduledKeys.add(key);
+        const note = {
+          event,
+          pitch: pitch3,
+          velocity: velocities.get(eventVelocityKey(event.eventId, event.occurrenceIndex)) ?? 80,
+          startSec: event.startSec,
+          startAtSec: clockNow + Math.max(0, event.startSec - seconds),
+          durationSec: event.durationSec
+        };
+        const voice = options.createVoice(note);
+        voice.start(note);
+        runningVoices.push({ note, voice });
+      }
+    }
+  }
+  function tick() {
+    if (stateValue !== "playing")
+      return;
+    const seconds = currentTimeSec();
+    emitActiveIfChanged(seconds);
+    scheduleDueEvents(seconds);
+    if (seconds >= timeline.durationSec) {
+      positionSec = timeline.durationSec;
+      clearTimer();
+      stopVoices();
+      setState("idle");
+      emitActiveIfChanged(timeline.durationSec);
+    }
+  }
+  function play(startSec = 0) {
+    resetScheduled();
+    positionSec = clampTime(startSec, timeline.durationSec);
+    startedAtClockSec = options.clock.now() - positionSec;
+    lastActiveKey = "";
+    setState("playing");
+    startTimer();
+    tick();
+  }
+  function pause() {
+    if (stateValue !== "playing")
+      return;
+    positionSec = currentTimeSec();
+    clearTimer();
+    resetScheduled();
+    setState("paused");
+    emitActiveIfChanged(positionSec);
+  }
+  function resume() {
+    if (stateValue !== "paused")
+      return;
+    startedAtClockSec = options.clock.now() - positionSec;
+    setState("playing");
+    startTimer();
+    tick();
+  }
+  function stop() {
+    positionSec = 0;
+    clearTimer();
+    resetScheduled();
+    setState("idle");
+    emitNoActiveEvents();
+  }
+  function seek(seconds) {
+    positionSec = clampTime(seconds, timeline.durationSec);
+    resetScheduled();
+    lastActiveKey = "";
+    if (stateValue === "playing") {
+      startedAtClockSec = options.clock.now() - positionSec;
+      tick();
+    } else {
+      emitActiveIfChanged(positionSec);
+    }
+  }
+  return {
+    play,
+    pause,
+    resume,
+    stop,
+    seek,
+    tick,
+    state: () => stateValue,
+    currentTimeSec,
+    durationSec: () => timeline.durationSec
+  };
+}
+// src/music-playback/synth.ts
+function midiToFrequency(midi, a4Hz = 440) {
+  return a4Hz * 2 ** ((midi - 69) / 12);
+}
+function createSilentSynthVoiceFactory(onStart) {
+  return () => ({
+    start(note) {
+      onStart?.(note);
+    }
+  });
+}
+// src/music-playback/midi.ts
+var MIDI_SUSTAIN_PEDAL_CONTROLLER = 64;
+function clampMidiByte(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.min(127, Math.max(0, Math.round(value)));
+}
+function clampMidiChannel(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.min(15, Math.max(0, Math.round(value)));
+}
+function midiNoteOnMessage(midi, velocity, channel = 0) {
+  return [144 + clampMidiChannel(channel), clampMidiByte(midi), clampMidiByte(velocity)];
+}
+function midiNoteOffMessage(midi, channel = 0) {
+  return [128 + clampMidiChannel(channel), clampMidiByte(midi), 0];
+}
+function midiControlChangeMessage(controller, value, channel = 0) {
+  return [176 + clampMidiChannel(channel), clampMidiByte(controller), clampMidiByte(value)];
+}
+function createMidiVoiceFactory(options) {
+  const channel = clampMidiChannel(options.channel ?? 0);
+  return () => {
+    let startedNote;
+    let noteOnHandle;
+    let noteOffHandle;
+    let stopped = false;
+    function send(kind, note, atSec) {
+      const message = kind === "noteOn" ? midiNoteOnMessage(note.pitch.midi, note.velocity, channel) : midiNoteOffMessage(note.pitch.midi, channel);
+      const handle = options.output.send(message, atSec);
+      options.onMessage?.({
+        kind,
+        eventId: note.event.eventId,
+        occurrenceIndex: note.event.occurrenceIndex,
+        channel,
+        midi: clampMidiByte(note.pitch.midi),
+        velocity: kind === "noteOn" ? clampMidiByte(note.velocity) : 0,
+        atSec,
+        message
+      });
+      return handle;
+    }
+    function cancel(handle) {
+      if (handle === undefined)
+        return;
+      options.output.cancel?.(handle);
+    }
+    return {
+      start(note) {
+        startedNote = note;
+        noteOnHandle = send("noteOn", note, note.startAtSec);
+        noteOffHandle = send("noteOff", note, note.startAtSec + Math.max(0, note.durationSec));
+      },
+      stop(atSec) {
+        if (stopped || startedNote === undefined)
+          return;
+        stopped = true;
+        if (options.output.cancel) {
+          cancel(noteOnHandle);
+          cancel(noteOffHandle);
+        } else {
+          options.output.clear?.();
+        }
+        send("noteOff", startedNote, atSec);
+      }
+    };
+  };
+}
+// src/music-playback/midiTransport.ts
+function createMidiPlaybackTransport(timeline, options) {
+  const {
+    output,
+    channel,
+    onMidiMessage,
+    ...schedulerOptions
+  } = options;
+  return createPlaybackScheduler(timeline, {
+    ...schedulerOptions,
+    createVoice: createMidiVoiceFactory({
+      output,
+      channel,
+      onMessage: onMidiMessage
+    })
+  });
+}
+// src/music-playback/midiFile.ts
+var DEFAULT_TICKS_PER_QUARTER = 480;
+function clampMidiChannel2(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.min(15, Math.max(0, Math.round(value)));
+}
+function clampMidiByte2(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  return Math.min(127, Math.max(0, Math.round(value)));
+}
+function clampMidiProgram(value) {
+  return clampMidiByte2(value);
+}
+function ticksPerQuarterFromOptions(options) {
+  const value = options.ticksPerQuarter ?? DEFAULT_TICKS_PER_QUARTER;
+  if (!Number.isFinite(value) || value <= 0)
+    return DEFAULT_TICKS_PER_QUARTER;
+  return Math.min(32767, Math.max(1, Math.round(value)));
+}
+function resolvedTimelineMidiOptions(options) {
+  return {
+    channel: clampMidiChannel2(options.channel ?? 0),
+    program: options.program == null ? null : clampMidiProgram(options.program),
+    ticksPerQuarter: ticksPerQuarterFromOptions(options)
+  };
+}
+function playbackStartQN(timeline) {
+  return Math.max(0, -Math.min(0, ...timeline.events.map((event) => rationalToNumber(event.startQN))));
+}
+function qnToTick(qn, preRollQN, ticksPerQuarter) {
+  if (!Number.isFinite(qn))
+    return 0;
+  return Math.max(0, Math.round((qn + preRollQN) * ticksPerQuarter));
+}
+function compareMidiMessages(a, b) {
+  if (a.tick !== b.tick)
+    return a.tick - b.tick;
+  if (a.kind !== b.kind)
+    return midiMessageKindOrder(a.kind) - midiMessageKindOrder(b.kind);
+  if (a.channel !== b.channel)
+    return a.channel - b.channel;
+  if (a.midi !== b.midi)
+    return a.midi - b.midi;
+  if (a.eventId !== b.eventId)
+    return a.eventId < b.eventId ? -1 : 1;
+  return a.occurrenceIndex - b.occurrenceIndex;
+}
+function midiMessageKindOrder(kind) {
+  if (kind === "noteOff")
+    return 0;
+  if (kind === "controlChange")
+    return 1;
+  return 2;
+}
+function timelineToMidiMessageSchedule(timeline, options = {}) {
+  const channel = clampMidiChannel2(options.channel ?? 0);
+  const ticksPerQuarter = ticksPerQuarterFromOptions(options);
+  const preRollQN = playbackStartQN(timeline);
+  const velocities = computeEventVelocities(timeline, options.defaultVelocity);
+  const messages = [];
+  for (const event of timeline.events) {
+    const startQN = rationalToNumber(event.startQN);
+    const durationQN = rationalToNumber(event.durationQN);
+    if (event.isRest || event.durationSec <= 0 || durationQN <= 0)
+      continue;
+    const startTick = qnToTick(startQN, preRollQN, ticksPerQuarter);
+    const endTick = qnToTick(startQN + durationQN, preRollQN, ticksPerQuarter);
+    const eventVelocity = velocities.get(eventVelocityKey(event.eventId, event.occurrenceIndex)) ?? 80;
+    for (const pitch3 of event.pitches) {
+      const midi = clampMidiByte2(pitch3.midi);
+      const velocity = clampMidiByte2(eventVelocity);
+      messages.push({
+        kind: "noteOn",
+        eventId: event.eventId,
+        occurrenceIndex: event.occurrenceIndex,
+        channel,
+        midi,
+        velocity,
+        atSec: event.startSec,
+        tick: startTick,
+        message: midiNoteOnMessage(midi, velocity, channel)
+      });
+      messages.push({
+        kind: "noteOff",
+        eventId: event.eventId,
+        occurrenceIndex: event.occurrenceIndex,
+        channel,
+        midi,
+        velocity: 0,
+        atSec: event.startSec + event.durationSec,
+        tick: Math.max(startTick, endTick),
+        message: midiNoteOffMessage(midi, channel)
+      });
+    }
+  }
+  const pedalEvents = timeline.pedalEvents ?? [];
+  for (let i = 0;i < pedalEvents.length; i++) {
+    const event = pedalEvents[i];
+    if (event.kind !== "sustain")
+      continue;
+    const value = event.action === "on" ? 127 : 0;
+    messages.push({
+      kind: "controlChange",
+      eventId: `pedal-${i}`,
+      occurrenceIndex: event.occurrenceIndex,
+      channel,
+      midi: MIDI_SUSTAIN_PEDAL_CONTROLLER,
+      velocity: value,
+      atSec: event.offsetSec,
+      tick: qnToTick(rationalToNumber(event.offsetQN), preRollQN, ticksPerQuarter),
+      message: midiControlChangeMessage(MIDI_SUSTAIN_PEDAL_CONTROLLER, value, channel)
+    });
+  }
+  return messages.sort(compareMidiMessages);
+}
+function asciiBytes(text2) {
+  return [...text2].map((char) => char.charCodeAt(0) & 255);
+}
+function uint16be(value) {
+  return [value >> 8 & 255, value & 255];
+}
+function uint32be(value) {
+  return [
+    value >> 24 & 255,
+    value >> 16 & 255,
+    value >> 8 & 255,
+    value & 255
+  ];
+}
+function variableLengthQuantity(value) {
+  let n = Math.max(0, Math.round(value));
+  let buffer = n & 127;
+  while ((n >>= 7) > 0) {
+    buffer <<= 8;
+    buffer |= n & 127 | 128;
+  }
+  const out = [];
+  for (;; ) {
+    out.push(buffer & 255);
+    if (buffer & 128)
+      buffer >>= 8;
+    else
+      break;
+  }
+  return out;
+}
+function tempoMetaBytes(region) {
+  const quarterBpm = Number.isFinite(region.quarterBpm) && region.quarterBpm > 0 ? region.quarterBpm : 120;
+  const microsPerQuarter = Math.min(16777215, Math.max(1, Math.round(60000000 / quarterBpm)));
+  return [
+    255,
+    81,
+    3,
+    microsPerQuarter >> 16 & 255,
+    microsPerQuarter >> 8 & 255,
+    microsPerQuarter & 255
+  ];
+}
+function trackEventsForTimeline(timeline, options) {
+  const preRollQN = playbackStartQN(timeline);
+  const events2 = [];
+  const conductorRegions = tempoRegionsFromConductor(timeline.conductor);
+  const tempoRegions = conductorRegions.length > 0 ? conductorRegions : [{ startQN: 0, startSec: 0, quarterBpm: 120 }];
+  if (options.program != null) {
+    events2.push({
+      tick: 0,
+      order: 1,
+      bytes: [192 + options.channel, options.program]
+    });
+  }
+  for (const region of tempoRegions) {
+    events2.push({
+      tick: qnToTick(region.startQN, preRollQN, options.ticksPerQuarter),
+      order: 0,
+      bytes: tempoMetaBytes(region)
+    });
+  }
+  for (const message of timelineToMidiMessageSchedule(timeline, options)) {
+    events2.push({
+      tick: message.tick,
+      order: 2 + midiMessageKindOrder(message.kind),
+      bytes: [...message.message]
+    });
+  }
+  return events2.sort((a, b) => a.tick - b.tick || a.order - b.order || a.bytes[0] - b.bytes[0] || a.bytes[1] - b.bytes[1]);
+}
+function timelineToMidiFile(timeline, options = {}) {
+  const resolvedOptions = resolvedTimelineMidiOptions(options);
+  const trackEvents = trackEventsForTimeline(timeline, resolvedOptions);
+  const preRollQN = playbackStartQN(timeline);
+  const endTick = Math.max(qnToTick(rationalToNumber(timeline.durationQN) - preRollQN, preRollQN, resolvedOptions.ticksPerQuarter), ...trackEvents.map((event) => event.tick));
+  trackEvents.push({ tick: endTick, order: 9, bytes: [255, 47, 0] });
+  const track = [];
+  let previousTick = 0;
+  for (const event of trackEvents) {
+    const tick = Math.max(previousTick, event.tick);
+    track.push(...variableLengthQuantity(tick - previousTick), ...event.bytes);
+    previousTick = tick;
+  }
+  const bytes = [
+    ...asciiBytes("MThd"),
+    ...uint32be(6),
+    ...uint16be(0),
+    ...uint16be(1),
+    ...uint16be(resolvedOptions.ticksPerQuarter),
+    ...asciiBytes("MTrk"),
+    ...uint32be(track.length),
+    ...track
+  ];
+  return Uint8Array.from(bytes);
+}
+function timelineToMidiBase64(timeline, options = {}) {
+  const bytes = timelineToMidiFile(timeline, options);
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0;i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = bytes[i + 1];
+    const c = bytes[i + 2];
+    const triple = a << 16 | (b ?? 0) << 8 | (c ?? 0);
+    out += alphabet[triple >> 18 & 63];
+    out += alphabet[triple >> 12 & 63];
+    out += b === undefined ? "=" : alphabet[triple >> 6 & 63];
+    out += c === undefined ? "=" : alphabet[triple & 63];
+  }
+  return out;
+}
+// src/music-playback/instruments.ts
+var GENERAL_MIDI_PROGRAMS = {
+  "acoustic grand": 0,
+  "acoustic grand piano": 0,
+  piano: 0,
+  "bright acoustic": 1,
+  "bright acoustic piano": 1,
+  "electric grand": 2,
+  "electric grand piano": 2,
+  "honky-tonk": 3,
+  "honky-tonk piano": 3,
+  "electric piano 1": 4,
+  "electric piano 2": 5,
+  harpsichord: 6,
+  clav: 7,
+  celesta: 8,
+  glockenspiel: 9,
+  "music box": 10,
+  vibraphone: 11,
+  marimba: 12,
+  xylophone: 13,
+  "tubular bells": 14,
+  dulcimer: 15,
+  organ: 19,
+  accordion: 21,
+  harmonica: 22,
+  guitar: 24,
+  "acoustic guitar": 24,
+  bass: 32,
+  violin: 40,
+  viola: 41,
+  cello: 42,
+  contrabass: 43,
+  "tremolo strings": 44,
+  pizzicato: 45,
+  "pizzicato strings": 45,
+  harp: 46,
+  timpani: 47,
+  strings: 48,
+  "string ensemble": 48,
+  "string ensemble 1": 48,
+  "string ensemble 2": 49,
+  choir: 52,
+  trumpet: 56,
+  trombone: 57,
+  tuba: 58,
+  horn: 60,
+  "french horn": 60,
+  sax: 64,
+  saxophone: 64,
+  oboe: 68,
+  bassoon: 70,
+  clarinet: 71,
+  piccolo: 72,
+  flute: 73,
+  recorder: 74,
+  panflute: 75,
+  sitar: 104,
+  banjo: 105,
+  shamisen: 106,
+  koto: 107,
+  bagpipe: 109,
+  fiddle: 110
+};
+function normalizeMidiInstrumentName(name) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+function midiProgramForInstrumentName(name) {
+  if (!name)
+    return null;
+  const normalized = normalizeMidiInstrumentName(name);
+  return GENERAL_MIDI_PROGRAMS[normalized] ?? null;
+}
+function midiInstrumentNameForScore(score2) {
+  const raw = score2?.info?.midiInstrument ?? score2?.info?.instrument;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
+}
+function midiProgramForScore(score2) {
+  return midiProgramForInstrumentName(midiInstrumentNameForScore(score2));
+}
 // src/music-playback/svgBinding.ts
 var DEFAULT_EVENT_ATTRIBUTE = "data-lily-event-id";
 var DEFAULT_MULTI_EVENT_ATTRIBUTE = "data-lily-event-ids";
@@ -84639,6 +88895,22 @@ function pushUniqueElement(elementsByEventId, eventId2, element) {
   if (!elements.includes(element))
     elements.push(element);
   elementsByEventId.set(eventId2, elements);
+}
+function findPlaybackElements(root, eventId2, options = {}) {
+  const eventAttribute = options.eventAttribute ?? DEFAULT_EVENT_ATTRIBUTE;
+  const multiEventAttribute = options.multiEventAttribute ?? DEFAULT_MULTI_EVENT_ATTRIBUTE;
+  const eventSelector = options.eventSelector ?? `[${eventAttribute}]`;
+  const out = [];
+  for (const element of toArray(root.querySelectorAll(eventSelector))) {
+    if (element.getAttribute(eventAttribute) === eventId2)
+      out.push(element);
+  }
+  for (const element of toArray(root.querySelectorAll(`[${multiEventAttribute}]`))) {
+    if (eventIdsForElement(element, eventAttribute, multiEventAttribute).includes(eventId2) && !out.includes(element)) {
+      out.push(element);
+    }
+  }
+  return out;
 }
 function createSvgPlaybackBinding(root, options = {}) {
   const eventAttribute = options.eventAttribute ?? DEFAULT_EVENT_ATTRIBUTE;
@@ -84711,6 +88983,145 @@ function setActivePlaybackEvents(root, events2, options = {}) {
   }
   const binding = createSvgPlaybackBinding(root, options);
   binding.setActiveEvents(events2);
+}
+// src/music-tools/generators/arpeggiator/pitchRange.ts
+var DEFAULT_LOW_MIDI = 48;
+function buildChordTonePool(source, options) {
+  const lowMidi = options.range?.lowMidi ?? DEFAULT_LOW_MIDI;
+  const highMidi = options.range?.highMidi ?? Number.POSITIVE_INFINITY;
+  const span = Math.max(1, Math.floor(options.octaveSpan));
+  const rootClass = (source.rootPitchClass % 12 + 12) % 12;
+  const rootMidi = lowMidi + ((rootClass - lowMidi % 12) % 12 + 12) % 12;
+  const seen = new Set;
+  const pool = [];
+  for (let octave = 0;octave < span; octave++) {
+    for (const interval of source.intervals) {
+      const midi = rootMidi + interval + 12 * octave;
+      if (midi < lowMidi || midi > highMidi)
+        continue;
+      if (seen.has(midi))
+        continue;
+      seen.add(midi);
+      pool.push(midi);
+    }
+  }
+  return pool;
+}
+
+// src/music-tools/generators/arpeggiator/pattern.ts
+function ascending(pool) {
+  return [...pool].sort((a, b) => a - b);
+}
+function patternSequence(writtenPool, pattern) {
+  if (writtenPool.length === 0)
+    return [];
+  const up = ascending(writtenPool);
+  switch (pattern) {
+    case "as-written":
+      return [...writtenPool];
+    case "up":
+      return up;
+    case "down":
+      return [...up].reverse();
+    case "up-down": {
+      if (up.length === 1)
+        return up;
+      const back = up.slice(1, -1).reverse();
+      return [...up, ...back];
+    }
+    case "down-up": {
+      const down = [...up].reverse();
+      if (down.length === 1)
+        return down;
+      const back = up.slice(1, -1);
+      return [...down, ...back];
+    }
+  }
+}
+
+// src/music-tools/generators/arpeggiator/createArpeggioPlan.ts
+function emptyPlan(durationQN, diagnostics) {
+  return { schemaVersion: 1, durationQN, events: [], diagnostics };
+}
+function createArpeggioPlan(timeline, options) {
+  const diagnostics = [];
+  const subdivisionQN = options.subdivisionQN;
+  if (!isSafeRational(subdivisionQN) || compareRational(subdivisionQN, RATIONAL_ZERO) <= 0) {
+    diagnostics.push({
+      code: "arpeggiator-invalid-subdivision",
+      severity: "error",
+      message: "subdivisionQN must be a positive, safe rational; no arpeggio was generated.",
+      recoverable: false
+    });
+    return emptyPlan(RATIONAL_ZERO, diagnostics);
+  }
+  const genStart = options.startOffsetQN ?? RATIONAL_ZERO;
+  const genEnd = options.endOffsetQN ?? timeline.durationQN;
+  const windowLength = normalizeRational(genEnd);
+  if (compareRational(genEnd, genStart) <= 0) {
+    diagnostics.push({
+      code: "arpeggiator-empty-range",
+      severity: "warning",
+      message: "The generation window is empty (endOffsetQN <= startOffsetQN).",
+      recoverable: true
+    });
+    return emptyPlan(windowLength, diagnostics);
+  }
+  const events2 = [];
+  for (const harmony2 of timeline.harmony) {
+    const spanStart = maxRational(harmony2.startQN, genStart);
+    const spanEnd = minRational(addRational(harmony2.startQN, harmony2.durationQN), genEnd);
+    if (compareRational(spanStart, spanEnd) >= 0)
+      continue;
+    if (harmony2.isNoChord || harmony2.chord === null)
+      continue;
+    if (harmony2.intervals === null) {
+      diagnostics.push({
+        code: "arpeggiator-unresolved-harmony",
+        severity: "info",
+        message: `Harmony "${harmony2.originalText}" has no derivable chord tones; it generates silence.`,
+        eventId: harmony2.id,
+        recoverable: true,
+        ...harmony2.source ? { source: harmony2.source } : {}
+      });
+      continue;
+    }
+    const writtenPool = buildChordTonePool({ intervals: harmony2.intervals, rootPitchClass: harmony2.chord.root.pitchClass }, { octaveSpan: options.octaveSpan, ...options.range ? { range: options.range } : {} });
+    const sequence = patternSequence(writtenPool, options.pattern);
+    if (sequence.length === 0) {
+      diagnostics.push({
+        code: "arpeggiator-out-of-range",
+        severity: "info",
+        message: `Harmony "${harmony2.originalText}" has no chord tones inside the requested register; it generates silence.`,
+        eventId: harmony2.id,
+        recoverable: true,
+        ...harmony2.source ? { source: harmony2.source } : {}
+      });
+      continue;
+    }
+    let at = spanStart;
+    let counter = 0;
+    while (compareRational(at, spanEnd) < 0) {
+      const nextAt = addRational(at, subdivisionQN);
+      const noteEnd = minRational(nextAt, spanEnd);
+      const durationQN = subtractRational(noteEnd, at);
+      const patternIndex = counter % sequence.length;
+      const midiNote = sequence[patternIndex];
+      events2.push({
+        id: `arp:${harmony2.id}:${counter}`,
+        sourceHarmonyId: harmony2.id,
+        startQN: at,
+        durationQN,
+        midiNote,
+        pitchClass: (midiNote % 12 + 12) % 12,
+        patternIndex,
+        cycleIndex: Math.floor(counter / sequence.length)
+      });
+      at = nextAt;
+      counter++;
+    }
+  }
+  return { schemaVersion: 1, durationQN: windowLength, events: events2, diagnostics };
 }
 // src/lilyjs.ts
 var rendererStyleInjected = false;
@@ -84946,23 +89357,81 @@ class MusicRender {
 }
 var music_render = MusicRender;
 export {
+  toQuarterBpm,
+  timelineToMidiMessageSchedule,
+  timelineToMidiFile,
+  timelineToMidiBase64,
+  tempoSegmentQuarterBpm,
+  tempoRegionsFromConductor,
+  subtractRational,
+  spelledPitchClass,
   setActivePlaybackEvents,
+  secondsToQuarterNote,
   renderScore,
   renderMusic,
   renderLily,
+  rationalToNumber,
+  rationalFromNumber,
+  quarterNoteToSeconds,
+  qnToSeconds,
+  pitchToMidi,
+  patternSequence,
   parseSource,
   parseLilyPondSource,
+  normalizeRational,
+  normalizeMidiInstrumentName,
+  normalizeHarmonyTrack,
   music_render,
+  multiplyRational,
+  minRational,
+  midiToFrequency,
+  midiProgramForScore,
+  midiProgramForInstrumentName,
+  midiNoteOnMessage,
+  midiNoteOffMessage,
+  midiInstrumentNameForScore,
+  midiControlChangeMessage,
+  maxRational,
+  isSafeRational,
+  findPlaybackElements,
+  eventVelocityKey,
+  dynamicToVelocity,
+  divideRational,
   detectSourceFormat,
   createSvgPlaybackBinding,
+  createSilentSynthVoiceFactory,
+  createPlaybackScheduler,
+  createMidiVoiceFactory,
+  createMidiPlaybackTransport,
+  createArpeggioPlan,
+  computeEventVelocities,
+  compareRational,
+  chordDescriptorPitchClasses,
+  chordDescriptorIntervals,
+  buildTimelineExpression,
+  buildTempoRegions,
+  buildPlaybackTimelineFromScore,
+  buildConductorMap,
+  buildChordTonePool,
+  beatUnitQN,
+  beatUnitDenominator,
+  addRational,
   TimeSignature,
   Score,
+  RATIONAL_ZERO,
   Pitch,
   Part,
   Note,
   MusicRender,
   Measure,
+  MIDI_SUSTAIN_PEDAL_CONTROLLER,
+  MIDI_OCTAVE_OFFSET,
   KeySignature,
+  GENERAL_MIDI_PROGRAMS,
   Duration,
+  DYNAMIC_VELOCITIES,
+  DEFAULT_VELOCITY,
+  DEFAULT_QUARTER_BPM,
+  DEFAULT_LOW_MIDI,
   Clef
 };

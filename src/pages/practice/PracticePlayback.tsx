@@ -388,9 +388,9 @@ export default function PracticePlayback({
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col gap-4">
+    <div id="play-along" className="flex flex-col gap-4">
       {/* Current exercise and primary actions stay visible even on load errors. */}
-      <div className="flex flex-col gap-3 border-b border-gray-700/70 pb-4">
+      <div id="play-along-exercise-header" className="flex flex-col gap-3 border-b border-gray-700/70 pb-4">
         <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-1">Exercise</p>
@@ -474,7 +474,7 @@ export default function PracticePlayback({
       {source && !loadError && (
         <>
       {/* Score */}
-      <div className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto">
+      <div id="play-along-score" className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto">
         <LilyScore
           source={source}
           scoreIndex={parsed?.renderScoreIndex}
@@ -485,7 +485,7 @@ export default function PracticePlayback({
 
       {/* Chord timeline */}
       {schedule && schedule.events.length > 0 && (
-        <div className="flex gap-2 justify-center flex-wrap">
+        <div id="play-along-chord-timeline" className="flex gap-2 justify-center flex-wrap">
           {schedule.events.map(e => (
             <span
               key={`${e.label}-${e.startBeat}`}
@@ -503,7 +503,7 @@ export default function PracticePlayback({
       )}
 
       {/* Transport */}
-      <div className="flex items-center gap-3">
+      <div id="play-along-transport" className="flex items-center gap-3">
         <button
           onClick={() => (isPlaying ? stopPlayback() : void startPlayback())}
           disabled={!schedule || schedule.totalBeats === 0}
@@ -533,7 +533,7 @@ export default function PracticePlayback({
       </div>
 
       {/* Options */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+      <div id="play-along-options" className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
         <label className="flex items-center gap-2 text-gray-400">
           <input type="checkbox" checked={countIn} onChange={e => setCountIn(e.target.checked)}
             className="accent-amber-400" />
@@ -574,7 +574,7 @@ export default function PracticePlayback({
       </div>
 
       {/* Tempo Trainer — ramp the tempo per loop or over time */}
-      <div className="rounded-xl bg-gray-800/40 p-3 flex flex-col gap-3">
+      <div id="play-along-tempo-trainer" className="rounded-xl bg-gray-800/40 p-3 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-2 text-sm text-gray-300">
             <input
@@ -682,7 +682,7 @@ export default function PracticePlayback({
 
       {/* Drone sound — only exercises with a chord track drive the drone */}
       {hasChordTrack ? (
-        <div className="flex gap-2">
+        <div id="play-along-drone-sounds" className="flex gap-2">
           {DRONE_SOUNDS.map(s => (
             <button
               key={s.value}

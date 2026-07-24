@@ -707,20 +707,27 @@ Suggested initial gate: warm p95 timeline construction below 20 ms for a typical
 
 ### Phase 6 — generic arpeggiator
 
-> Not started. `src/music-tools/` exists (transforms/, select, internal/) but has no
-> `generators/`. Its `chordDescriptorToPitchClasses()` dependency is flagged in Phase 2.
+> **Shipped (2026-07-24).** `src/music-tools/generators/arpeggiator/` (`types.ts`,
+> `pitchRange.ts`, `pattern.ts`, `createArpeggioPlan.ts`, `index.ts`) is a pure generator
+> with only a type-only dependency on `music-playback` (no runtime coupling) and reuses
+> `chordDescriptorIntervals`/`chordDescriptorPitchClasses` from `music-model`. Exported
+> from the `music-tools` entry (`src/music-tools.ts`). 30 tests in
+> `tests/music-tools/arpeggiator/` (unit + invariant + determinism + Gm–Cm–F–B♭
+> integration); full suite green (2670 pass). One deferral: the standalone 128-bar
+> benchmark (last item) — determinism-at-scale is covered, a timed gate is not, to avoid
+> a flaky assertion; add when a real perf need surfaces.
 
-- [ ] Create `src/music-tools/generators/arpeggiator/` with no parser, renderer, DOM, MIDI, Web Audio, or Giusto dependencies.
-- [ ] Define `ArpeggiatorOptions`, `ArpeggioEvent`, `ArpeggioPlan`, and `createArpeggioPlan`.
-- [ ] Implement `up`, `down`, `up-down`, `down-up`, and `as-written` chord-tone traversal.
-- [ ] Implement deterministic octave expansion and MIDI register/range placement.
-- [ ] Generate exact-QN subdivisions and clip notes exactly at harmony changes and requested bounds.
-- [ ] Preserve source harmony/occurrence IDs on every generated event.
-- [ ] Treat continuations, skips, and no-chord spans according to the normalized harmony contract.
-- [ ] Consume performed harmony directly so repeats/voltas are not reinterpreted.
-- [ ] Export the generator from the supported `music-tools` entry point.
-- [ ] Add unit, invariant, serialization, and Gm–Cm–F–B-flat integration tests.
-- [ ] Benchmark a 128-bar harmony track separately from parsing, timeline construction, scheduling, and rendering.
+- [x] Create `src/music-tools/generators/arpeggiator/` with no parser, renderer, DOM, MIDI, Web Audio, or Giusto dependencies.
+- [x] Define `ArpeggiatorOptions`, `ArpeggioEvent`, `ArpeggioPlan`, and `createArpeggioPlan`.
+- [x] Implement `up`, `down`, `up-down`, `down-up`, and `as-written` chord-tone traversal. *(`up-down`/`down-up` exclude turnaround endpoints so a repeated cycle never doubles the top/bottom note; `as-written` keeps the chord voicing order while `up`/`down` re-sort.)*
+- [x] Implement deterministic octave expansion and MIDI register/range placement. *(root anchored at the lowest MIDI ≥ `lowMidi` matching its pitch class — default C3 = 48; octave-major expansion; MIDI-dedup; optional `[lowMidi, highMidi]` clip.)*
+- [x] Generate exact-QN subdivisions and clip notes exactly at harmony changes and requested bounds. *(per-chord grid anchored at each chord onset clamped to the window; last note clipped at chord/window end; a chord change truncates the previous note but never moves the next attack.)*
+- [x] Preserve source harmony/occurrence IDs on every generated event. *(`sourceHarmonyId` + stable `arp:<harmonyId>:<k>` ids; occurrence identity rides Phase 4 performed-order harmony.)*
+- [x] Treat continuations, skips, and no-chord spans according to the normalized harmony contract. *(continuation carries the active chord → generates; skip / no-chord → silence, no diagnostic; unresolved chord → info diagnostic + silence, never a guessed triad.)*
+- [x] Consume performed harmony directly so repeats/voltas are not reinterpreted. *(reads `timeline.harmony` as-is; no second repeat interpreter — performed-order expansion of the harmony track itself still rides Phase 4.)*
+- [x] Export the generator from the supported `music-tools` entry point.
+- [x] Add unit, invariant, serialization, and Gm–Cm–F–B-flat integration tests. *(serialization asserted via byte-identical JSON determinism.)*
+- [ ] Benchmark a 128-bar harmony track separately from parsing, timeline construction, scheduling, and rendering. *(deferred — see note above.)*
 
 **Exit criterion:** LilyJS can deterministically generate an exact-QN, renderer-neutral arpeggio plan from `PlaybackTimeline.harmony`; Giusto can choose whether and how to orchestrate that plan without parsing chord labels or reimplementing chord-tone ordering.
 
@@ -732,7 +739,7 @@ Suggested initial gate: warm p95 timeline construction below 20 ms for a typical
 > bundle entry does not). The CLI already consumes
 > `buildPlaybackTimelineFromScore` + `timelineToMidiFile` for `--midi=` sidecar export.
 
-- [ ] Export the redesigned playback types and functions from LilyJS’s supported package entry point. *(today only `createSvgPlaybackBinding`/`setActivePlaybackEvents` are exported — `lilyjs.ts:326`)*
+- [x] Export the redesigned playback types and functions from LilyJS’s supported package entry point. *(done 2026-07-24: `src/lilyjs.ts` now re-exports the whole `music-playback` surface + `createArpeggioPlan` + Rational/harmony types; verified present in `dist/lilyjs.esm.js`.)*
 - [ ] Generate TypeScript declarations upstream instead of hand-maintaining the full API in Giusto.
 - [ ] Document `buildPlaybackTimelineFromScore`, `diffPlaybackTimeline`, rational units, repeat modes, diagnostics, and examples.
 - [ ] Add a minimal LilyPond-to-timeline example that does not require a DOM. *(the CLI `--midi` path is close: parse → timeline → SMF, no DOM)*
@@ -743,7 +750,7 @@ Suggested initial gate: warm p95 timeline construction below 20 ms for a typical
 - [ ] Refactor pedal, grace, repeat, and active-event scheduling to use exact canonical positions.
 - [ ] Refactor SVG playback binding to consume scheduled active-event IDs without owning timeline semantics. *(already true — `svgBinding.ts` is id-based and DOM-neutral)*
 - [ ] Verify parsing and rendering do not regress; update playback tests to the new breaking contract.
-- [ ] Version the LilyJS release and update the vendored package through the normal sync script.
+- [x] Version the LilyJS release and update the vendored package through the normal sync script. *(done 2026-07-24: lilyJS tagged `v0.4.0` locally; `scripts/sync-lilyjs.sh` refreshed `packages/lilyjs/lilyjs.esm.js` + `upstream.json`; hand-maintained `index.d.ts` extended with the timeline/harmony/arpeggio surface. Declarations are still hand-maintained upstream-generation remains open.)*
 - [ ] Delete redundant accompaniment/playback declarations from Giusto once generated LilyJS types ship.
 - [ ] Record migration notes and known unsupported notation cases.
 
