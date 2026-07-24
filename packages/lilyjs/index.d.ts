@@ -373,3 +373,27 @@ export function createArpeggioPlan(
   timeline: Pick<PlaybackTimeline, 'harmony' | 'conductor' | 'durationQN'>,
   options: ArpeggiatorOptions,
 ): ArpeggioPlan
+
+// ── score transforms (transpose) ─────────────────────────────────────────────
+
+export type MeasureIndex = number | 'start' | 'end'
+
+export interface Selection {
+  fromMeasure: number
+  toMeasure: number
+  includesPickup: boolean
+}
+
+export interface TransformResult {
+  score: ScoreLike
+  warnings: string[]
+}
+
+export function measureRange(from: MeasureIndex, to: MeasureIndex): { from: MeasureIndex; to: MeasureIndex }
+
+export function resolveSelection(score: ScoreLike, range: { from: MeasureIndex; to: MeasureIndex }): Selection
+
+/** Transpose notes, key signature, chord symbols, and the harmony track together
+ *  by `semitones` over the selected measures (harmony is transposed in full).
+ *  Returns a new score; the input is not mutated. */
+export function transpose(score: ScoreLike, selection: Selection, semitones: number): TransformResult

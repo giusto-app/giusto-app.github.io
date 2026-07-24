@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createSvgPlaybackBinding,
+  measureRange,
   parseSource,
+  resolveSelection,
+  transpose,
   type MusicDocumentBlock,
   type ScoreLike,
   type SvgPlaybackBinding,
@@ -21,9 +24,16 @@ import { resumeAudioContext } from '../../audio/audioContext'
 import { PlaybackClock } from '../../audio/playbackClock'
 import { playWoodblock } from '../../audio/woodblock'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
-import { StringsInstrument } from '../../audio/stringsInstrument'
-import { arpNotesInWindow, buildArpeggioSchedule, type ArpNote } from '../../audio/arpeggioSchedule'
-import { buildChordBackingSchedule, chordBlocksInWindow, type ChordBlock } from '../../audio/chordBacking'
+import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
+import {
+  backingNotesInWindow,
+  buildBackingArrangement,
+  isStyleAvailable,
+  prepareMidisByInstrument,
+  BACKING_STYLE_LABELS,
+  type BackingLayer,
+  type BackingStyle,
+} from '../../audio/backingStyles'
 import {
   buildChordSchedule,
   chordSoundingAtBeat,
@@ -38,6 +48,7 @@ import {
 import { bpmAtElapsed, bpmForLoop, plannedSteps, rampFraction, type TempoPlan } from '../../audio/tempoPlan'
 import { clicksInWindow } from '../../audio/meter'
 import type { ConcertPitchHz } from '../../utils/concertPitch'
+import { keyTransposeOptions } from '../../utils/keyTranspose'
 
 // Practice Playback: renders a LilyPond exercise with lilyJS and plays a
 // woodblock metronome plus a drone that changes on every chord change.
@@ -57,17 +68,25 @@ function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score
   return b.type === 'score' && 'score' in b
 }
 
-type BackingMode = 'off' | 'drone' | 'chords' | 'arpeggio'
+// One backing selector: silence, the tuning drone, or a musical style. Each
+// style renders the same harmony as a different texture (see backingStyles).
+type BackingSelection = 'off' | 'drone' | BackingStyle
 
-const BACKING_MODES: Array<[BackingMode, string]> = [
-  ['off', 'Off'], ['drone', 'Drone'], ['chords', 'Chords'], ['arpeggio', 'Arpeggio'],
+const BACKING_OPTIONS: Array<[BackingSelection, string]> = [
+  ['off', 'Off'],
+  ['drone', 'Drone'],
+  ['chords', BACKING_STYLE_LABELS.chords],
+  ['arpeggio', BACKING_STYLE_LABELS.arpeggio],
+  ['pulse', BACKING_STYLE_LABELS.pulse],
+  ['waltz', BACKING_STYLE_LABELS.waltz],
+  ['gypsy', BACKING_STYLE_LABELS.gypsy],
 ]
 
+const isStyle = (s: BackingSelection): s is BackingStyle => s !== 'off' && s !== 'drone'
+
 // The play-along drone uses the sampled cello (steady, no wavy detune); the
-// tuning-voice choice lives in the Drone tab. Chords/arpeggio use the strings.
+// tuning-voice choice lives in the Drone tab. Styles play through the strings.
 const DRONE_SOUND: ChordDroneSoundType = 'cello'
-// Fixed, tasteful arpeggio shape — no UI knobs.
-const ARP_CONFIG = { pattern: 'up', rhythm: 'eighth', octaves: 1 } as const
 
 /** A labeled row of mutually-exclusive pill buttons. */
 function SegRow<T extends string>({
@@ -116,9 +135,12 @@ export default function PracticePlayback({
   const [countIn, setCountIn] = useState(true)
   const [loop, setLoop] = useState(false)
   const [metronomeVol, setMetronomeVol] = useState(0.85)
-  // Backing: one of Off / Drone / Chords / Arpeggio, with a single volume.
-  const [backingMode, setBackingMode] = useState<BackingMode>('drone')
+  const [metronomeOn, setMetronomeOn] = useState(true)
+  // Backing: Off / Drone / a musical style, with a single volume.
+  const [backingSelection, setBackingSelection] = useState<BackingSelection>('drone')
   const [backingVol, setBackingVol] = useState(0.5)
+  // Transpose the exercise to a target key (0 = original).
+  const [transposeSemitones, setTransposeSemitones] = useState(0)
   const [activeChordLabel, setActiveChordLabel] = useState<string | null>(null)
   const [isCountingIn, setIsCountingIn] = useState(false)
   const [shareStatus, setShareStatus] = useState('')
@@ -142,15 +164,17 @@ export default function PracticePlayback({
 
   const clockRef = useRef<PlaybackClock | null>(null)
   const droneRef = useRef<ChordDrone | null>(null)
-  const stringsRef = useRef<StringsInstrument | null>(null)
-  // Read live inside the clock's onBeat closure so switching backing mode takes
+  const instrumentsRef = useRef<Record<InstrumentId, SampledInstrument> | null>(null)
+  // Read live inside the clock's onBeat closure so switching backing takes
   // effect without restarting playback.
-  const backingModeRef = useRef(backingMode)
-  backingModeRef.current = backingMode
-  const arpScheduleRef = useRef<ArpNote[]>([])
-  const chordBackingRef = useRef<ChordBlock[]>([])
+  const backingSelectionRef = useRef(backingSelection)
+  backingSelectionRef.current = backingSelection
+  const backingArrangementRef = useRef<BackingLayer[]>([])
+  const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [] })
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
+  const metronomeOnRef = useRef(metronomeOn)
+  metronomeOnRef.current = metronomeOn
   // Mirror of the bpm state, so trainer ramps re-anchor after a manual slider
   // drag instead of snapping back (the ramp steps FROM the latest value).
   const bpmRef = useRef(bpm)
@@ -184,10 +208,16 @@ export default function PracticePlayback({
       const scoreBlocks = doc?.blocks.filter(isScoreBlock) ?? []
       const block = scoreBlocks[exercise.scoreIndex] ?? scoreBlocks[0]
       if (!block) return null
+      // Transpose once here so chords, notes, and backing all follow the key;
+      // LilyScore transposes its own render by the same amount.
+      const score = transposeSemitones
+        ? transpose(block.score, resolveSelection(block.score, measureRange('start', 'end')), transposeSemitones).score
+        : block.score
       return {
-        score: block.score,
-        chords: buildChordSchedule(block.score),
-        notes: buildNoteSchedule(block.score),
+        score,
+        meterNumerator: score.parts[0]?.measures[0]?.timeSignature?.beats ?? 4,
+        chords: buildChordSchedule(score),
+        notes: buildNoteSchedule(score),
         // Always render just the selected score block: whole-document renders
         // paginate to a full letter page (huge empty area below short
         // exercises), and LilyScore injects the catalog title anyway.
@@ -197,23 +227,32 @@ export default function PracticePlayback({
       console.error('exercise parse failed', err)
       return null
     }
-  }, [source, exercise.scoreIndex])
+  }, [source, exercise.scoreIndex, transposeSemitones])
   const schedule: ChordScheduleResult | null = parsed?.chords ?? null
   const noteEvents: NotePlaybackEvent[] = parsed?.notes ?? []
   const hasChordTrack = (schedule?.events.length ?? 0) > 0
+  const meterNumerator = parsed?.meterNumerator ?? 4
 
-  // Backing schedules (chords + arpeggio) — rebuilt per exercise, read live via
-  // refs inside the clock's onBeat closure.
-  const arpSchedule = useMemo<ArpNote[]>(
-    () => (parsed?.score ? buildArpeggioSchedule(parsed.score, ARP_CONFIG) : []),
+  // Only offer styles that suit the exercise's meter (Waltz → 3/4, Gypsy → 4/4).
+  const backingOptions = useMemo(
+    () => BACKING_OPTIONS.filter(([v]) => v === 'off' || v === 'drone' || isStyleAvailable(v, meterNumerator)),
+    [meterNumerator],
+  )
+  const keyOptions = useMemo(() => keyTransposeOptions(exercise.key), [exercise.key])
+
+  // Active-style arrangement (one or more instrument layers) — rebuilt when the
+  // exercise or style changes, read live via the ref inside onBeat.
+  const backingArrangement = useMemo<BackingLayer[]>(
+    () => (parsed?.score && isStyle(backingSelection) ? buildBackingArrangement(parsed.score, backingSelection) : []),
+    [parsed, backingSelection],
+  )
+  backingArrangementRef.current = backingArrangement
+  // Per-instrument preload notes, so switching styles never falls back to synth.
+  const prepareMidis = useMemo(
+    () => (parsed?.score ? prepareMidisByInstrument(parsed.score) : { strings: [], bass: [], guitar: [] }),
     [parsed],
   )
-  arpScheduleRef.current = arpSchedule
-  const chordBacking = useMemo<ChordBlock[]>(
-    () => (parsed?.score ? buildChordBackingSchedule(parsed.score) : []),
-    [parsed],
-  )
-  chordBackingRef.current = chordBacking
+  prepareMidisRef.current = prepareMidis
 
   // Score \tempo (when present) beats the UI default, once per exercise —
   // clamped to the slider's range in case a file carries an extreme marking.
@@ -238,8 +277,10 @@ export default function PracticePlayback({
     clockRef.current = null
     droneRef.current?.dispose()
     droneRef.current = null
-    stringsRef.current?.dispose()
-    stringsRef.current = null
+    if (instrumentsRef.current) {
+      for (const inst of Object.values(instrumentsRef.current)) inst.dispose()
+      instrumentsRef.current = null
+    }
     if (noteRafRef.current !== null) cancelAnimationFrame(noteRafRef.current)
     noteRafRef.current = null
     noteAnchorRef.current = null
@@ -256,22 +297,27 @@ export default function PracticePlayback({
     const ctx = await resumeAudioContext()
 
     // Both backing instruments are created up front; the active one is chosen
-    // live by backingModeRef, and each is enable-gated by volume (see effects).
-    const droneActive = backingMode === 'drone'
-    const stringsActive = backingMode === 'chords' || backingMode === 'arpeggio'
+    // live by backingSelectionRef, each enable-gated by volume (see effects).
+    const droneActive = backingSelection === 'drone'
+    const stringsActive = isStyle(backingSelection)
     const drone = new ChordDrone(ctx, {
       soundType: DRONE_SOUND,
       concertPitchHz: concertPitch,
       volume: droneActive ? backingVol * 0.4 : 0,
     })
     await drone.prepare(schedule.events.map(e => e.rootPc))
-    const strings = new StringsInstrument(ctx, {
-      concertPitchHz: concertPitch,
-      volume: stringsActive ? backingVol : 0,
-    })
-    await strings.prepare([
-      ...arpScheduleRef.current.map(n => n.midi),
-      ...chordBackingRef.current.flatMap(b => b.midis),
+    const instrumentVol = stringsActive ? backingVol : 0
+    const prep = prepareMidisRef.current
+    const instruments: Record<InstrumentId, SampledInstrument> = {
+      strings: new SampledInstrument(ctx, SAMPLE_SETS.strings, { concertPitchHz: concertPitch, volume: instrumentVol }),
+      bass: new SampledInstrument(ctx, SAMPLE_SETS.bass, { concertPitchHz: concertPitch, volume: instrumentVol }),
+      guitar: new SampledInstrument(ctx, SAMPLE_SETS.guitar, { concertPitchHz: concertPitch, volume: instrumentVol }),
+    }
+    // Preload every instrument's notes so switching styles never falls back to synth.
+    await Promise.all([
+      instruments.strings.prepare(prep.strings),
+      instruments.bass.prepare(prep.bass),
+      instruments.guitar.prepare(prep.guitar),
     ])
 
     // Tempo training repeats the exercise until its target is completed.
@@ -302,13 +348,16 @@ export default function PracticePlayback({
       // clock grid: a 6/8 jig clicks twice per bar (dotted quarters), and the
       // second click falls BETWEEN clock beats (offset scheduled below).
       const secondsPerQN = 60 / clock.bpm
-      for (const click of clicksInWindow(e.beat, e.beat + 1, schedule.pulseBeats, schedule.beatsPerBar)) {
-        playWoodblock(
-          ctx, ctx.destination,
-          e.time + (click.beat - e.beat) * secondsPerQN,
-          click.isDownbeat,
-          metronomeVolRef.current,
-        )
+      // The count-in bar always ticks (e.beat < 0); during play, only if on.
+      if (metronomeOnRef.current || e.beat < 0) {
+        for (const click of clicksInWindow(e.beat, e.beat + 1, schedule.pulseBeats, schedule.beatsPerBar)) {
+          playWoodblock(
+            ctx, ctx.destination,
+            e.time + (click.beat - e.beat) * secondsPerQN,
+            click.isDownbeat,
+            metronomeVolRef.current,
+          )
+        }
       }
       if (e.beat < 0) return // count-in: clicks only
 
@@ -347,29 +396,25 @@ export default function PracticePlayback({
 
       const beat = shouldLoop ? e.beat % total : e.beat
       const secondsPer = 60 / clock.bpm
-      const mode = backingModeRef.current
+      const selection = backingSelectionRef.current
 
-      if (mode === 'drone') {
+      if (selection === 'drone') {
         for (const chord of chordsStartingInWindow(schedule.events, beat, beat + 1)) {
           drone.setChord(chord.rootPc, chord.quality, e.time + (chord.startBeat - beat) * secondsPer)
         }
         // ChordDrone's same-chord guard handles the non-change case; a loop
         // back to Gm from Bb is a real change and re-articulates.
-      } else if (mode === 'chords') {
-        for (const block of chordBlocksInWindow(chordBackingRef.current, beat, beat + 1)) {
-          const at = e.time + (block.startBeat - beat) * secondsPer
-          for (const midi of block.midis) {
-            strings.playNote(midi, at, block.durationBeats * secondsPer, block.velocity)
+      } else if (selection !== 'off') {
+        for (const layer of backingArrangementRef.current) {
+          const inst = instruments[layer.instrument]
+          for (const note of backingNotesInWindow(layer.notes, beat, beat + 1)) {
+            inst.playNote(
+              note.midi,
+              e.time + (note.startBeat - beat) * secondsPer,
+              note.durationBeats * secondsPer,
+              note.velocity,
+            )
           }
-        }
-      } else if (mode === 'arpeggio') {
-        for (const note of arpNotesInWindow(arpScheduleRef.current, beat, beat + 1)) {
-          strings.playNote(
-            note.midi,
-            e.time + (note.startBeat - beat) * secondsPer,
-            note.durationBeats * secondsPer,
-            note.velocity,
-          )
         }
       }
     })
@@ -401,26 +446,39 @@ export default function PracticePlayback({
 
     clock.onEnded(() => {
       drone.stop()
-      strings.stop()
+      for (const inst of Object.values(instruments)) inst.stop()
       if (plan) setTrainerCompleted(true)
       stopPlayback()
     })
 
     clockRef.current = clock
     droneRef.current = drone
-    stringsRef.current = strings
+    instrumentsRef.current = instruments
     clock.start()
     setIsPlaying(true)
-  }, [schedule, noteEvents, concertPitch, backingMode, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
+  }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
 
   // Live control forwarding
   useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
-  // Backing mode/volume are volume-gated (gapless): the inactive instrument is
-  // silenced but keeps running, so switching modes needs no restart.
+  // Backing selection/volume are volume-gated (gapless): the inactive instrument
+  // is silenced but keeps running, so switching needs no restart.
   useEffect(() => {
-    droneRef.current?.setVolume(backingMode === 'drone' ? backingVol * 0.4 : 0)
-    stringsRef.current?.setVolume(backingMode === 'chords' || backingMode === 'arpeggio' ? backingVol : 0)
-  }, [backingMode, backingVol])
+    droneRef.current?.setVolume(backingSelection === 'drone' ? backingVol * 0.4 : 0)
+    const vol = isStyle(backingSelection) ? backingVol : 0
+    if (instrumentsRef.current) for (const inst of Object.values(instrumentsRef.current)) inst.setVolume(vol)
+  }, [backingSelection, backingVol])
+
+  // Drop a style that doesn't fit the exercise's meter (e.g. Waltz on a 4/4 piece).
+  useEffect(() => {
+    if (isStyle(backingSelection) && !isStyleAvailable(backingSelection, meterNumerator)) {
+      setBackingSelection('drone')
+    }
+  }, [meterNumerator, backingSelection])
+
+  // Gypsy jazz swings against the bass, not a click — default its metronome off.
+  useEffect(() => {
+    if (backingSelection === 'gypsy') setMetronomeOn(false)
+  }, [backingSelection])
 
   useEffect(() => {
     setTrainerCompleted(false)
@@ -428,6 +486,9 @@ export default function PracticePlayback({
 
   // Tear down audio when the view unmounts or the exercise changes
   useEffect(() => stopPlayback, [stopPlayback, exercise.id])
+
+  // A new exercise starts in its own key.
+  useEffect(() => { setTransposeSemitones(0) }, [exercise.id])
 
   const handlePick = useCallback((entry: ExerciseCatalogEntry) => {
     stopPlayback()
@@ -589,28 +650,10 @@ export default function PracticePlayback({
           source={source}
           scoreIndex={parsed?.renderScoreIndex}
           title={exercise.title}
+          transposeSemitones={transposeSemitones}
           onRendered={handleRendered}
         />
       </div>
-
-      {/* Chord timeline */}
-      {schedule && schedule.events.length > 0 && (
-        <div id="play-along-chord-timeline" className="flex gap-2 justify-center flex-wrap">
-          {schedule.events.map(e => (
-            <span
-              key={`${e.label}-${e.startBeat}`}
-              className={[
-                'px-3 py-1 rounded-full text-sm font-semibold transition-colors',
-                activeChordLabel === e.label
-                  ? 'bg-amber-400 text-gray-900'
-                  : 'bg-gray-800 text-gray-400',
-              ].join(' ')}
-            >
-              {e.label}
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* Transport */}
       <div id="play-along-transport" className="flex items-center gap-3">
@@ -660,13 +703,28 @@ export default function PracticePlayback({
         </label>
 
         <div>
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>Metronome</span>
-          </div>
+          <label className="text-xs text-gray-500 mb-1 block">Key</label>
+          <select
+            value={transposeSemitones}
+            onChange={e => { setTransposeSemitones(Number(e.target.value)); stopPlayback() }}
+            className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1.5 text-sm text-gray-200"
+          >
+            {keyOptions.map(o => (
+              <option key={o.semitones} value={o.semitones}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-gray-400 mb-1">
+            <input type="checkbox" checked={metronomeOn} onChange={e => setMetronomeOn(e.target.checked)}
+              className="accent-amber-400" />
+            Metronome
+          </label>
           <input
-            type="range" min={0} max={1} step={0.05} value={metronomeVol}
+            type="range" min={0} max={1} step={0.05} value={metronomeVol} disabled={!metronomeOn}
             onChange={e => setMetronomeVol(Number(e.target.value))}
-            className="w-full accent-amber-400"
+            className="w-full accent-amber-400 disabled:opacity-40"
           />
         </div>
         {/* Drone volume lives in the Backing section below. */}
@@ -783,8 +841,8 @@ export default function PracticePlayback({
           sampled cello (drone) and string ensemble (chords/arpeggio) */}
       {hasChordTrack ? (
         <div id="play-along-backing" className="rounded-xl bg-gray-800/40 p-3 flex flex-col gap-3">
-          <SegRow label="Backing" value={backingMode} onChange={setBackingMode} options={BACKING_MODES} />
-          {backingMode !== 'off' && (
+          <SegRow label="Backing" value={backingSelection} onChange={setBackingSelection} options={backingOptions} />
+          {backingSelection !== 'off' && (
             <label className="flex items-center gap-2 text-xs text-gray-500">
               <span className="w-16 shrink-0">Volume</span>
               <input

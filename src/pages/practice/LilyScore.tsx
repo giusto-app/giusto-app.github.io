@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { parseSource, renderLily, renderScore } from 'lilyjs'
+import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
 // Unlike StaffViewLilyPond (legacy lily-parser + frozen lily-viewer), this
@@ -21,12 +21,14 @@ interface LilyScoreProps {
   title?: string
   /** SVG layout width in px. Default 720 (lilyJS letter-page content width). */
   width?: number
+  /** Transpose the rendered score by this many semitones (0 = original key). */
+  transposeSemitones?: number
   className?: string
   /** Called after each render with the container (for overlays/highlights). */
   onRendered?: (container: HTMLDivElement) => void
 }
 
-export default function LilyScore({ source, scoreIndex, title, width = 720, className, onRendered }: LilyScoreProps) {
+export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered }: LilyScoreProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -41,9 +43,13 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, clas
           | { score: Parameters<typeof renderScore>[1] & { title?: string } }
           | undefined
         if (!block) throw new Error(`score block ${scoreIndex} not found (${blocks.length} scores)`)
+        let score = block.score
+        if (transposeSemitones) {
+          score = transpose(score, resolveSelection(score, measureRange('start', 'end')), transposeSemitones).score as typeof score
+        }
         // The parsed doc is ours (fresh from parseSource) — safe to retitle.
-        if (title) block.score.title = title
-        renderScore(el, block.score, { width, theme: 'dark' })
+        if (title) score.title = title
+        renderScore(el, score, { width, theme: 'dark' })
       } else {
         renderLily(el, source, { width, theme: 'dark' })
       }
@@ -56,7 +62,7 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, clas
       console.error('lilyjs render failed', err)
       el.textContent = 'Score rendering failed'
     }
-  }, [source, scoreIndex, width, onRendered])
+  }, [source, scoreIndex, width, transposeSemitones, onRendered])
 
   // [&_svg]: the fill-the-container scaling must survive lilyjs's async
   // font-ready re-render (which replaces the <svg>), so it lives in CSS

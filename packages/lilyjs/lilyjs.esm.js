@@ -84771,7 +84771,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.4.0",
+  version: "0.5.0",
   type: "module",
   exports: {
     ".": {
@@ -89123,6 +89123,296 @@ function createArpeggioPlan(timeline, options) {
   }
   return { schemaVersion: 1, durationQN: windowLength, events: events2, diagnostics };
 }
+// src/music-tools/transforms/pitchAdapter.ts
+var ALTER_TO_ACC = {
+  0: "",
+  1: "s",
+  2: "ss",
+  "-1": "f",
+  "-2": "ff"
+};
+var ACC_TO_ALTER = {
+  "": 0,
+  s: 1,
+  ss: 2,
+  f: -1,
+  ff: -2
+};
+function getDiatonicShift(semitoneShift) {
+  const octaves = Math.floor(semitoneShift / 12);
+  const rem = (semitoneShift % 12 + 12) % 12;
+  const REM_TO_DIATONIC = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6];
+  return octaves * 7 + REM_TO_DIATONIC[rem];
+}
+function adaptAndTranspose(modelPitch, semitones) {
+  const parserPitch = {
+    base: modelPitch.step.toLowerCase(),
+    accidental: ALTER_TO_ACC[modelPitch.alter] ?? "",
+    octave: `abs:${modelPitch.octave}`
+  };
+  const diatonicShift = getDiatonicShift(semitones);
+  const transposed = transposePitch(parserPitch, semitones, diatonicShift);
+  const outStep = transposed.base.toUpperCase();
+  const outAlter = ACC_TO_ALTER[transposed.accidental ?? ""] ?? 0;
+  let outOctave = 4;
+  if (transposed.octave.startsWith("abs:")) {
+    outOctave = parseInt(transposed.octave.slice(4), 10);
+  }
+  return new Pitch(outStep, outAlter, outOctave);
+}
+function transposeKeySignature(keySig3, semitones) {
+  let fifths = 0;
+  if (keySig3.type === "sharp") {
+    fifths = keySig3.count;
+  } else if (keySig3.type === "flat") {
+    fifths = -keySig3.count;
+  }
+  let shift = semitones * 7 % 12;
+  if (shift > 6)
+    shift -= 12;
+  if (shift < -6)
+    shift += 12;
+  const outFifths = fifths + shift;
+  if (outFifths > 0) {
+    return new KeySignature("sharp", Math.min(outFifths, 7));
+  } else if (outFifths < 0) {
+    return new KeySignature("flat", Math.min(Math.abs(outFifths), 7));
+  } else {
+    return new KeySignature("natural", 0);
+  }
+}
+
+// src/music-tools/transforms/transposeChords.ts
+var ACC_TO_ALTER2 = {
+  "": 0,
+  "#": 1,
+  "##": 2,
+  "♯": 1,
+  "♯♯": 2,
+  b: -1,
+  bb: -2,
+  "♭": -1,
+  "♭♭": -2
+};
+function accToAlter(acc) {
+  return ACC_TO_ALTER2[acc] ?? 0;
+}
+function formatRoot(letter, alter, unicode) {
+  const acc = alter > 0 ? (unicode ? "♯" : "#").repeat(alter) : alter < 0 ? (unicode ? "♭" : "b").repeat(-alter) : "";
+  return letter + acc;
+}
+function transposeSpelled(letter, alter, semitones) {
+  const p = adaptAndTranspose(new Pitch(letter, alter, 4), semitones);
+  return { letter: p.step, alter: p.alter };
+}
+function transposeSpelledPitchClass(spc, semitones) {
+  const { letter, alter } = transposeSpelled(spc.letter, spc.alteration, semitones);
+  return spelledPitchClass(letter, alter);
+}
+function transposeChordDescriptor(chord, semitones) {
+  return {
+    ...chord,
+    root: transposeSpelledPitchClass(chord.root, semitones),
+    ...chord.bass ? { bass: { ...chord.bass, pitch: transposeSpelledPitchClass(chord.bass.pitch, semitones) } } : {}
+  };
+}
+var ROOT_RE = /^([A-G])(#{1,2}|♯{1,2}|b{1,2}|♭{1,2})?/;
+var SLASH_BASS_RE = /\/([A-G])(#{1,2}|♯{1,2}|b{1,2}|♭{1,2})?$/;
+function transposeChordText(text2, semitones) {
+  const t = text2.trim();
+  const rootMatch = ROOT_RE.exec(t);
+  if (!rootMatch)
+    return text2;
+  const [rootStr, letter, acc = ""] = rootMatch;
+  const r = transposeSpelled(letter, accToAlter(acc), semitones);
+  const rest = t.slice(rootStr.length).replace(SLASH_BASS_RE, (_all, bl, ba = "") => {
+    const rb = transposeSpelled(bl, accToAlter(ba), semitones);
+    return "/" + formatRoot(rb.letter, rb.alter, /[♯♭]/.test(ba));
+  });
+  return formatRoot(r.letter, r.alter, /[♯♭]/.test(acc)) + rest;
+}
+function transposeHarmony(harmony2, semitones) {
+  return {
+    ...harmony2,
+    chord: harmony2.chord ? transposeChordDescriptor(harmony2.chord, semitones) : null,
+    text: transposeChordText(harmony2.text, semitones)
+  };
+}
+
+// src/music-tools/internal/cloneEvent.ts
+function clonePitch2(pitch3) {
+  return new Pitch(pitch3.step, pitch3.alter, pitch3.octave);
+}
+function cloneDuration(duration3) {
+  if (duration3.writtenBase) {
+    return new Duration(duration3.writtenBase, duration3.dots, duration3.tuplets.map((t) => ({ ...t })));
+  }
+  return new Duration({ ...duration3.sounding }, { tuplets: duration3.tuplets.map((t) => ({ ...t })) });
+}
+function cloneEvent(event) {
+  if (event instanceof Note) {
+    return new Note(event.id, clonePitch2(event.pitch), cloneDuration(event.duration), {
+      articulations: [...event.articulations],
+      isGrace: event.isGrace
+    });
+  }
+  if (event instanceof Chord) {
+    return new Chord(event.id, event.pitches.map(clonePitch2), cloneDuration(event.duration), {
+      articulations: [...event.articulations],
+      isGrace: event.isGrace
+    });
+  }
+  if (event instanceof Rest) {
+    return new Rest(event.id, cloneDuration(event.duration));
+  }
+  return event;
+}
+function transposeEvent(event, semitones) {
+  if (event instanceof Note) {
+    return new Note(event.id, adaptAndTranspose(event.pitch, semitones), cloneDuration(event.duration), {
+      articulations: [...event.articulations],
+      isGrace: event.isGrace
+    });
+  }
+  if (event instanceof Chord) {
+    return new Chord(event.id, event.pitches.map((p) => adaptAndTranspose(p, semitones)), cloneDuration(event.duration), {
+      articulations: [...event.articulations],
+      isGrace: event.isGrace
+    });
+  }
+  if (event instanceof Rest) {
+    return new Rest(event.id, cloneDuration(event.duration));
+  }
+  return event;
+}
+
+// src/music-tools/transforms/transpose.ts
+function isPickupMeasure(measure2) {
+  if (!measure2.expectedDurationQN)
+    return false;
+  const beats = measure2.timeSignature.beats;
+  const beatUnit = measure2.timeSignature.beatUnit;
+  const num3 = measure2.expectedDurationQN.num;
+  const den = measure2.expectedDurationQN.den;
+  return num3 * beatUnit < den * beats * 4;
+}
+function isMeasureSelected(mi, selection, hasPickup) {
+  if (hasPickup) {
+    if (mi === 0)
+      return selection.includesPickup;
+    return mi >= selection.fromMeasure && mi <= selection.toMeasure;
+  }
+  const measureNum = mi + 1;
+  return measureNum >= selection.fromMeasure && measureNum <= selection.toMeasure;
+}
+function transpose(score2, selection, semitones) {
+  const transposedParts = score2.parts.map((part2) => {
+    const hasPickup = part2.measures.length > 0 && isPickupMeasure(part2.measures[0]);
+    const transposedMeasures = part2.measures.map((measure2, mi) => {
+      const isSelected = isMeasureSelected(mi, selection, hasPickup);
+      const newEvents = measure2.events.map((event) => isSelected ? transposeEvent(event, semitones) : cloneEvent(event));
+      const transposedStaffMeasures = measure2.staffMeasures?.map((sm) => ({
+        staffId: sm.staffId,
+        voices: sm.voices.map((vc) => ({
+          voiceId: vc.voiceId,
+          events: vc.events.map((event) => isSelected ? transposeEvent(event, semitones) : cloneEvent(event))
+        }))
+      }));
+      const transposedKeySig = measure2.keySignature && isSelected ? transposeKeySignature(measure2.keySignature, semitones) : measure2.keySignature && new KeySignature(measure2.keySignature.type, measure2.keySignature.count);
+      const newMeasure = new Measure(measure2.number, measure2.timeSignature, newEvents, measure2.slurs.map((s) => new Slur(s.startEventId, s.endEventId)), measure2.ties.map((t) => new Tie(t.fromNoteId, t.toNoteId)), measure2.beamGroups.map((bg) => new BeamGroup(bg.id, [...bg.eventIds])), {
+        keySignature: transposedKeySig,
+        clef: measure2.clef,
+        chordSymbols: measure2.chordSymbols.map((cs) => new ChordSymbol(isSelected ? transposeChordText(cs.text, semitones) : cs.text, cs.eventId, cs.placement, cs.offset, cs.style, cs.harmony ? isSelected ? transposeHarmony(cs.harmony, semitones) : cs.harmony : undefined)),
+        dynamics: measure2.dynamics.map((d) => new DynamicMark(d.value, d.eventId, d.placement)),
+        tempoMarks: measure2.tempoMarks.map((tm) => new TempoMark({ text: tm.text, bpm: tm.bpm, beatUnit: tm.beatUnit, eventId: tm.eventId })),
+        hairpins: measure2.hairpins.map((h) => ({ ...h })),
+        rehearsalMarks: measure2.rehearsalMarks.map((rm) => ({ ...rm })),
+        tupletSpans: measure2.tupletSpans.map((ts) => ({ ...ts })),
+        voltaBrackets: measure2.voltaBrackets.map((vb) => new VoltaBracket(vb.label, vb.position)),
+        ottavas: measure2.ottavas.map((o) => new OttavaSpan(o.startEventId, o.endEventId, o.level, o.placement)),
+        repeatStart: measure2.repeatStart,
+        repeatEnd: measure2.repeatEnd,
+        systemBreak: measure2.systemBreak,
+        barlineStart: measure2.barlineStart,
+        barlineEnd: measure2.barlineEnd,
+        staffMeasures: transposedStaffMeasures
+      });
+      newMeasure.expectedDurationQN = measure2.expectedDurationQN;
+      return newMeasure;
+    });
+    return new Part(part2.id, part2.name, part2.staves, transposedMeasures, { voices: [...part2.voices] });
+  });
+  return {
+    score: new Score(score2.title, transposedParts, {
+      annotations: [...score2.annotations],
+      info: score2.info,
+      directives: [...score2.directives],
+      lyrics: score2.lyrics.map((line) => ({
+        ...line,
+        syllables: line.syllables.map((syllable) => ({ ...syllable }))
+      })),
+      pedalEvents: score2.pedalEvents.map((event) => ({ ...event })),
+      harmonyTrack: score2.harmonyTrack.map((h) => transposeHarmony(h, semitones))
+    }),
+    warnings: []
+  };
+}
+// src/music-tools/select.ts
+function measureRange(from, to) {
+  return { from, to };
+}
+function isPickupMeasure2(measure2) {
+  if (!measure2.expectedDurationQN)
+    return false;
+  const beats = measure2.timeSignature.beats;
+  const beatUnit = measure2.timeSignature.beatUnit;
+  const num3 = measure2.expectedDurationQN.num;
+  const den = measure2.expectedDurationQN.den;
+  return num3 * beatUnit < den * beats * 4;
+}
+function resolveSelection(score2, range3) {
+  const part2 = score2.parts[0];
+  if (!part2 || part2.measures.length === 0) {
+    throw new RangeError("Score has no measures to select from");
+  }
+  const totalMeasures = part2.measures.length;
+  const hasPickup = isPickupMeasure2(part2.measures[0]);
+  let resolvedFrom;
+  if (range3.from === "start") {
+    resolvedFrom = 1;
+  } else if (range3.from === "end") {
+    resolvedFrom = totalMeasures;
+  } else if (typeof range3.from === "number") {
+    resolvedFrom = range3.from;
+  } else {
+    throw new RangeError(`Invalid from measure index: ${range3.from}`);
+  }
+  let resolvedTo;
+  if (range3.to === "start") {
+    resolvedTo = 1;
+  } else if (range3.to === "end") {
+    resolvedTo = totalMeasures;
+  } else if (typeof range3.to === "number") {
+    resolvedTo = range3.to;
+  } else {
+    throw new RangeError(`Invalid to measure index: ${range3.to}`);
+  }
+  if (resolvedFrom < 1 || resolvedFrom > totalMeasures) {
+    throw new RangeError(`Start measure ${resolvedFrom} is out of bounds (1 to ${totalMeasures})`);
+  }
+  if (resolvedTo < 1 || resolvedTo > totalMeasures) {
+    throw new RangeError(`End measure ${resolvedTo} is out of bounds (1 to ${totalMeasures})`);
+  }
+  if (resolvedFrom > resolvedTo) {
+    throw new RangeError(`Start measure ${resolvedFrom} is after end measure ${resolvedTo}`);
+  }
+  return {
+    fromMeasure: resolvedFrom,
+    toMeasure: resolvedTo,
+    includesPickup: range3.from === "start" && hasPickup
+  };
+}
+
 // src/lilyjs.ts
 var rendererStyleInjected = false;
 function ensureMusicFontsLoaded(fontFamily = "Bravura") {
@@ -89357,6 +89647,7 @@ class MusicRender {
 }
 var music_render = MusicRender;
 export {
+  transpose,
   toQuarterBpm,
   timelineToMidiMessageSchedule,
   timelineToMidiFile,
@@ -89367,6 +89658,7 @@ export {
   spelledPitchClass,
   setActivePlaybackEvents,
   secondsToQuarterNote,
+  resolveSelection,
   renderScore,
   renderMusic,
   renderLily,
@@ -89391,6 +89683,7 @@ export {
   midiNoteOffMessage,
   midiInstrumentNameForScore,
   midiControlChangeMessage,
+  measureRange,
   maxRational,
   isSafeRational,
   findPlaybackElements,

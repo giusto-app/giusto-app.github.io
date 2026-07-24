@@ -37,6 +37,10 @@ echo "Copying music fonts into public/lilyjs/fonts/ ..."
 mkdir -p "$GIUSTO_DIR/public/lilyjs/fonts"
 cp "$LILYJS_DIR/src/music-rendering/fonts/Bravura.woff2" \
    "$LILYJS_DIR/src/music-rendering/fonts/Academico.woff2" \
+   "$LILYJS_DIR/src/music-rendering/fonts/TeXGyreSchola-Regular.woff2" \
+   "$LILYJS_DIR/src/music-rendering/fonts/TeXGyreSchola-Bold.woff2" \
+   "$LILYJS_DIR/src/music-rendering/fonts/TeXGyreSchola-Italic.woff2" \
+   "$LILYJS_DIR/src/music-rendering/fonts/TeXGyreSchola-BoldItalic.woff2" \
    "$GIUSTO_DIR/public/lilyjs/fonts/"
 
 echo "Synced lilyJS ${LILYJS_TAG:-$LILYJS_COMMIT}."
