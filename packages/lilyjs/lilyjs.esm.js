@@ -9033,6 +9033,12 @@ function momentSchemeToQN(raw) {
   return num / den * 4;
 }
 function applyLayoutSetting(target, rawKey, rawValue) {
+  if (rawKey === "indent" || rawKey === "Score.indent") {
+    const n = coerceNumber(rawValue);
+    if (n !== undefined)
+      target.firstIndent = n;
+    return;
+  }
   if (rawKey === "Lyrics.LyricText.font-size" || rawKey === "Score.LyricText.font-size" || rawKey === "LyricText.font-size") {
     const delta = coerceNumber(rawValue);
     if (delta !== undefined)
@@ -12998,7 +13004,9 @@ function ordinaryAttackAdvance(width, a, b, opts) {
   const rod = ordinaryAttackRod(a, b);
   if (!rod)
     return width;
-  const natural = opts?.shortestDur != null ? spacingEventWidth(a, opts.shortestDur) : width;
+  if (opts?.shortestDur != null)
+    return width;
+  const natural = width;
   if (opts?.spreadWhenExpanded && width > natural + PIXEL_EPSILON)
     return Math.max(rod, width);
   return a.duration > 1 ? Math.max(rod, width) : rod;
@@ -13363,7 +13371,8 @@ function buildMeasureRods(measure2, noteAccCols, noteAccidentalKinds, noteSteps)
       const baseTo = { left: NH_RX * toScale, right: NH_RX * toScale };
       minDist = Math.max(minColumnGap(baseFrom, toExtent, accidentalColumns > 0 ? accidentalClearance(accidentalKind) : 0), minColumnGap(fromExtent, baseTo));
     }
-    minDist = Math.max(minDist, ordinaryAttackRod({
+    const hasSkyline = fromStep != null && toStep != null;
+    minDist = Math.max(minDist, hasSkyline ? 0 : ordinaryAttackRod({
       duration: spacingDurationForNote(fromNote),
       musicScale: fromScale,
       isRest: !!fromNote.isRest,
@@ -67832,6 +67841,148 @@ function el(type, props, children, key) {
   };
 }
 
+// src/music-rendering/renderer/staffRow/measureNotes/rehearsalMarks.ts
+var REHEARSAL_MARK_CHAR_WIDTHS = {
+  "'": 0.1848,
+  A: 0.7267,
+  B: 0.6651,
+  C: 0.6651,
+  D: 0.7267,
+  E: 0.611,
+  F: 0.556,
+  G: 0.722,
+  H: 0.722,
+  I: 0.333,
+  J: 0.389,
+  K: 0.722,
+  L: 0.611,
+  M: 0.889,
+  N: 0.722,
+  O: 0.722,
+  P: 0.556,
+  Q: 0.722,
+  R: 0.667,
+  S: 0.556,
+  T: 0.611,
+  U: 0.722,
+  V: 0.722,
+  W: 0.944,
+  X: 0.722,
+  Y: 0.722,
+  Z: 0.611,
+  a: 0.444,
+  b: 0.5,
+  c: 0.444,
+  d: 0.5,
+  e: 0.444,
+  f: 0.333,
+  g: 0.5,
+  h: 0.5,
+  i: 0.278,
+  j: 0.278,
+  k: 0.5,
+  l: 0.278,
+  m: 0.778,
+  n: 0.5,
+  o: 0.5,
+  p: 0.5,
+  q: 0.5,
+  r: 0.333,
+  s: 0.389,
+  t: 0.278,
+  u: 0.5,
+  v: 0.5,
+  w: 0.722,
+  x: 0.5,
+  y: 0.5,
+  z: 0.444,
+  "0": 0.5,
+  "1": 0.5,
+  "2": 0.5,
+  "3": 0.5,
+  "4": 0.5,
+  "5": 0.5,
+  "6": 0.5,
+  "7": 0.5,
+  "8": 0.5,
+  "9": 0.5,
+  " ": 0.25,
+  "-": 0.333,
+  ".": 0.25,
+  ",": 0.25,
+  ":": 0.278,
+  ";": 0.278,
+  "!": 0.333,
+  "?": 0.444,
+  "(": 0.333,
+  ")": 0.333,
+  "/": 0.278,
+  "&": 0.778
+};
+var LATIN_CAP_HEIGHT_EM = 0.6772;
+function latinTextWidthEm(text) {
+  let em = 0;
+  for (const char of text)
+    em += REHEARSAL_MARK_CHAR_WIDTHS[char] ?? 0.722;
+  return em;
+}
+function rehearsalMarkTextWidth(text) {
+  return latinTextWidthEm(text) * REHEARSAL_MARK_FONT_SIZE;
+}
+function rehearsalMarkBoxMetrics(text) {
+  return {
+    width: rehearsalMarkTextWidth(text) + REHEARSAL_MARK_PAD_X * 2,
+    height: REHEARSAL_MARK_FONT_SIZE * LATIN_CAP_HEIGHT_EM + REHEARSAL_MARK_PAD * 2
+  };
+}
+function rehearsalMarkVerticalMetrics(text, topY, boxBottomY) {
+  const box = rehearsalMarkBoxMetrics(text);
+  const boxBottom = boxBottomY ?? topY - LINE_SPACING;
+  const boxTop = boxBottom - box.height;
+  return {
+    boxTop,
+    textY: boxBottom - REHEARSAL_MARK_PAD
+  };
+}
+function rehearsalMarkAnchorX(input) {
+  const {
+    mi,
+    ni,
+    firstSpacingEventIndex,
+    noteX,
+    measureStartX,
+    systemStartTextX
+  } = input;
+  if (ni !== firstSpacingEventIndex)
+    return noteX;
+  return mi === 0 && systemStartTextX != null ? systemStartTextX : measureStartX;
+}
+function renderRehearsalMark(input) {
+  const { text, noteX, textStartX, topY, boxBottomY, keySuffix } = input;
+  const box = rehearsalMarkBoxMetrics(text);
+  const { boxTop, textY } = boxBottomY == null ? rehearsalMarkVerticalMetrics(text, topY) : rehearsalMarkVerticalMetrics(text, topY, boxBottomY);
+  const textX = textStartX ?? noteX;
+  const boxX = textX - REHEARSAL_MARK_PAD_X;
+  return [
+    el("rect", {
+      x: boxX,
+      y: boxTop,
+      width: box.width,
+      height: box.height,
+      className: "ll",
+      "data-lily-element": "rehearsal-mark-box"
+    }, undefined, `mark-r${keySuffix}`),
+    el("text", {
+      x: textX,
+      y: textY,
+      fontSize: REHEARSAL_MARK_FONT_SIZE,
+      fontFamily: "serif",
+      textAnchor: "start",
+      "data-lily-element": "rehearsal-mark"
+    }, text, `mark-t${keySuffix}`)
+  ];
+}
+
 // src/music-rendering/smufl/SmuflGlyphPathRegistry.ts
 function normalizeSmuflPathFontName(fontFamily) {
   return (fontFamily ?? "Bravura").split(",")[0]?.trim().replace(/^["']|["']$/g, "") || "Bravura";
@@ -68221,6 +68372,19 @@ function collectMeasureChordNames(opts) {
       smuflFontFamily
     });
   }
+}
+function chordNameSkylineBoxes(items) {
+  if (items.length === 0)
+    return [];
+  const rowChordY = Math.min(...items.map((i) => i.nameY));
+  const rootCapH = CHORD_NAME_FONT_SIZE * LATIN_CAP_HEIGHT_EM;
+  const suffixCapH = CHORD_NAME_FONT_SIZE * Math.SQRT1_2 * LATIN_CAP_HEIGHT_EM;
+  return items.map((item) => {
+    const rootW = latinTextWidthEm(item.root) * CHORD_NAME_FONT_SIZE;
+    const suffixW = item.suffix ? latinTextWidthEm(item.suffix) * CHORD_NAME_FONT_SIZE * Math.SQRT1_2 : 0;
+    const top = item.suffix ? Math.min(rowChordY - rootCapH, rowChordY - LINE_SPACING * 1.2 - suffixCapH) : rowChordY - rootCapH;
+    return { left: item.x, right: item.x + rootW + suffixW, top };
+  });
 }
 
 // src/music-rendering/renderer/staffRow/dynamics.ts
@@ -72805,99 +72969,6 @@ function renderTempoMark(input) {
   }, tempoChildren, key);
 }
 
-// src/music-rendering/renderer/staffRow/measureNotes/rehearsalMarks.ts
-var REHEARSAL_MARK_CHAR_WIDTHS = {
-  "'": 0.1848,
-  A: 0.7267,
-  B: 0.6651,
-  C: 0.6651,
-  D: 0.7267,
-  E: 0.611,
-  F: 0.556,
-  G: 0.722,
-  H: 0.722,
-  I: 0.333,
-  J: 0.389,
-  K: 0.722,
-  L: 0.611,
-  M: 0.889,
-  N: 0.722,
-  O: 0.722,
-  P: 0.556,
-  Q: 0.722,
-  R: 0.667,
-  S: 0.556,
-  T: 0.611,
-  U: 0.722,
-  V: 0.722,
-  W: 0.944,
-  X: 0.722,
-  Y: 0.722,
-  Z: 0.611
-};
-var REHEARSAL_MARK_CAP_HEIGHT_EM = 0.6772;
-function rehearsalMarkTextWidth(text) {
-  let width = 0;
-  for (const char of text) {
-    const factor = REHEARSAL_MARK_CHAR_WIDTHS[char] ?? 0.722;
-    width += REHEARSAL_MARK_FONT_SIZE * factor;
-  }
-  return width;
-}
-function rehearsalMarkBoxMetrics(text) {
-  return {
-    width: rehearsalMarkTextWidth(text) + REHEARSAL_MARK_PAD_X * 2,
-    height: REHEARSAL_MARK_FONT_SIZE * REHEARSAL_MARK_CAP_HEIGHT_EM + REHEARSAL_MARK_PAD * 2
-  };
-}
-function rehearsalMarkVerticalMetrics(text, topY, boxBottomY) {
-  const box = rehearsalMarkBoxMetrics(text);
-  const boxBottom = boxBottomY ?? topY - LINE_SPACING;
-  const boxTop = boxBottom - box.height;
-  return {
-    boxTop,
-    textY: boxBottom - REHEARSAL_MARK_PAD
-  };
-}
-function rehearsalMarkAnchorX(input) {
-  const {
-    mi,
-    ni,
-    firstSpacingEventIndex,
-    noteX,
-    measureStartX,
-    systemStartTextX
-  } = input;
-  if (ni !== firstSpacingEventIndex)
-    return noteX;
-  return mi === 0 && systemStartTextX != null ? systemStartTextX : measureStartX;
-}
-function renderRehearsalMark(input) {
-  const { text, noteX, textStartX, topY, boxBottomY, keySuffix } = input;
-  const box = rehearsalMarkBoxMetrics(text);
-  const { boxTop, textY } = boxBottomY == null ? rehearsalMarkVerticalMetrics(text, topY) : rehearsalMarkVerticalMetrics(text, topY, boxBottomY);
-  const textX = textStartX ?? noteX;
-  const boxX = textX - REHEARSAL_MARK_PAD_X;
-  return [
-    el("rect", {
-      x: boxX,
-      y: boxTop,
-      width: box.width,
-      height: box.height,
-      className: "ll",
-      "data-lily-element": "rehearsal-mark-box"
-    }, undefined, `mark-r${keySuffix}`),
-    el("text", {
-      x: textX,
-      y: textY,
-      fontSize: REHEARSAL_MARK_FONT_SIZE,
-      fontFamily: "serif",
-      textAnchor: "start",
-      "data-lily-element": "rehearsal-mark"
-    }, text, `mark-t${keySuffix}`)
-  ];
-}
-
 // src/music-rendering/renderer/staffRow/grace.ts
 function renderGraceNote(opts) {
   const { note, measure: measure2, ni, mi, nx, ny, step, yOffset, keySet, measureAcc, inBeam, selectedEventIds, musicGlyphMode = "font", fontFamily } = opts;
@@ -76207,6 +76278,7 @@ function buildSystemVerticalSkylinePlan(input) {
   const belowSkyline = new Skyline2("below", btmY);
   const markCandidates = [];
   const measureBounds = [];
+  const chordNameItems = [];
   let cursor2 = createMeasureCursor({
     mx: cx,
     noteIdx: props.staffSystemNoteOffset ?? system.noteOffset,
@@ -76261,6 +76333,22 @@ function buildSystemVerticalSkylinePlan(input) {
       leftX: cursor2.mx,
       rightX: mi === renderMeasures.length - 1 ? staffEndX : cursor2.mx + plan.mw
     });
+    if (props.chordSymbols?.length) {
+      collectMeasureChordNames({
+        chordSymbols: props.chordSymbols,
+        chordMeasureQN: cursor2.chordMeasureQN,
+        totalDur: plan.totalDur,
+        measure: measure2,
+        noteXs: plan.noteXs,
+        measureRightX: mi === renderMeasures.length - 1 ? staffEndX : cursor2.mx + plan.mw,
+        noteIdx: cursor2.noteIdx,
+        yOffset,
+        mi,
+        topY,
+        stepForPitch: plan.stepForPitch,
+        chordRenderItems: chordNameItems
+      });
+    }
     const firstSpacingEventIndex = measure2.findIndex((entry) => !isStructuralMarkerNote(entry) && !entry.isGrace && entry.duration > 0);
     for (let ni = 0;ni < measure2.length; ni++) {
       const note = measure2[ni];
@@ -76380,6 +76468,9 @@ function buildSystemVerticalSkylinePlan(input) {
       aboveSkyline.raise(plan.labelBox.left, plan.labelBox.right, plan.labelBox.top - VOLTA_SKYLINE_CLEARANCE);
     }
   }
+  for (const box of chordNameSkylineBoxes(chordNameItems)) {
+    aboveSkyline.raise(box.left, box.right, box.top);
+  }
   let rehearsalMarkBoxBottomY;
   if (markCandidates.length) {
     rehearsalMarkBoxBottomY = topY - LINE_SPACING;
@@ -76480,7 +76571,7 @@ function renderSystemLayout(props) {
   });
   const contentInset = system.isFirst && firstSystemContentInset && firstSystemContentInset > 0 ? firstSystemContentInset : 0;
   const cx = headerPlan.contentStartX + contentInset;
-  const rehearsalMarkTextStartX = LEFT_MARGIN + hdrW + indentX + contentInset + LINE_SPACING * 1.5;
+  const rehearsalMarkTextStartX = CLEF_X + CLEF_GLYPH_W + LINE_SPACING * 0.65 + indentX + REHEARSAL_MARK_PAD_X;
   const systemShortestDur = systemSpacingReferenceDur(system.measures);
   const belowSky = new Skyline2("below", btmY);
   const dynEvents = [];
@@ -78257,7 +78348,7 @@ function computeScoreVerticalLayout(opts) {
   const hasFirstSystemTempoMark = (activeTune.tempoMarks ?? []).some((mark) => firstSystemNoteIndices.has(mark.noteIndex));
   const hasNonFirstSystemTempoMark = (activeTune.tempoMarks ?? []).some((mark) => !firstSystemNoteIndices.has(mark.noteIndex));
   const computeContentExtents = (entries, includeTempoMarks, opts2 = {}) => {
-    const includeRehearsalMarks = opts2.includeRehearsalMarks ?? true;
+    const includeRehearsalMarks = (opts2.includeRehearsalMarks ?? true) && (!opts2.markRequiresChordStack || hasChordSymbols);
     const groupStemUp = opts2.groupStemUp;
     const useRenderedStemExtents = showTitle;
     let topContentY2 = STAFF_TOP - chordNameHeadroom;
@@ -78289,6 +78380,10 @@ function computeScoreVerticalLayout(opts) {
           obstacleTopY = Math.min(obstacleTopY, chordTopY - stemH);
         }
         markBoxBottomY = Math.min(markBoxBottomY, obstacleTopY - LINE_SPACING * 0.6);
+      }
+      if (hasChordSymbols) {
+        const chordRowTopY = STAFF_TOP - SCORE_VERTICAL_SPACING.chordNameStaffGapPx - CHORD_NAME_FONT_SIZE * LATIN_CAP_HEIGHT_EM;
+        markBoxBottomY = Math.min(markBoxBottomY, chordRowTopY - LINE_SPACING * 0.6);
       }
       topContentY2 = Math.min(topContentY2, markBoxBottomY - maxMarkHeight);
     }
@@ -78429,7 +78524,8 @@ function computeScoreVerticalLayout(opts) {
   };
   const allExtents = computeContentExtents(realNoteEntries, hasNonFirstSystemTempoMark);
   const interSystemExtents = computeContentExtents(realNoteEntries, hasNonFirstSystemTempoMark, {
-    includeRehearsalMarks: false
+    includeRehearsalMarks: true,
+    markRequiresChordStack: true
   });
   const firstSystemExtents = computeContentExtents(firstSystemRealNoteEntries, hasFirstSystemTempoMark);
   const { topContentY, contentBottom } = allExtents;
@@ -84771,7 +84867,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.5.0",
+  version: "0.6.0",
   type: "module",
   exports: {
     ".": {
