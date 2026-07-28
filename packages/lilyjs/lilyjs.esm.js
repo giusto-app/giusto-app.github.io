@@ -80019,7 +80019,6 @@ function renderScoreToSvgModel(options) {
     contentWidth,
     firstSystemContentInset: resolvedFirstSystemContentInset,
     pageContentHeight,
-    physicalContentWidth,
     globalStaffSize: effectiveGlobalStaffSize,
     staffSizeScale,
     allMeasures,
@@ -80236,7 +80235,7 @@ function renderScoreToSvgModel(options) {
       "data-lily-staff-size-scale": staffSizeScale
     }, labeledEls)
   ];
-  const outputContentWidth = deferGlobalStaffSizeScale ? contentWidth + staffLabelGutter : physicalContentWidth + staffLabelGutter * staffSizeScale;
+  const outputContentWidth = deferGlobalStaffSizeScale ? contentWidth + staffLabelGutter : contentWidth * staffSizeScale + staffLabelGutter * staffSizeScale;
   const finalHeight = deferGlobalStaffSizeScale ? totalH : totalH * staffSizeScale;
   const effectiveLayout = layout ?? (typeof width === "string" ? "fit" : "fixed");
   const doc = assembleScoreSvgDocument({
@@ -84924,7 +84923,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.7.0",
+  version: "0.7.1",
   type: "module",
   exports: {
     ".": {
