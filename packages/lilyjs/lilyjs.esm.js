@@ -7185,21 +7185,23 @@ function transformMusic(node, ctx, variables) {
     }
     case "staffContext": {
       const staff2 = node;
-      const bodyResult = transformMusic(staff2.body, absoluteContext(), variables);
+      const bodyResult = transformMusic(staff2.body, currentCtx, variables);
       return {
         node: { ...staff2, body: bodyResult.node },
-        ctx: currentCtx
+        ctx: bodyResult.ctx
       };
     }
     case "staffGroupContext": {
       const sg = node;
+      let groupCtx = currentCtx;
       const transformedStaves = sg.staves.map((stave) => {
-        const result = transformMusic(stave, absoluteContext(), variables);
+        const result = transformMusic(stave, groupCtx, variables);
+        groupCtx = result.ctx;
         return result.node;
       });
       return {
         node: { ...sg, staves: transformedStaves },
-        ctx: currentCtx
+        ctx: groupCtx
       };
     }
     case "chordMode":
@@ -10243,14 +10245,24 @@ function buildEngravingEventStream(context) {
 }
 
 // src/music-input/lilypond/phases/staffGroupExtraction.ts
-function extractStaffGroupContext(node) {
-  if (node.type === "staffGroupContext")
-    return node;
-  if (node.type === "sequential" && Array.isArray(node.elements) && node.elements.length === 1) {
-    const sole = node.elements[0];
-    if (sole.type === "staffGroupContext")
-      return sole;
+function unwrapStructuralMusic(node) {
+  let current2 = node;
+  for (;; ) {
+    if (current2.type === "sequential" && Array.isArray(current2.elements) && current2.elements.length === 1) {
+      current2 = current2.elements[0];
+      continue;
+    }
+    if ((current2.type === "relative" || current2.type === "fixed") && current2.body) {
+      current2 = current2.body;
+      continue;
+    }
+    return current2;
   }
+}
+function extractStaffGroupContext(node) {
+  const unwrapped = unwrapStructuralMusic(node);
+  if (unwrapped.type === "staffGroupContext")
+    return unwrapped;
   return null;
 }
 function collectVoiceNames(node, out) {
@@ -10267,10 +10279,7 @@ function attachLyricToStaff(staff2, lyric) {
   return staff2.type === "simultaneous" ? { ...staff2, elements: [...staff2.elements, lyric] } : { type: "simultaneous", elements: [staff2, lyric], loc: staff2.loc };
 }
 function extractBareStaffGroupContext(node) {
-  let top = node;
-  if (top.type === "sequential" && Array.isArray(top.elements) && top.elements.length === 1) {
-    top = top.elements[0];
-  }
+  const top = unwrapStructuralMusic(node);
   if (top.type !== "simultaneous" || !Array.isArray(top.elements))
     return null;
   const els = top.elements;
@@ -10307,16 +10316,13 @@ function extractBareStaffGroupContext(node) {
     return null;
   return {
     type: "staffGroupContext",
-    groupType: "StaffGroup",
+    groupType: "ImplicitStaffGroup",
     staves,
     loc: node.loc
   };
 }
 function extractMixedStaffGroupContext(node) {
-  let top = node;
-  if (top.type === "sequential" && Array.isArray(top.elements) && top.elements.length === 1) {
-    top = top.elements[0];
-  }
+  const top = unwrapStructuralMusic(node);
   if (top.type !== "simultaneous" || !Array.isArray(top.elements))
     return null;
   const els = top.elements;
@@ -12824,13 +12830,8 @@ function polyphonicColumnDurations(measure2) {
   }
   return durations.length ? durations : null;
 }
-function applyTerminalShortTail(events2, shortestDur, active) {
-  if (!active || !events2.length)
-    return events2;
-  const last = events2[events2.length - 1];
-  if (!(last.duration > shortestDur))
-    return events2;
-  return [...events2.slice(0, -1), { ...last, duration: shortestDur }];
+function applyTerminalShortTail(events2, _shortestDur, _active) {
+  return events2;
 }
 function measureWidthForSpacingEvents(realEventsIn, shortestDur, opts) {
   let realEvents = realEventsIn;
@@ -67508,6 +67509,28 @@ var BravuraMetadata = {
   }
 };
 
+// src/music-rendering/textFontFaces.ts
+var SCHOLA_FAMILY = "TeX Gyre Schola";
+var ROMAN_TEXT_STACK = `"${SCHOLA_FAMILY}", serif`;
+var SCHOLA_FACES = [
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Regular.woff2" },
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Bold.woff2", weight: "bold" },
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Italic.woff2", style: "italic" },
+  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-BoldItalic.woff2", weight: "bold", style: "italic" }
+];
+var SCHOLA_FILES = SCHOLA_FACES.map((f) => f.file);
+
+// src/music-rendering/smufl/textFontForMusicFont.ts
+function textFontForMusicFont(musicFont, context = "general") {
+  if (musicFont === "Petaluma") {
+    return "Petaluma Script, serif";
+  }
+  if (context === "chord-symbol") {
+    return "sans-serif";
+  }
+  return ROMAN_TEXT_STACK;
+}
+
 // src/music-rendering/smufl/SmuflFontRegistry.ts
 var FONT_DEFS = {
   Bravura: {
@@ -67586,7 +67609,11 @@ function buildRuntime(name) {
       return tuple ? tupleToPoint(tuple) : undefined;
     },
     textFontFor(context) {
-      return def.textFontByContext?.[context] ?? def.textFont;
+      const explicit = def.textFontByContext?.[context];
+      if (explicit)
+        return explicit;
+      const resolved = textFontForMusicFont(name, context);
+      return resolved || def.textFont;
     }
   };
 }
@@ -72206,28 +72233,6 @@ function lilyElementAttrs(element, mi, ni, eventId2, suffix) {
   };
 }
 
-// src/music-rendering/textFontFaces.ts
-var SCHOLA_FAMILY = "TeX Gyre Schola";
-var ROMAN_TEXT_STACK = `"${SCHOLA_FAMILY}", serif`;
-var SCHOLA_FACES = [
-  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Regular.woff2" },
-  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Bold.woff2", weight: "bold" },
-  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Italic.woff2", style: "italic" },
-  { family: SCHOLA_FAMILY, file: "TeXGyreSchola-BoldItalic.woff2", weight: "bold", style: "italic" }
-];
-var SCHOLA_FILES = SCHOLA_FACES.map((f) => f.file);
-
-// src/music-rendering/smufl/textFontForMusicFont.ts
-function textFontForMusicFont(musicFont, context = "general") {
-  if (musicFont === "Petaluma") {
-    return "Petaluma Script, serif";
-  }
-  if (context === "chord-symbol") {
-    return "sans-serif";
-  }
-  return ROMAN_TEXT_STACK;
-}
-
 // src/music-rendering/renderer/staffRow/measureNotes/grobs.ts
 function appendMeasureNoteObject(els, node, objects) {
   els.push(node);
@@ -75486,6 +75491,15 @@ function solveSystemColumnChain(input) {
       inverseCompressStrength: bar.inverseCompressStrength
     });
   }
+  if (debugFlag("LILYJS_CHAIN_DUMP")) {
+    const f = (v) => (v / LINE_SPACING).toFixed(2);
+    console.error(`
+=== chain: ${measures.length} measures, target ${f(targetW)}ss, ragged=${isRagged}`);
+    measures.forEach((m, mi) => {
+      const seam = seams[mi];
+      console.error(`  m${mi + 1}: baseW ${f(m.baseW)}ss  minW ${f(m.minW)}ss  invStretch ${m.inverseStretch.toFixed(2)}` + `   | seam${mi + 1}: minW ${f(seam.minW)}ss spent ${f(Math.min(seam.alreadySpentW ?? 0, 1e5))}ss pos ${seam.position}`);
+    });
+  }
   if (isRagged) {
     const measureWs2 = [];
     const measureScales2 = [];
@@ -75509,6 +75523,14 @@ function solveSystemColumnChain(input) {
     measureWs.push(measureW);
     measureScales.push(measureW / Math.max(measures[mi].baseW, 1));
     seamWs.push(solution.lengthsSs[mi * 2 + 1] * LINE_SPACING);
+  }
+  if (debugFlag("LILYJS_CHAIN_DUMP")) {
+    const f = (v) => (v / LINE_SPACING).toFixed(2);
+    console.error(`  solved force ${solution.force?.toFixed(4)}`);
+    measureWs.forEach((w, mi) => {
+      const base = measures[mi].baseW;
+      console.error(`   m${mi + 1}: baseW ${f(base)} -> solved ${f(w)}ss  (+${f(w - base)}ss, x${(w / Math.max(base, 1)).toFixed(3)})` + `   seam ${f(seamWs[mi])}ss`);
+    });
   }
   return { measureWs, measureScales, seamWs, force: solution.force, fellBack: false };
 }
@@ -76786,6 +76808,18 @@ function isSinglePagePageBreaking(mode) {
   return mode === "one-page" || mode === "one-line" || mode === "one-line-auto-height";
 }
 
+// src/music-rendering/layout/paperScoreSizing.ts
+function paperScoreEngravingWidth(contentWidth) {
+  return Math.round(contentWidth * LINE_SPACING / CANONICAL_STAFF_SPACE_PX + LEFT_MARGIN);
+}
+function paperDefaultFirstIndentSs() {
+  const lilyPondDefaultIndentMm = 15;
+  return lilyPondDefaultIndentMm * 96 / 25.4 / CANONICAL_STAFF_SPACE_PX;
+}
+function paperFirstSystemContentInset(pageBreaking) {
+  return pageBreaking === "one-page" ? LINE_SPACING : undefined;
+}
+
 // src/music-rendering/renderer/renderModel.ts
 var STEP_SEMITONES2 = {
   C: 0,
@@ -77944,8 +77978,10 @@ function buildScoreSystemPlan(input) {
   const staffSizeScale = globalStaffSizeScale(globalStaffSize);
   let physicalContentWidth = computeContentWidthFromPaper(activeTune.paperWidthMm, activeTune.leftMarginMm, activeTune.rightMarginMm, activeTune.lilypondVersion, "source-version");
   const physicalPageContentHeight = computeContentHeightFromPaper(activeTune.paperHeightMm, activeTune.topMarginMm, activeTune.bottomMarginMm, activeTune.lilypondVersion, "source-version");
-  let contentWidth = Number.isFinite(contentWidthOverride) && (contentWidthOverride ?? 0) > 0 ? Number(contentWidthOverride) : physicalContentWidth / staffSizeScale;
+  const rawContentWidth = physicalContentWidth / staffSizeScale;
+  let contentWidth = Number.isFinite(contentWidthOverride) && (contentWidthOverride ?? 0) > 0 ? Number(contentWidthOverride) : paperScoreEngravingWidth(rawContentWidth);
   let lineBreakContentWidth = Number.isFinite(lineBreakContentWidthOverride) && (lineBreakContentWidthOverride ?? 0) > 0 ? Number(lineBreakContentWidthOverride) : contentWidth;
+  const resolvedFirstSystemContentInset = firstSystemContentInset ?? paperFirstSystemContentInset(activeTune.pageBreaking);
   const pageContentHeight = physicalPageContentHeight / staffSizeScale;
   const effectivePartial = score2 ? activeTune.partialDuration : partialDuration ?? activeTune.partialDuration;
   const groupedMeasures = groupMeasures(activeNotes, activeTune.timeSig, effectivePartial, engravingEvents2);
@@ -78001,7 +78037,7 @@ function buildScoreSystemPlan(input) {
     baseShortestDurationQN: activeTune.baseShortestDurationQN,
     ...perSystemPenalty != null ? { perSystemPenalty } : {}
   };
-  const buildSystems = (traceOut) => computeLineBreaks(measures, activeTune.key, measureRange ? undefined : activeTune.systemBreaks, measureRange ? undefined : activeTune.repeatRegions, measureRange ? undefined : activeTune.voltaRegions, firstIndent ?? activeTune.firstIndent, measureBarlines, measureKeySigs, lineBreakContentWidth, firstSystemContentInset, traceOut, lineBreakOptions);
+  const buildSystems = (traceOut) => computeLineBreaks(measures, activeTune.key, measureRange ? undefined : activeTune.systemBreaks, measureRange ? undefined : activeTune.repeatRegions, measureRange ? undefined : activeTune.voltaRegions, firstIndent ?? activeTune.firstIndent, measureBarlines, measureKeySigs, lineBreakContentWidth, resolvedFirstSystemContentInset, traceOut, lineBreakOptions);
   let systems;
   let lineBreakDemerits;
   if (precomputedSystems) {
@@ -78112,6 +78148,7 @@ function buildScoreSystemPlan(input) {
     autoBeamByNoteIndex,
     activeFont,
     contentWidth,
+    firstSystemContentInset: resolvedFirstSystemContentInset,
     pageContentHeight,
     physicalContentWidth,
     physicalPageContentHeight,
@@ -79980,6 +80017,7 @@ function renderScoreToSvgModel(options) {
     inlineClefChanges,
     activeFont,
     contentWidth,
+    firstSystemContentInset: resolvedFirstSystemContentInset,
     pageContentHeight,
     physicalContentWidth,
     globalStaffSize: effectiveGlobalStaffSize,
@@ -80127,7 +80165,7 @@ function renderScoreToSvgModel(options) {
       raggedLast: raggedLast ?? activeTune.raggedLast,
       raggedRight: effectiveRaggedRight,
       firstIndent: effectiveFirstIndent ?? activeTune.firstIndent,
-      firstSystemContentInset,
+      firstSystemContentInset: resolvedFirstSystemContentInset,
       fontFamily: activeFont,
       chordSymbols,
       percentRepeatSpans,
@@ -80920,7 +80958,8 @@ function renderPianoGrandStaffFrame(input) {
     debugBeatLines = false,
     braceStaffRange,
     staffSystemYOffsets,
-    firstIndentPx = 0
+    firstIndentPx = 0,
+    drawBrace = true
   } = input;
   const barlineStrokeWidth = fontInfo.engravingPx("thinBarlineThickness", 0.16);
   const frameElements = [];
@@ -80967,18 +81006,21 @@ function renderPianoGrandStaffFrame(input) {
       "data-lily-grob-type": "SpanBar",
       "data-lily-grob-parent-id": `grob:SpanBar:normal:${systemIndex}`,
       "data-lily-grob-piece": "normal-span"
-    }), el("text", {
-      x: brace.braceX,
-      y: brace.braceY,
-      fontSize: brace.braceFontSize,
-      fontFamily,
-      textAnchor: "start",
-      dominantBaseline: "auto",
-      fill: "currentColor",
-      "data-lily-element": "brace",
-      "data-lily-grob-type": "SystemStartBrace",
-      "data-lily-grob-parent-id": `grob:SystemStartBrace:${systemIndex}`
-    }, BRACE_CHAR));
+    }));
+    if (drawBrace) {
+      frameElements.push(el("text", {
+        x: brace.braceX,
+        y: brace.braceY,
+        fontSize: brace.braceFontSize,
+        fontFamily,
+        textAnchor: "start",
+        dominantBaseline: "auto",
+        fill: "currentColor",
+        "data-lily-element": "brace",
+        "data-lily-grob-type": "SystemStartBrace",
+        "data-lily-grob-parent-id": `grob:SystemStartBrace:${systemIndex}`
+      }, BRACE_CHAR));
+    }
   }
   return [
     ...frameElements,
@@ -81663,7 +81705,8 @@ function paginateStaffGroup(input) {
     deferGlobalStaffSizeScale,
     staffSizeScale,
     globalStaffSize,
-    contentWidth
+    contentWidth,
+    drawBrace = true
   } = input;
   if (pageHeightBudget == null || !Number.isFinite(pageHeightBudget) || pageHeightBudget <= 0) {
     return;
@@ -81784,7 +81827,8 @@ function paginateStaffGroup(input) {
     fontInfo,
     fontFamily,
     firstSystemContentInset,
-    debugBeatLines
+    debugBeatLines,
+    drawBrace
   });
   const systemIndexOfNode = (node) => {
     if (!("props" in node) || !node.props)
@@ -81904,6 +81948,13 @@ function braceStaffRangeFromContextTree(contextTree, staffCount) {
   if (group.start === 0 && group.end >= staffCount)
     return;
   return { start: group.start, end: group.end };
+}
+function drawsSystemStartBrace(contextTree) {
+  if (!contextTree)
+    return true;
+  if (contextTree.nestedGroups?.length)
+    return true;
+  return contextTree.groupType !== "ImplicitStaffGroup";
 }
 function renderStaffGroupContextToSvgModel(opts) {
   const {
@@ -82121,6 +82172,7 @@ function renderStaffGroupContextToSvgModel(opts) {
     debugBeatLines,
     deferGlobalStaffSizeScale,
     staffSizeScale,
+    drawBrace: drawsSystemStartBrace(contextTree),
     globalStaffSize,
     contentWidth
   });
@@ -82140,7 +82192,8 @@ function renderStaffGroupContextToSvgModel(opts) {
       debugBeatLines,
       braceStaffRange: braceStaffRangeFromContextTree(contextTree, yOffsets.length),
       staffSystemYOffsets: finalPass.staffSystemYOffsets,
-      firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING
+      firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING,
+      drawBrace: drawsSystemStartBrace(contextTree)
     }),
     ...pedalElements,
     ...renderStackedStaffGroupContent({ staffDocs: validDocs, yOffsets })
@@ -82226,6 +82279,7 @@ function renderContextTreeToSvgModel(tree, options = {}) {
     case "PianoStaff":
     case "GrandStaff":
     case "StaffGroup":
+    case "ImplicitStaffGroup":
       return renderStaffGroupContext(tree, options);
   }
 }
@@ -82423,6 +82477,8 @@ function systemStartDelimiterFor(groupType) {
       return "SystemStartBrace";
     case "StaffGroup":
       return "SystemStartBracket";
+    case "ImplicitStaffGroup":
+      return "SystemStartBar";
   }
 }
 function scoreChildrenFromTune(tune, events2) {
@@ -82549,8 +82605,9 @@ function buildScoreContextTree(input) {
   };
 }
 function normalizeStaffGroupKind(groupType) {
-  if (groupType === "GrandStaff" || groupType === "StaffGroup")
+  if (groupType === "GrandStaff" || groupType === "StaffGroup" || groupType === "ImplicitStaffGroup") {
     return groupType;
+  }
   return "PianoStaff";
 }
 function buildStaffGroupContextTree(input) {
@@ -84867,7 +84924,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.6.0",
+  version: "0.7.0",
   type: "module",
   exports: {
     ".": {
@@ -85735,7 +85792,7 @@ function markupSystemStaffTopY(params) {
 
 // src/music-rendering/renderer/document/scoreSizing.ts
 function documentScoreContentWidth(contentWidth) {
-  return Math.round(contentWidth * LINE_SPACING / CANONICAL_STAFF_SPACE_PX + LEFT_MARGIN);
+  return paperScoreEngravingWidth(contentWidth);
 }
 function documentScoreLineBreakContentWidth(contentWidth, pageBreaking) {
   return pageBreaking === "one-page" ? documentScoreContentWidth(contentWidth) : contentWidth;
@@ -85754,8 +85811,7 @@ function fullPageScoreFillExtraPx(documentInfo) {
   return Math.max(0, lastBottomRod - LINE_SPACING * 0.45);
 }
 function defaultDocumentFirstIndentStaffSpaces() {
-  const lilyPondDefaultIndentMm = 15;
-  return lilyPondDefaultIndentMm * 96 / 25.4 / CANONICAL_STAFF_SPACE_PX;
+  return paperDefaultFirstIndentSs();
 }
 function documentInfoWithDefaultFirstIndent(documentInfo) {
   if (!documentInfo || documentInfo.firstIndent !== undefined)
