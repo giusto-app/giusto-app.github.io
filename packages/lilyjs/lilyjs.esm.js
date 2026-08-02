@@ -473,6 +473,7 @@ function keySignatureAlterForStep(step, info) {
 class KeySignature {
   type;
   count;
+  name;
   constructor(typeOrName, count) {
     if (count !== undefined && (typeOrName === "natural" || typeOrName === "sharp" || typeOrName === "flat")) {
       this.type = typeOrName;
@@ -481,6 +482,9 @@ class KeySignature {
       const info = keySignatureInfoFromName(typeOrName);
       this.type = info.type;
       this.count = info.count;
+      const trimmed = String(typeOrName).trim();
+      if (trimmed)
+        this.name = trimmed;
     }
   }
 }
@@ -12638,11 +12642,13 @@ function flagGlyph(d, up) {
   return null;
 }
 // src/music-rendering/engraving/fingering.ts
+var FINGERING_GLYPH_BELOW_ANCHOR = LINE_SPACING * 0.594;
+var FINGERING_GLYPH_INK_ABOVE_ANCHOR = LINE_SPACING * 0.944;
 function fingeringY(ny, _stemUp, fingeringBelow, topY, btmY, fontSize) {
   const placeBelow = fingeringBelow === true;
   const capH = Math.round(fontSize * 0.75);
   const minGap = Math.round(LINE_SPACING * 0.5);
-  return placeBelow ? Math.max(ny + LINE_SPACING + capH, btmY + minGap + capH) : Math.min(ny - LINE_SPACING, topY - LINE_SPACING);
+  return placeBelow ? Math.max(ny + LINE_SPACING + capH, btmY + minGap + capH) : Math.min(ny - LINE_SPACING - FINGERING_GLYPH_BELOW_ANCHOR, topY - LINE_SPACING - FINGERING_GLYPH_BELOW_ANCHOR);
 }
 // src/music-rendering/engraving/keySig.ts
 var SHARP_STEPS = [8, 5, 9, 6, 3, 7, 4];
@@ -16381,8 +16387,7 @@ function timeSignatureFromString(timeSig2) {
   return new TimeSignature(beats ?? 4, beatUnit ?? 4);
 }
 function keySignatureFromString(key) {
-  const info = keySignatureInfoFromName(key);
-  return new KeySignature(info.type, info.count);
+  return new KeySignature(key);
 }
 var SUPPORTED_CLEF_NAMES = new Set([
   "treble",
@@ -70462,13 +70467,7 @@ function collectMeasureChordNames(opts) {
     const beatNote = measure2[bestNi];
     const beatNoteY = stepY(stepForPitch(beatNote.noteName, beatNote.octave, noteIdx + bestNi)) + yOffset;
     const beatTopY = beatNote.chordNotes ? Math.min(beatNoteY, ...beatNote.chordNotes.map((cn) => stepY(stepForPitch(cn.noteName, cn.octave, noteIdx + bestNi)) + yOffset)) : beatNoteY;
-    let nameY = Math.min(CHORD_Y, beatTopY - SCORE_VERTICAL_SPACING.chordNameStaffGapPx);
-    if (beatNote.fingering != null && beatNote.fingeringBelow !== true) {
-      const fingeringSize = musicGlyphFontSizes(undefined).music * FINGERING_MUSIC_SCALE * (beatNote.musicScale ?? 1);
-      const digitBaselineY = fingeringY(beatNoteY, true, false, topY, topY + LINE_SPACING * 4, fingeringSize);
-      const digitTopY = digitBaselineY - LINE_SPACING * 1.147;
-      nameY = Math.min(nameY, digitTopY - LINE_SPACING * 0.5);
-    }
+    const nameY = Math.min(CHORD_Y, beatTopY - SCORE_VERTICAL_SPACING.chordNameStaffGapPx);
     const m = sym.text.match(/^([A-G][#b]?)(.*)$/);
     const root = m ? m[1] : sym.text;
     const suffix = m ? m[2] : "";
@@ -72252,6 +72251,7 @@ function buildRenderedSlurTrace(input) {
 }
 
 // src/music-rendering/renderer/staffRow/slurSlots.ts
+var SLUR_STEM_SIDE_CLEARANCE_SS = 0.43;
 function voiceKeyOfEventId(eventId2) {
   if (!eventId2)
     return null;
@@ -72302,8 +72302,10 @@ function closeSlurSlot(slot, ctx) {
   const curveContext = slot.curveContext;
   const startBeamOuterY = slot.stemUp === true ? slot.beamOuterY ?? undefined : undefined;
   const endBeamOuterY = stemUp && noteBeamOuterY.has(ni) ? noteBeamOuterY.get(ni) : undefined;
-  const slurX1 = startBeamOuterY !== undefined && slot.beamStemX !== null ? slot.beamStemX : x1;
-  const slurX2 = endBeamOuterY !== undefined && noteBeamStemX.has(ni) ? noteBeamStemX.get(ni) : x2;
+  const stemSideStartX = slot.stemUp === true && startBeamOuterY === undefined ? x1 + NH_RX + LINE_SPACING * SLUR_STEM_SIDE_CLEARANCE_SS : x1;
+  const stemSideEndX = stemUp && endBeamOuterY === undefined ? x2 + NH_RX + LINE_SPACING * SLUR_STEM_SIDE_CLEARANCE_SS : x2;
+  const slurX1 = startBeamOuterY !== undefined && slot.beamStemX !== null ? slot.beamStemX : stemSideStartX;
+  const slurX2 = endBeamOuterY !== undefined && noteBeamStemX.has(ni) ? noteBeamStemX.get(ni) : stemSideEndX;
   const slurGeom = computeSlurGeometry(slurX1, y1, slurX2, y2, middleY, staffLineYs, undefined, undefined, startBeamOuterY, endBeamOuterY, curveContext, "outside-beam", !!onSlurTrace);
   const { pathD } = slurGeom;
   if (onSlurTrace) {
@@ -75814,6 +75816,14 @@ function renderMeasureNoteText(opts) {
 
 // src/music-rendering/renderer/staffRow/measureNotes/tempoMarks.ts
 var TEMPO_AUGMENTATION_DOT = "";
+var TEMPO_NOTE_GLYPH_BELOW_ORIGIN_SS = {
+  1: 0.5,
+  2: 0.564,
+  4: 0.564,
+  8: 0.564,
+  16: 0.564
+};
+var TEMPO_NOTE_GLYPH_BELOW_ORIGIN_DEFAULT_SS = 0.564;
 var TEMPO_NOTE_GLYPHS = {
   1: "",
   2: "",
@@ -75848,20 +75858,22 @@ function renderTempoMark(input) {
     if (mark.text) {
       tempoChildren.push(el("tspan", { fontStyle: "normal", fontWeight: "normal" }, " ("));
     }
+    const noteBelowOriginSs = TEMPO_NOTE_GLYPH_BELOW_ORIGIN_SS[mark.beatUnitDenominator ?? 4] ?? TEMPO_NOTE_GLYPH_BELOW_ORIGIN_DEFAULT_SS;
+    const noteBaselineLift = Math.round(noteBelowOriginSs * (TEMPO_NOTE_GLYPH_FONT_SIZE / 4) * 1000) / 1000;
     tempoChildren.push(el("tspan", {
+      dy: -noteBaselineLift,
       fontFamily: fontFamily ?? "Bravura",
       fontSize: TEMPO_NOTE_GLYPH_FONT_SIZE,
       fontStyle: "normal",
       fontWeight: "normal"
     }, (TEMPO_NOTE_GLYPHS[mark.beatUnitDenominator ?? 4] ?? "") + TEMPO_AUGMENTATION_DOT.repeat(mark.beatUnitDots ?? 0)));
-    tempoChildren.push(el("tspan", { fontStyle: "normal", fontWeight: "normal" }, mark.text ? ` = ${mark.bpm})` : ` = ${mark.bpm}`));
+    tempoChildren.push(el("tspan", { dy: noteBaselineLift, fontStyle: "normal", fontWeight: "normal" }, mark.text ? ` = ${mark.bpm})` : ` = ${mark.bpm}`));
   }
   return el("text", {
     x: tempoMarkAnchorX({ noteX, ...breakAlignX != null ? { breakAlignX } : {} }),
     y,
     fontSize: TEMPO_TEXT_FONT_SIZE,
-    fontFamily: "'LilyPond Serif', 'TeX Gyre Schola', serif",
-    fontStyle: "italic",
+    fontFamily: ROMAN_TEXT_STACK,
     fontWeight: "bold",
     textAnchor: "start",
     "data-lily-element": "tempo-mark"
@@ -78959,6 +78971,7 @@ function renderSkylineDebugNodes(input) {
 }
 
 // src/music-rendering/renderer/systemLayout/verticalSkylines.ts
+var CHORD_NAME_STAFF_SKYLINE_PADDING_SS = 0.5;
 var NOTEHEAD_HALF_HEIGHT = LINE_SPACING * 0.45;
 var REHEARSAL_MARK_CONTENT_CLEARANCE = LINE_SPACING * 0.6;
 var VOLTA_SKYLINE_CLEARANCE = LINE_SPACING * 0.15;
@@ -79050,6 +79063,7 @@ function buildSystemVerticalSkylinePlan(input) {
   const markCandidates = [];
   const measureBounds = [];
   const chordNameItems = [];
+  let chordRowBaselineY;
   let cursor2 = createMeasureCursor({
     mx: cx,
     noteIdx: props.staffSystemNoteOffset ?? system.noteOffset,
@@ -79213,6 +79227,12 @@ function buildSystemVerticalSkylinePlan(input) {
         yOffset,
         stepForPitch: plan.stepForPitch
       });
+      if (note.fingering != null && note.fingeringBelow !== true) {
+        const size = musicGlyphFontSizes(undefined).music * FINGERING_MUSIC_SCALE * (note.musicScale ?? 1);
+        const anchorY = fingeringY(ny, true, false, topY, btmY, size);
+        const halfW = Math.max(NH_RX, size * 0.3);
+        aboveSkyline.raise(nx - halfW, nx + halfW, anchorY - FINGERING_GLYPH_INK_ABOVE_ANCHOR);
+      }
     }
     cursor2 = advanceMeasureCursor(cursor2, {
       measureWidth: plan.mw,
@@ -79239,6 +79259,18 @@ function buildSystemVerticalSkylinePlan(input) {
       aboveSkyline.raise(plan.labelBox.left, plan.labelBox.right, plan.labelBox.top - VOLTA_SKYLINE_CLEARANCE);
     }
   }
+  if (chordNameItems.length > 0) {
+    const padding = LINE_SPACING * CHORD_NAME_STAFF_SKYLINE_PADDING_SS;
+    let rowBaselineY = Infinity;
+    for (const box of chordNameSkylineBoxes(chordNameItems)) {
+      rowBaselineY = Math.min(rowBaselineY, aboveSkyline.query(box.left, box.right) - padding);
+    }
+    if (Number.isFinite(rowBaselineY)) {
+      chordRowBaselineY = rowBaselineY;
+      for (const item of chordNameItems)
+        item.nameY = rowBaselineY;
+    }
+  }
   for (const box of chordNameSkylineBoxes(chordNameItems)) {
     aboveSkyline.raise(box.left, box.right, box.top);
   }
@@ -79254,6 +79286,7 @@ function buildSystemVerticalSkylinePlan(input) {
     rehearsalMarkBoxBottomYAt = (anchorX) => byAnchorX.get(Math.round(anchorX * 100)) ?? staffPadBottomY;
   }
   return {
+    ...chordRowBaselineY !== undefined ? { chordRowBaselineY } : {},
     rehearsalMarkBoxBottomYAt,
     debugNodes: props.debugAboveStaffSkyline ? [
       ...renderSkylineDebugNodes({
@@ -79494,6 +79527,11 @@ function renderSystemLayout(props) {
   }));
   if (!suppressStaffLocalVoltaBrackets) {
     els.push(...renderVoltaBrackets(system, cx, yOffset, systemShortestDur, topY, scale, staffEndX, measureBounds, isLast, chordSymbols?.some((sym) => sym.placement === "above" && sym.text.length > 0)));
+  }
+  if (verticalSkylinePlan.chordRowBaselineY !== undefined) {
+    for (const item of chordRenderItems) {
+      item.nameY = verticalSkylinePlan.chordRowBaselineY;
+    }
   }
   els.push(...renderChordNames(chordRenderItems, { musicGlyphMode }));
   const trailingHairpin = hpState.open;
@@ -81266,8 +81304,7 @@ function computeHeaderRows(opts) {
         key: "composer-0",
         text: opts.composer,
         align: "right",
-        fontSize: HEADER_COMPOSER_FONT_SIZE,
-        fontStyle: "italic"
+        fontSize: HEADER_COMPOSER_FONT_SIZE
       }]
     });
   } else if (composerRowLeft) {
@@ -81286,8 +81323,7 @@ function computeHeaderRows(opts) {
       cells: [{
         text: opts.composer,
         align: "right",
-        fontSize: HEADER_COMPOSER_FONT_SIZE,
-        fontStyle: "italic"
+        fontSize: HEADER_COMPOSER_FONT_SIZE
       }]
     });
   }
@@ -87932,7 +87968,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.9.0",
+  version: "0.10.0",
   type: "module",
   exports: {
     ".": {
