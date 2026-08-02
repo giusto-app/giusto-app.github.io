@@ -2067,11 +2067,32 @@ function parseTopLevelMarkup(state, cmdToken) {
       }
       const argTarget = markupCommandArgTarget(cmdTok.value);
       while (args.length < argTarget && !isAtEnd(state) && canStartMarkupExpr(state)) {
+        const gapStart = sourceCursor;
+        const gapText = state.source && current(state).pos > gapStart ? state.source.slice(gapStart, current(state).pos).replace(/%\{[\s\S]*?%\}/g, "").replace(/%[^\n]*/g, "") : "";
+        const argTokenKind = current(state).kind;
+        const bareWordArg = argTokenKind === "word" || argTokenKind === "number" || argTokenKind === "note" || argTokenKind === "rest";
         const arg = parseMarkupExpr();
-        if (arg)
-          args.push(arg);
-        else
+        if (!arg)
           break;
+        if (arg.type === "markupText" && bareWordArg && !/[\\{}"#$]/.test(gapText)) {
+          const leadGlue = /(\S+)$/.exec(gapText)?.[1];
+          if (leadGlue) {
+            arg.text = leadGlue + arg.text;
+            if (arg.loc)
+              arg.loc.offset -= leadGlue.length;
+          }
+          if (state.source && current(state).pos > sourceCursor) {
+            const tail = state.source.slice(sourceCursor, current(state).pos);
+            const tailGlue = /^(\S+)/.exec(tail)?.[1];
+            if (tailGlue && !/[\\{}"#$%]/.test(tailGlue)) {
+              arg.text = arg.text + tailGlue;
+              if (arg.loc?.endOffset != null)
+                arg.loc.endOffset += tailGlue.length;
+              sourceCursor += tailGlue.length;
+            }
+          }
+        }
+        args.push(arg);
       }
       return {
         type: "markupCommand",
@@ -2101,7 +2122,7 @@ function canStartMarkupExpr(state) {
   return check(state, "open") || isTextLikeMarkupToken(current(state).kind) || check(state, "command");
 }
 function isTextLikeMarkupToken(kind) {
-  return kind === "string" || kind === "word" || kind === "number" || kind === "scheme_block" || kind === "note" || kind === "rest" || kind === "tie" || kind === "slur_open" || kind === "slur_close" || kind === "beam_open" || kind === "beam_close" || kind === "barcheck" || kind === "slash" || kind === "equals";
+  return kind === "string" || kind === "word" || kind === "number" || kind === "scheme_block" || kind === "scheme_symbol" || kind === "note" || kind === "rest" || kind === "tie" || kind === "slur_open" || kind === "slur_close" || kind === "beam_open" || kind === "beam_close" || kind === "barcheck" || kind === "slash" || kind === "equals";
 }
 function markupCommandArgTarget(command) {
   const declared = LILYPOND_MARKUP_ARITY[command];
@@ -3559,6 +3580,15 @@ function isMarkupBlockNode(node) {
 }
 
 // src/music-input/lilypond/markup-payload/textHelpers.ts
+var MUSIC_GLYPH_CHARS = {
+  "accidentals.sharp": "♯",
+  "accidentals.flat": "♭",
+  "accidentals.natural": "♮",
+  "accidentals.doubleSharp": "\uD834\uDD2A",
+  "accidentals.flatflat": "\uD834\uDD2B",
+  keyboardPedalPed: "",
+  keyboardPedalUp: ""
+};
 function shouldInsertSpace(prev, next) {
   if (!prev || !next)
     return false;
@@ -3666,6 +3696,14 @@ function drawLineTokenFromNode(node) {
   if (width === 0)
     return null;
   return `\\drawline#${width}#0`;
+}
+var TEXT_FONT_SIZE_PT = 11;
+function charCodeFromArg(node) {
+  if (!node || node.type !== "markupText")
+    return null;
+  const raw = node.text.trim().replace(/^#+/, "");
+  const value = /^x[0-9a-fA-F]+$/.test(raw) ? parseInt(raw.slice(1), 16) : /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(value) ? value : null;
 }
 function colorFromNode(node) {
   if (!node)
@@ -3866,6 +3904,7 @@ function styleFromContext(ctx) {
   return {
     ...ctx.bold ? { bold: true } : {},
     ...ctx.italic ? { italic: true } : {},
+    ...ctx.sans ? { sans: true } : {},
     ...ctx.color ? { color: ctx.color } : {},
     ...ctx.code ? { code: true } : {},
     ...ctx.smallCaps ? { smallCaps: true } : {},
@@ -3897,17 +3936,19 @@ function makeLevelScoper(baseLevel) {
   };
 }
 function musicGlyphChar(glyphName) {
-  const glyphs = {
-    keyboardPedalPed: "",
-    keyboardPedalUp: "",
-    "accidentals.sharp": "♯",
-    "accidentals.flat": "♭",
-    "accidentals.natural": "♮",
-    "accidentals.doubleSharp": "\uD834\uDD2A",
-    "accidentals.flatflat": "\uD834\uDD2B"
-  };
-  return glyphs[glyphName];
+  return MUSIC_GLYPH_CHARS[glyphName];
 }
+var TRANSPARENT_RUN_WRAPPERS = [
+  "with-url",
+  "hspace",
+  "override",
+  "box",
+  "pad-to-box",
+  "pad-around",
+  "pad-markup",
+  "pad-x",
+  "whiteout"
+];
 function hasRunUnsupportedCommand(node, extra) {
   if (node.type === "markupText")
     return false;
@@ -3944,7 +3985,11 @@ function hasRunUnsupportedCommand(node, extra) {
     "left-column",
     "vcenter",
     "vspace",
-    "musicglyph"
+    "musicglyph",
+    "sans",
+    "abs-fontsize",
+    "char",
+    "number"
   ]);
   if (!supported.has(node.command) && !extra?.has(node.command))
     return true;
@@ -3958,13 +4003,15 @@ function trimRuns(runs) {
     out.pop();
   return out;
 }
-function normalizeRunsAgainstGlobalStyle(runs, style) {
+function normalizeRunsAgainstGlobalStyle(runs, style, keepUnstyled = false) {
   const normalized = trimRuns(runs).map((run) => {
     const next = { ...run };
     if (style.bold)
       delete next.bold;
     if (style.italic)
       delete next.italic;
+    if (style.sans)
+      delete next.sans;
     if (style.code)
       delete next.code;
     if (style.smallCaps)
@@ -3976,8 +4023,8 @@ function normalizeRunsAgainstGlobalStyle(runs, style) {
     }
     return next;
   });
-  const hasScopedStyle = normalized.some((run) => Boolean(run.bold || run.italic || run.code || run.smallCaps || run.color || run.fontSizeScale != null || run.musicGlyph || run.wordwrapLine || run.wordwrapUnit));
-  return hasScopedStyle ? normalized : undefined;
+  const hasScopedStyle = normalized.some((run) => Boolean(run.bold || run.italic || run.sans || run.code || run.smallCaps || run.color || run.fontSizeScale != null || run.musicGlyph || run.wordwrapLine || run.wordwrapUnit));
+  return hasScopedStyle || keepUnstyled && normalized.length > 0 ? normalized : undefined;
 }
 function synthesizeWordwrapRunsFromText(text) {
   if (text.trim().length === 0)
@@ -3991,7 +4038,10 @@ function synthesizeWordwrapRunsFromText(text) {
   return runs.some((run) => run.wordwrapUnit) ? runs : undefined;
 }
 function extractScopedMarkupRuns(children, style, opts = {}) {
-  const extra = opts.allowBaselineShifts ? new Set(["super", "sub"]) : undefined;
+  const extra = opts.allowBaselineShifts || opts.allowTransparentWrappers ? new Set([
+    ...opts.allowBaselineShifts ? ["super", "sub"] : [],
+    ...opts.allowTransparentWrappers ? TRANSPARENT_RUN_WRAPPERS : []
+  ]) : undefined;
   if (children.some((c) => hasRunUnsupportedCommand(c, extra)))
     return;
   const baseLevel = opts.baseFontSizeLevel ?? 0;
@@ -3999,16 +4049,27 @@ function extractScopedMarkupRuns(children, style, opts = {}) {
   const runs = [];
   let lastChunk = "";
   let concatLeadPending = false;
-  const appendRun = (raw, ctx) => {
+  let suppressNextSpace = false;
+  let lastEndOffset;
+  const appendRun = (raw, ctx, loc) => {
     if (raw.length === 0)
       return;
     const unescaped = unescapeMarkupString(raw);
     const isWordwrapUnit = Boolean(ctx.wordwrap && /\S\s+\S/.test(unescaped.trim()));
-    const text = isWordwrapUnit ? unescaped.trim() : unescaped;
+    let text = isWordwrapUnit ? unescaped.trim() : unescaped;
     if (text.trim().length === 0)
       return;
-    const allowSpace = !ctx.concat || concatLeadPending;
+    const abutsPrevious = loc != null && lastEndOffset != null && loc.offset === lastEndOffset;
+    lastEndOffset = loc ? loc.endOffset ?? loc.offset + raw.length : undefined;
+    const allowSpace = (!ctx.concat || concatLeadPending) && !suppressNextSpace && !abutsPrevious;
+    if (suppressNextSpace) {
+      text = text.replace(/^\s+/, "");
+      const prev = runs[runs.length - 1];
+      if (prev)
+        prev.text = prev.text.replace(/\s+$/, "");
+    }
     concatLeadPending = false;
+    suppressNextSpace = false;
     if (allowSpace && shouldInsertSpace(lastChunk, text)) {
       runs.push({ text: " " });
       lastChunk = " ";
@@ -4017,6 +4078,7 @@ function extractScopedMarkupRuns(children, style, opts = {}) {
     lastChunk = text;
   };
   const appendNewline = () => {
+    lastEndOffset = undefined;
     if (runs.length === 0 || lastChunk.endsWith(`
 `))
       return;
@@ -4044,7 +4106,7 @@ function extractScopedMarkupRuns(children, style, opts = {}) {
   };
   const visit = (node, ctx) => {
     if (node.type === "markupText") {
-      appendRun(node.text, ctx);
+      appendRun(node.text, ctx, node.loc);
       return;
     }
     if (node.type === "markupBlock") {
@@ -4086,6 +4148,22 @@ function extractScopedMarkupRuns(children, style, opts = {}) {
       const next = Number.isFinite(n) ? levelOf(ctx) + n : levelOf(ctx);
       return visitList(contentArgs, withFontSizeLevel(ctx, next));
     }
+    if (cmd === "abs-fontsize") {
+      const numArg = node.args[0];
+      const n = numArg?.type === "markupText" ? parseFloat(numArg.text.replace(/^#/, "")) : NaN;
+      if (!Number.isFinite(n) || n <= 0)
+        return visitList(node.args.slice(1), ctx);
+      const level = 6 * Math.log2(n / TEXT_FONT_SIZE_PT);
+      return visitList(node.args.slice(1), withFontSizeLevel(ctx, level));
+    }
+    if (cmd === "sans")
+      return visitList(node.args, { ...ctx, sans: true });
+    if (cmd === "char") {
+      const code = charCodeFromArg(node.args[0]);
+      if (code != null)
+        appendRun(String.fromCodePoint(code), ctx);
+      return;
+    }
     if (cmd === "raise" || cmd === "lower") {
       const numArg = node.args[0];
       const contentArgs = node.args.slice(1);
@@ -4112,6 +4190,23 @@ function extractScopedMarkupRuns(children, style, opts = {}) {
     }
     if (cmd === "halign")
       return visitList(node.args.slice(1), ctx);
+    if (cmd === "with-url")
+      return visitList(node.args.slice(1), ctx);
+    if (cmd === "hspace") {
+      const numArg = node.args[0];
+      const n = numArg?.type === "markupText" ? parseFloat(numArg.text.replace(/^#/, "")) : NaN;
+      if (Number.isFinite(n) && n <= -0.75)
+        suppressNextSpace = true;
+      return;
+    }
+    if (cmd === "override" || cmd === "box" || cmd === "pad-to-box" || cmd === "pad-around" || cmd === "pad-markup" || cmd === "pad-x" || cmd === "whiteout") {
+      for (const arg of node.args) {
+        if (arg.type === "markupText" && arg.text.trimStart().startsWith("#"))
+          continue;
+        visit(arg, ctx);
+      }
+      return;
+    }
     if (cmd === "with-color") {
       const color = colorFromNode(node.args[0]);
       return visitList(node.args.slice(1), { ...ctx, ...color ? { color } : {} });
@@ -4143,7 +4238,7 @@ function extractScopedMarkupRuns(children, style, opts = {}) {
     visitList(node.args, ctx);
   };
   visitList(children, { fontSizeLevel: baseLevel });
-  return normalizeRunsAgainstGlobalStyle(runs, style);
+  return normalizeRunsAgainstGlobalStyle(runs, style, opts.keepUnstyledRuns);
 }
 
 // src/music-input/lilypond/markup-payload/tokenSink.ts
@@ -4204,7 +4299,7 @@ function createMarkupTokenSink() {
 var SUBSCRIPT_SHIFT_STAFF_SPACES = 2.2 * 0.25;
 function extractMarkupPayload(children, opts = {}) {
   if (!opts.skipGraphical) {
-    const graphicalPayload = extractGraphicalMarkupPayload(children, (nodes) => extractMarkupPayload(nodes, { skipGraphical: true }));
+    const graphicalPayload = extractGraphicalMarkupPayload(children, (nodes) => extractMarkupPayload(nodes, { ...opts, skipGraphical: true }));
     if (graphicalPayload)
       return graphicalPayload;
   }
@@ -4305,23 +4400,13 @@ function extractMarkupPayload(children, opts = {}) {
         visit(overrideTarget.target, { ...ctx, ...overrideTarget.style });
         return;
       }
-      if (cmd === "bold") {
+      if (cmd === "bold" || cmd === "italic") {
         if (node.args.length > 0)
-          appendCommandToken("\\bold");
+          appendCommandToken(`\\${cmd}`);
         for (const arg of node.args) {
           if (arg.type === "markupText" && arg.text.trim().length === 0)
             continue;
-          visit(arg, { ...ctx, bold: true });
-        }
-        return;
-      }
-      if (cmd === "italic") {
-        if (node.args.length > 0)
-          appendCommandToken("\\italic");
-        for (const arg of node.args) {
-          if (arg.type === "markupText" && arg.text.trim().length === 0)
-            continue;
-          visit(arg, { ...ctx, italic: true });
+          visit(arg, { ...ctx, [cmd]: true });
         }
         return;
       }
@@ -4379,14 +4464,9 @@ function extractMarkupPayload(children, opts = {}) {
           visit(arg, { ...ctx, wordwrap: true });
         return;
       }
-      if (cmd === "large") {
+      if (cmd === "large" || cmd === "huge") {
         for (const arg of node.args)
-          visit(arg, { ...ctx, large: true });
-        return;
-      }
-      if (cmd === "huge") {
-        for (const arg of node.args)
-          visit(arg, { ...ctx, huge: true });
+          visit(arg, { ...ctx, [cmd]: true });
         return;
       }
       if (cmd === "larger") {
@@ -4401,10 +4481,30 @@ function extractMarkupPayload(children, opts = {}) {
           visit(arg, { ...ctx, fontSizeScale: scale });
         return;
       }
-      if (cmd === "small") {
-        const scale = (ctx.fontSizeScale ?? 1) * Math.pow(2, -1 / 6);
+      const smallSize = { small: -1, tiny: -2, teeny: -3, normalsize: 0 }[cmd];
+      if (smallSize !== undefined) {
+        const scale = Math.pow(2, smallSize / 6);
         for (const arg of node.args)
           visit(arg, { ...ctx, fontSizeScale: scale });
+        return;
+      }
+      if (cmd === "abs-fontsize") {
+        const numArg = node.args[0];
+        const n = numArg?.type === "markupText" ? parseFloat(numArg.text.replace(/^#/, "")) : NaN;
+        const scale = Number.isFinite(n) && n > 0 ? n / TEXT_FONT_SIZE_PT : ctx.fontSizeScale ?? 1;
+        for (const arg of node.args.slice(1))
+          visit(arg, { ...ctx, fontSizeScale: scale });
+        return;
+      }
+      if (cmd === "char") {
+        const code = charCodeFromArg(node.args[0]);
+        if (code != null)
+          appendText(String.fromCodePoint(code));
+        return;
+      }
+      if (cmd === "with-url") {
+        for (const arg of node.args.slice(1))
+          visit(arg, ctx);
         return;
       }
       if (cmd === "fontsize") {
@@ -4657,18 +4757,12 @@ function extractMarkupPayload(children, opts = {}) {
         appendNewline();
         return;
       }
-      if (cmd === "sub") {
+      if (cmd === "sub" || cmd === "super") {
         if (node.args.length > 0) {
-          recordLoweredInlineShift(SUBSCRIPT_SHIFT_STAFF_SPACES);
-          appendCommandToken("\\sub");
+          if (cmd === "sub")
+            recordLoweredInlineShift(SUBSCRIPT_SHIFT_STAFF_SPACES);
+          appendCommandToken(`\\${cmd}`);
         }
-        for (const arg of node.args)
-          visit(arg, ctx);
-        return;
-      }
-      if (cmd === "super") {
-        if (node.args.length > 0)
-          appendCommandToken("\\super");
         for (const arg of node.args)
           visit(arg, ctx);
         return;
@@ -4699,16 +4793,7 @@ function extractMarkupPayload(children, opts = {}) {
       if (cmd === "musicglyph") {
         const nameArg = node.args[0];
         const glyphName = nameArg?.type === "markupText" ? nameArg.text.replace(/^"|"$/g, "") : "";
-        const unicode = {
-          "accidentals.sharp": "♯",
-          "accidentals.flat": "♭",
-          "accidentals.natural": "♮",
-          "accidentals.doubleSharp": "\uD834\uDD2A",
-          "accidentals.flatflat": "\uD834\uDD2B",
-          keyboardPedalPed: "",
-          keyboardPedalUp: ""
-        };
-        const ch = unicode[glyphName];
+        const ch = MUSIC_GLYPH_CHARS[glyphName];
         if (ch)
           appendText(ch);
         return;
@@ -4763,7 +4848,7 @@ function extractMarkupPayload(children, opts = {}) {
   }
   if (style.smallCaps)
     text = text.replace(/^\\smallCaps\s*/, "");
-  const runs = extractScopedMarkupRuns(children, style) ?? (style.wordwrap ? synthesizeWordwrapRunsFromText(text) : undefined);
+  const runs = extractScopedMarkupRuns(children, style, opts.runOptions) ?? (style.wordwrap ? synthesizeWordwrapRunsFromText(text) : undefined);
   return { text, style, ...runs ? { runs } : {} };
 }
 // src/music-input/lilypond/markup-payload/blocks.ts
@@ -4838,20 +4923,20 @@ function isMarkupListColumn(nodes) {
   return nested.length === 1 && nested[0]?.type === "markupList";
 }
 function wrapStyledLine(styleNode, child) {
-  if (styleNode.command === "with-color" || styleNode.command === "fontsize") {
+  if (styleNode.command === "with-color" || styleNode.command === "fontsize" || styleNode.command === "abs-fontsize") {
     return { ...styleNode, args: [...styleNode.args.slice(0, 1), child] };
   }
   return { ...styleNode, args: [child] };
 }
 function styleContentArgs(node) {
-  if (node.command === "with-color" || node.command === "fontsize")
+  if (node.command === "with-color" || node.command === "fontsize" || node.command === "abs-fontsize")
     return node.args.slice(1);
   return node.args;
 }
 function isBlockStyleCommand(node) {
   if (node.type !== "markupCommand")
     return false;
-  return node.command === "typewriter" || node.command === "italic" || node.command === "bold" || node.command === "large" || node.command === "huge" || node.command === "larger" || node.command === "smaller" || node.command === "with-color" || node.command === "fontsize";
+  return node.command === "typewriter" || node.command === "italic" || node.command === "bold" || node.command === "sans" || node.command === "large" || node.command === "huge" || node.command === "larger" || node.command === "smaller" || node.command === "with-color" || node.command === "fontsize" || node.command === "abs-fontsize";
 }
 function isExplicitBlankCodeLineNode(styleNode, node) {
   const sourceSpan = node.loc ? (node.loc.endOffset ?? node.loc.offset) - node.loc.offset : 0;
@@ -4880,6 +4965,18 @@ function expandStyledBlockLines(node) {
     const blockChildren = onlyArg.children.filter((child) => isStyledBlockContentNode(node, child));
     if (blockChildren.length > 1)
       return blockChildren.map((child) => isVspaceNode(child) ? child : wrapStyledLine(node, child));
+  }
+  if (isBlockStyleCommand(onlyArg)) {
+    const nested = expandStyledBlockLines(onlyArg);
+    if (nested) {
+      return nested.map((child) => isVspaceNode(child) ? child : wrapStyledLine(node, child));
+    }
+  }
+  if (onlyArg.type === "markupCommand" && onlyArg.command === "with-url") {
+    const urlBlock = onlyArg.args.slice(1).find(isMarkupBlockNode);
+    const urlChildren = urlBlock?.children.filter((child) => isStyledBlockContentNode(node, child)) ?? [];
+    if (urlChildren.length > 1)
+      return urlChildren.map((child) => isVspaceNode(child) ? child : wrapStyledLine(node, child));
   }
   return null;
 }
@@ -4914,13 +5011,13 @@ function addGapBeforeFirstLine(payload, staffSpaces) {
 function addGapAfterLastLine(payload, staffSpaces) {
   return addLineGap(payload, "lineGapAfterStaffSpaces", staffSpaces, payloadLineCount(payload) - 1);
 }
-function extractMarkupPayloadBlocks(children) {
+function extractMarkupPayloadBlocks(children, opts = {}) {
   const columnChildren = findColumnChildren(children);
   const compactLineGap = isMarkupListColumn(children);
   const meaningfulTop = children.filter(isMeaningfulMarkupNode);
   const exBlock = meaningfulTop.length === 1 && meaningfulTop[0]?.type === "markupCommand" && meaningfulTop[0].command === "ex-block" ? meaningfulTop[0] : null;
   if (exBlock) {
-    const contentPayload = extractMarkupPayload(exBlock.args);
+    const contentPayload = extractMarkupPayload(exBlock.args, opts);
     if (contentPayload.text.trim().length > 0) {
       return [
         { text: "Example:", style: { bold: true, codeBlockHeading: true } },
@@ -4970,7 +5067,7 @@ function extractMarkupPayloadBlocks(children) {
       }
       const nestedColumnChildren = findColumnChildren([lineNode]);
       if (nestedColumnChildren && nestedColumnChildren.length > 0) {
-        for (const payload3 of extractMarkupPayloadBlocks([lineNode])) {
+        for (const payload3 of extractMarkupPayloadBlocks([lineNode], opts)) {
           pushPayload(payload3);
         }
         continue;
@@ -4982,12 +5079,12 @@ function extractMarkupPayloadBlocks(children) {
             applyVspace(expandedLine);
             continue;
           }
-          const payload3 = expandedLine.type === "markupCommand" && expandedLine.command === "typewriter" && expandedLine.args.some((arg) => isExplicitBlankCodeLineNode(expandedLine, arg)) ? blankCodeLinePayload() : extractMarkupPayload([expandedLine]);
+          const payload3 = expandedLine.type === "markupCommand" && expandedLine.command === "typewriter" && expandedLine.args.some((arg) => isExplicitBlankCodeLineNode(expandedLine, arg)) ? blankCodeLinePayload() : extractMarkupPayload([expandedLine], opts);
           pushPayload(payload3);
         }
         continue;
       }
-      const payload2 = extractMarkupPayload([lineNode]);
+      const payload2 = extractMarkupPayload([lineNode], opts);
       pushPayload(payload2);
     }
     if (pendingLineGapBeforeStaffSpaces !== 0 && blocks.length > 0) {
@@ -4998,7 +5095,7 @@ function extractMarkupPayloadBlocks(children) {
       return compactLineGap ? blocks.map((block) => ({ ...block, compactLineGap: true })) : blocks;
     }
   }
-  const payload = extractMarkupPayload(children);
+  const payload = extractMarkupPayload(children, opts);
   if (!payload.text)
     return [];
   return [payload];
@@ -5028,6 +5125,97 @@ function extractFillLineColumns(children) {
   if (colNodes.length === 0)
     return null;
   return colNodes.map((colNode) => extractMarkupPayloadBlocks([colNode]));
+}
+// src/music-input/lilypond/markup-payload/lines.ts
+var LINE_EXTRACTION_OPTS = {
+  runOptions: { allowTransparentWrappers: true, keepUnstyledRuns: true }
+};
+function stripInlineCommandTokens(text) {
+  return text.replace(/\\(?:bold|italic|smallCaps|typewriter|sub|super|raise#[-\d.]*|lower#[-\d.]*|boxed-run|boxed-start|boxed-end|circled-start|circled-end|rounded-start|rounded-end)\b\s*/g, "").replace(/[ \t]{2,}/g, " ");
+}
+function toMarkupTextLine(b) {
+  const runs = b.runs?.map((run) => ({ ...run, text: run.text.replace(/\s+/g, " ") })).filter((run) => run.text.length > 0);
+  if (runs && runs.length > 0) {
+    runs[0] = { ...runs[0], text: runs[0].text.replace(/^\s+/, "") };
+    const last = runs.length - 1;
+    runs[last] = { ...runs[last], text: runs[last].text.replace(/\s+$/, "") };
+  }
+  const cleanRuns = runs?.filter((run) => run.text.length > 0).map((run) => ({
+    ...b.style.bold ? { bold: true } : {},
+    ...b.style.italic ? { italic: true } : {},
+    ...b.style.sans ? { sans: true } : {},
+    ...b.style.color ? { color: b.style.color } : {},
+    ...run
+  }));
+  return {
+    text: stripInlineCommandTokens(b.text).replace(/\s*\n\s*/g, " ").trim(),
+    ...cleanRuns && cleanRuns.length > 0 ? { runs: cleanRuns } : {},
+    ...b.style.fontSizeScale != null ? { fontSizeScale: b.style.fontSizeScale } : {}
+  };
+}
+function columnAlignOf(node) {
+  if (node.type !== "markupCommand")
+    return null;
+  if (node.command === "right-column")
+    return "right";
+  if (node.command === "center-column")
+    return "center";
+  if (node.command === "column" || node.command === "left-column")
+    return "left";
+  for (const arg of node.args) {
+    const nested = columnAlignOf(arg);
+    if (nested)
+      return nested;
+  }
+  return null;
+}
+function topLevelNodes(children) {
+  let nodes = children.filter(isMeaningfulMarkupNode);
+  while (nodes.length === 1 && nodes[0].type === "markupBlock") {
+    nodes = nodes[0].children.filter(isMeaningfulMarkupNode);
+  }
+  return nodes;
+}
+function extractMarkupTextColumns(children) {
+  const nodes = topLevelNodes(children);
+  if (nodes.length < 2 || !nodes.every((n) => n.type === "markupCommand"))
+    return;
+  const groups = nodes.map((n) => ({
+    align: columnAlignOf(n) ?? "left",
+    lines: extractMarkupPayloadBlocks([n], LINE_EXTRACTION_OPTS).map(toMarkupTextLine).filter((l) => l.text.length > 0)
+  })).filter((g) => g.lines.length > 0);
+  return groups.length >= 2 && groups.some((g) => g.lines.length > 1) ? groups : undefined;
+}
+function zipTopLevelColumnRow(children) {
+  const groups = extractMarkupTextColumns(children)?.map((g) => g.lines);
+  if (!groups)
+    return null;
+  const rowCount = Math.max(...groups.map((g) => g.length));
+  const rows = [];
+  for (let i = 0;i < rowCount; i++) {
+    const runs = [];
+    const texts = [];
+    for (const group of groups) {
+      const line = group[i];
+      if (!line)
+        continue;
+      const lineRuns = line.runs ?? [{ text: line.text }];
+      const scaled = line.fontSizeScale != null ? lineRuns.map((run) => run.fontSizeScale == null ? { ...run, fontSizeScale: line.fontSizeScale } : run) : lineRuns;
+      if (runs.length > 0)
+        runs.push({ text: " " });
+      runs.push(...scaled);
+      texts.push(line.text);
+    }
+    if (runs.length > 0)
+      rows.push({ text: texts.join(" "), runs });
+  }
+  return rows.length > 0 ? rows : null;
+}
+function extractMarkupTextLines(children) {
+  const zipped = zipTopLevelColumnRow(children);
+  if (zipped)
+    return zipped;
+  return extractMarkupPayloadBlocks(children, LINE_EXTRACTION_OPTS).map(toMarkupTextLine).filter((line) => line.text.length > 0);
 }
 // src/music-input/lilypond/phases/parser/primitives/attachments.ts
 var DYNAMIC_COMMANDS = new Set([
@@ -5294,7 +5482,9 @@ function parseAttachedText(state, position, markerTok) {
       const markupTok = advance(state);
       children = parseTopLevelMarkup(state, markupTok).children;
     }
-    const payload = extractMarkupPayload(children);
+    const payload = extractMarkupPayload(children, {
+      runOptions: { allowBaselineShifts: true }
+    });
     if (!payload.text)
       return null;
     return {
@@ -5821,6 +6011,21 @@ function parseCommandDispatch(state, parseMusic, parseCommand) {
     case "appoggiatura":
     case "slashedGrace":
       return parseGraceCommand(state, cmdToken, parseMusic);
+    case "skip": {
+      const durTok = expect(state, "number", "Expected duration after \\skip");
+      if (!durTok)
+        return null;
+      const duration2 = parseDurationToken(durTok.value);
+      if (!duration2)
+        return null;
+      const skipMult = check(state, "number") ? Number.parseInt(advance(state).value, 10) : 1;
+      return {
+        type: "spacer",
+        duration: duration2,
+        ...Number.isFinite(skipMult) && skipMult > 1 ? { durationMultiplier: skipMult } : {},
+        loc: tokenToLoc(cmdToken)
+      };
+    }
     case "partial": {
       const durTok = expect(state, "number", "Expected duration after \\partial");
       if (!durTok)
@@ -8274,6 +8479,17 @@ function mergeVoicesByTime(voices) {
   }
   return result;
 }
+function translateStructuralEventIndices(ev, map) {
+  if ("at" in ev)
+    return { ...ev, at: map(ev.at) };
+  if ("noteIndex" in ev)
+    return { ...ev, noteIndex: map(ev.noteIndex) };
+  if ("start" in ev && "end" in ev) {
+    const e = ev;
+    return { ...ev, start: map(e.start), end: map(e.end) };
+  }
+  return ev;
+}
 function offsetStructuralEvent(ev, base) {
   if ("at" in ev)
     return { ...ev, at: ev.at + base };
@@ -8469,7 +8685,7 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
       } else if (melodyEls.length >= 2) {
         const STEM_DIRS = ["up", "down", "up", "down"];
         ctx.simultaneousDepth++;
-        const probeNoteless = (el) => {
+        const probeEmit = (el) => {
           const probe = createContext2();
           probe.currentKey = ctx.currentKey;
           probe.currentTimeSig = ctx.currentTimeSig;
@@ -8477,20 +8693,57 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
           probe.cadenzaEnabled = ctx.cadenzaEnabled;
           probe.simultaneousDepth = ctx.simultaneousDepth;
           emitMusic(el, probe, durationScale, semitoneShift, diatonicShift);
-          return probe.notes.length === 0;
+          return probe;
         };
-        const notelessEls = melodyEls.filter(probeNoteless);
+        const probes = melodyEls.map(probeEmit);
+        const notelessEls = melodyEls.filter((_el, i) => probes[i].notes.length === 0);
         for (const el of notelessEls) {
           emitMusic(el, ctx, durationScale, semitoneShift, diatonicShift);
         }
-        const voiceEls = melodyEls.filter((el) => !notelessEls.includes(el));
+        const skeletonProbes = melodyEls.map((el, i) => ({ el, probe: probes[i] })).filter(({ el, probe }) => !notelessEls.includes(el) && probe.notes.length > 0 && probe.notes.every((n) => n.isSpacer === true));
+        const skeletonEls = skeletonProbes.map(({ el }) => el);
+        const voiceEls = melodyEls.filter((el) => !notelessEls.includes(el) && !skeletonEls.includes(el));
         ctx.simultaneousDepth--;
+        const placeSkeletonEvents = (segmentStart) => {
+          if (skeletonProbes.length === 0)
+            return;
+          const segment = ctx.notes.slice(segmentStart);
+          const cum = [];
+          let mt = 0;
+          for (const n of segment) {
+            cum.push(mt);
+            mt += n.isGrace ? 0 : n.duration;
+          }
+          for (const { probe } of skeletonProbes) {
+            const times = [];
+            let t = 0;
+            for (const n of probe.notes) {
+              times.push(t);
+              t += n.duration;
+            }
+            const timeOfIndex = (idx) => idx <= 0 ? 0 : idx >= times.length ? t : times[idx];
+            const indexAtTime = (tt) => {
+              for (let k = 0;k < cum.length; k++) {
+                if (cum[k] >= tt - 0.000000001)
+                  return k;
+              }
+              return segment.length;
+            };
+            for (const ev of probe.structuralEvents) {
+              ctx.structuralEvents.push(offsetStructuralEvent(translateStructuralEventIndices(ev, (idx) => indexAtTime(timeOfIndex(idx))), segmentStart));
+            }
+          }
+        };
         if (voiceEls.length === 1) {
+          const segmentStart = ctx.notes.length;
           emitMusic(voiceEls[0], ctx, durationScale, semitoneShift, diatonicShift);
+          placeSkeletonEvents(segmentStart);
           break;
         }
-        if (voiceEls.length === 0)
+        if (voiceEls.length === 0) {
+          placeSkeletonEvents(ctx.notes.length);
           break;
+        }
         ctx.simultaneousDepth++;
         const voiceNotes = voiceEls.map((el, vi) => {
           const scratch = createContext2();
@@ -8534,6 +8787,7 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
         for (const ev of scratch0.structuralEvents) {
           ctx.structuralEvents.push(offsetStructuralEvent(ev, baseIdx));
         }
+        placeSkeletonEvents(baseIdx);
         if (scratch0.partialDuration !== undefined && ctx.partialDuration === undefined) {
           ctx.partialDuration = scratch0.partialDuration;
         }
@@ -9122,18 +9376,105 @@ function taglineTextFromMarkup(raw) {
   }
   return parts.join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
 }
-function taglineLinesFromMarkup(raw) {
+var BUILTIN_MARKUP_COMMANDS = new Set([
+  "line",
+  "column",
+  "center-column",
+  "right-column",
+  "left-column",
+  "concat",
+  "fill-line",
+  "wordwrap",
+  "justify",
+  "vcenter",
+  "vspace",
+  "hspace",
+  "bold",
+  "italic",
+  "typewriter",
+  "smallCaps",
+  "sans",
+  "caps",
+  "small",
+  "tiny",
+  "teeny",
+  "large",
+  "huge",
+  "larger",
+  "smaller",
+  "normalsize",
+  "fontsize",
+  "abs-fontsize",
+  "magnify",
+  "with-color",
+  "with-url",
+  "char",
+  "override",
+  "revert",
+  "box",
+  "rounded-box",
+  "circle",
+  "ellipse",
+  "oval",
+  "pad-to-box",
+  "pad-around",
+  "pad-markup",
+  "pad-x",
+  "whiteout",
+  "raise",
+  "lower",
+  "halign",
+  "translate",
+  "translate-scaled",
+  "super",
+  "sub",
+  "combine",
+  "draw-line",
+  "musicglyph",
+  "markup"
+]);
+function substituteHeaderFieldRefs(nodes, fields) {
+  const mapNode = (node) => {
+    if (node.type === "markupCommand") {
+      const value = fields[node.command];
+      if (typeof value === "string" && !BUILTIN_MARKUP_COMMANDS.has(node.command)) {
+        const rest = node.args.flatMap(mapNode);
+        return [{ type: "markupText", text: value, loc: node.loc }, ...rest];
+      }
+      return [{ ...node, args: node.args.flatMap(mapNode) }];
+    }
+    if (node.type === "markupBlock")
+      return [{ ...node, children: node.children.flatMap(mapNode) }];
+    if (node.type === "markupList")
+      return [{ ...node, items: node.items.flatMap(mapNode) }];
+    return [node];
+  };
+  return nodes.flatMap(mapNode);
+}
+function markupChildrenFromRaw(raw, headerFields) {
   try {
     const { tokens } = lex(raw, "nederlands");
     const { ast } = parse(tokens, raw, "nederlands");
     const block = ast?.children.find((child) => child.type === "markupBlock");
     if (!block)
-      return [];
-    const blocks = extractMarkupPayloadBlocks(block.children);
-    return blocks.map((b) => b.text.trim()).filter((t) => t.length > 0);
+      return null;
+    const children = block.children;
+    return headerFields && Object.keys(headerFields).length > 0 ? substituteHeaderFieldRefs(children, headerFields) : children;
   } catch {
-    return [];
+    return null;
   }
+}
+function taglineLinesFromMarkup(raw, headerFields) {
+  const children = markupChildrenFromRaw(raw, headerFields);
+  return children ? extractMarkupTextLines(children) : [];
+}
+function taglineColumnsFromMarkup(raw, headerFields) {
+  const children = markupChildrenFromRaw(raw, headerFields);
+  return children ? extractMarkupTextColumns(children) : undefined;
+}
+function taglineBaselineSkipFromMarkup(raw) {
+  const match2 = /baseline-skip\s*\.\s*([\d.]+)/.exec(raw);
+  return match2 ? Number(match2[1]) : undefined;
 }
 var TITLE_FIELD_FONT_SIZE_LEVEL = {
   title: 4,
@@ -9404,6 +9745,11 @@ function extractMeta(ast) {
     }
     if (child.type === "header") {
       const header = child;
+      const stringFields = {};
+      for (const [k, v] of header.fields.entries()) {
+        if (typeof v === "string" && !v.trimStart().startsWith("\\markup"))
+          stringFields[k] = v;
+      }
       for (const [rawKey, rawVal] of header.fields.entries()) {
         const key = rawKey.toLowerCase();
         const val = typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup") ? taglineTextFromMarkup(rawVal) : rawVal;
@@ -9439,12 +9785,15 @@ function extractMeta(ast) {
               info.tagline = val;
             } else if (typeof val === "string") {
               if (typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup")) {
-                const lines = taglineLinesFromMarkup(rawVal);
+                const lines = taglineLinesFromMarkup(rawVal, stringFields);
                 if (lines.length > 1)
                   info.taglineLines = lines;
                 const rawBox = taglineBoxFromMarkup(rawVal);
                 if (rawBox)
                   info.taglineBox = rawBox;
+                const baselineSkip = taglineBaselineSkipFromMarkup(rawVal);
+                if (baselineSkip != null)
+                  info.taglineBaselineSkip = baselineSkip;
               }
               if (val.trimStart().startsWith("\\markup")) {
                 info.tagline = taglineTextFromMarkup(val);
@@ -9454,6 +9803,21 @@ function extractMeta(ast) {
               } else {
                 info.tagline = val;
               }
+            }
+            break;
+          case "copyright":
+            if (typeof val === "string")
+              info.copyright = val;
+            if (typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup")) {
+              const lines = taglineLinesFromMarkup(rawVal, stringFields);
+              if (lines.length > 0)
+                info.copyrightLines = lines;
+              const columns = taglineColumnsFromMarkup(rawVal, stringFields);
+              if (columns)
+                info.copyrightColumns = columns;
+              const baselineSkip = taglineBaselineSkipFromMarkup(rawVal);
+              if (baselineSkip != null)
+                info.copyrightBaselineSkip = baselineSkip;
             }
             break;
           case "arranger":
@@ -9569,9 +9933,15 @@ function extractMeta(ast) {
             } else if (typeof rawVal === "string") {
               if (rawVal.trimStart().startsWith("\\markup")) {
                 info.tagline = taglineTextFromMarkup(rawVal);
+                const lines = taglineLinesFromMarkup(rawVal);
+                if (lines.length > 1)
+                  info.taglineLines = lines;
                 const box = taglineBoxFromMarkup(rawVal);
                 if (box)
                   info.taglineBox = box;
+                const baselineSkip = taglineBaselineSkipFromMarkup(rawVal);
+                if (baselineSkip != null)
+                  info.taglineBaselineSkip = baselineSkip;
               } else {
                 info.tagline = rawVal;
               }
@@ -11193,7 +11563,12 @@ function measureRanges(measures) {
   const out = [];
   let start = 0;
   for (const m of measures) {
-    const end = start + m.length;
+    let realNotes = 0;
+    for (const n of m) {
+      if (!isStructuralMarkerNoteName(n.noteName))
+        realNotes++;
+    }
+    const end = start + realNotes;
     out.push({ start, end });
     start = end;
   }
@@ -16292,6 +16667,55 @@ function barlineTypeFromOverrideStr(barOverrideStr) {
   return;
 }
 
+// src/music-core-adapter/eventFrames.ts
+function mergedAtToVoice0(notes, at) {
+  let v0 = 0;
+  const limit = Math.min(at, notes.length);
+  for (let i = 0;i < limit; i++) {
+    const n = notes[i];
+    if (!(n.duration === 0 && n.voiceDuration != null && !n.isGrace))
+      v0++;
+  }
+  return v0;
+}
+function eventsInVoice0Frame(notes, engravingEvents2) {
+  if (!engravingEvents2)
+    return;
+  return engravingEvents2.map((ev) => ev.type === "change" && typeof ev.at === "number" ? { ...ev, at: mergedAtToVoice0(notes, ev.at) } : ev);
+}
+
+// src/music-core-adapter/measureOffsets.ts
+function buildMeasureOffsets(canonicalMeasures) {
+  const measureNoteOffsets = [];
+  {
+    let acc = 0;
+    for (const m of canonicalMeasures) {
+      measureNoteOffsets.push(acc);
+      acc += m.length;
+    }
+  }
+  const measureQNOffsets = [];
+  canonicalMeasures.reduce((qn, m) => {
+    measureQNOffsets.push(qn);
+    return qn + m.reduce((s, n) => s + n.duration, 0);
+  }, 0);
+  const offsetQNByParsedIndex = new Map;
+  let totalOffsetQN = 0;
+  {
+    let parsedIndex = 0;
+    for (const measure2 of canonicalMeasures) {
+      for (const note of measure2) {
+        offsetQNByParsedIndex.set(parsedIndex, totalOffsetQN);
+        if (!isStructuralMarkerNote(note) && !note.isGrace)
+          totalOffsetQN += note.duration;
+        parsedIndex++;
+      }
+    }
+    offsetQNByParsedIndex.set(parsedIndex, totalOffsetQN);
+  }
+  return { measureNoteOffsets, measureQNOffsets, offsetQNByParsedIndex, totalOffsetQN };
+}
+
 // src/music-core-adapter/scoreAssembly.ts
 function assembleScoreFromParsedTune(input) {
   const { tune, part: part2, sourceRangeByEventId, persistedStructuralEvents, directives, lyrics, pedalEvents } = input;
@@ -16565,36 +16989,11 @@ function buildScoreFromTune(tune) {
   }
   const lyricVoiceResolver = isPolyphonic ? buildLyricVoiceResolver(tune.voices, voiceMeasures) : undefined;
   const canonicalMeasures = isPolyphonic && voiceMeasures.length > 0 ? voiceMeasures[0] : measures;
-  const measureTimeSigs = timeSigByMeasure(canonicalMeasures, tune.timeSig, engravingEvents2);
-  const measureKeySigs = keySigByMeasure(canonicalMeasures, tune.key, engravingEvents2);
+  const eventsForMeasureFlow = isPolyphonic && voiceMeasures.length > 0 ? eventsInVoice0Frame(tune.notes, engravingEvents2) : engravingEvents2;
+  const measureTimeSigs = timeSigByMeasure(canonicalMeasures, tune.timeSig, eventsForMeasureFlow);
+  const measureKeySigs = keySigByMeasure(canonicalMeasures, tune.key, eventsForMeasureFlow);
   const initialKey = measureKeySigs[0] ?? tune.key;
-  const measureNoteOffsets = [];
-  {
-    let acc = 0;
-    for (const m of canonicalMeasures) {
-      measureNoteOffsets.push(acc);
-      acc += m.length;
-    }
-  }
-  const measureQNOffsets = [];
-  canonicalMeasures.reduce((qn, m) => {
-    measureQNOffsets.push(qn);
-    return qn + m.reduce((s, n) => s + n.duration, 0);
-  }, 0);
-  const offsetQNByParsedIndex = new Map;
-  let totalOffsetQN = 0;
-  {
-    let parsedIndex = 0;
-    for (const measure2 of canonicalMeasures) {
-      for (const note of measure2) {
-        offsetQNByParsedIndex.set(parsedIndex, totalOffsetQN);
-        if (!isStructuralMarkerNote(note) && !note.isGrace)
-          totalOffsetQN += note.duration;
-        parsedIndex++;
-      }
-    }
-    offsetQNByParsedIndex.set(parsedIndex, totalOffsetQN);
-  }
+  const { measureNoteOffsets, measureQNOffsets, offsetQNByParsedIndex, totalOffsetQN } = buildMeasureOffsets(canonicalMeasures);
   const chordPlacements = computeChordPlacements(tune.chordNames);
   let globalIndex = 0;
   let noteTokenIndex = 0;
@@ -69071,7 +69470,8 @@ var BravuraMetadata = {
 
 // src/music-rendering/textFontFaces.ts
 var SCHOLA_FAMILY = "TeX Gyre Schola";
-var ROMAN_TEXT_STACK = `"${SCHOLA_FAMILY}", serif`;
+var ROMAN_TEXT_STACK = `"Times New Roman", "Nimbus Roman", "Liberation Serif", "${SCHOLA_FAMILY}", serif`;
+var SANS_TEXT_STACK = "sans-serif";
 var SCHOLA_FACES = [
   { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Regular.woff2" },
   { family: SCHOLA_FAMILY, file: "TeXGyreSchola-Bold.woff2", weight: "bold" },
@@ -70062,7 +70462,13 @@ function collectMeasureChordNames(opts) {
     const beatNote = measure2[bestNi];
     const beatNoteY = stepY(stepForPitch(beatNote.noteName, beatNote.octave, noteIdx + bestNi)) + yOffset;
     const beatTopY = beatNote.chordNotes ? Math.min(beatNoteY, ...beatNote.chordNotes.map((cn) => stepY(stepForPitch(cn.noteName, cn.octave, noteIdx + bestNi)) + yOffset)) : beatNoteY;
-    const nameY = Math.min(CHORD_Y, beatTopY - SCORE_VERTICAL_SPACING.chordNameStaffGapPx);
+    let nameY = Math.min(CHORD_Y, beatTopY - SCORE_VERTICAL_SPACING.chordNameStaffGapPx);
+    if (beatNote.fingering != null && beatNote.fingeringBelow !== true) {
+      const fingeringSize = musicGlyphFontSizes(undefined).music * FINGERING_MUSIC_SCALE * (beatNote.musicScale ?? 1);
+      const digitBaselineY = fingeringY(beatNoteY, true, false, topY, topY + LINE_SPACING * 4, fingeringSize);
+      const digitTopY = digitBaselineY - LINE_SPACING * 1.147;
+      nameY = Math.min(nameY, digitTopY - LINE_SPACING * 0.5);
+    }
     const m = sym.text.match(/^([A-G][#b]?)(.*)$/);
     const root = m ? m[1] : sym.text;
     const suffix = m ? m[2] : "";
@@ -74679,6 +75085,535 @@ function noteTextBaselineY(input) {
   return Math.min(baseline, clearInner);
 }
 
+// src/music-rendering/renderer/markup/textRuns.ts
+var MUSIC_GLYPH_ADVANCE_STAFF_SPACES = {
+  "": 4.076,
+  "": 1.8
+};
+function runWidth(run, fontSize) {
+  const effectiveFontSize = Math.round(fontSize * (run.fontSizeScale ?? 1));
+  if (run.text === " ")
+    return estimateMarkupAdvanceWidthPx(" ", effectiveFontSize);
+  if (run.musicGlyph) {
+    const staffSpacePx = effectiveFontSize / 4;
+    return Array.from(run.text).reduce((sum, glyph) => sum + (MUSIC_GLYPH_ADVANCE_STAFF_SPACES[glyph] ?? 1) * staffSpacePx, 0);
+  }
+  return estimateMarkupAdvanceWidthPx(run.text, effectiveFontSize, {
+    code: run.code,
+    smallCaps: run.smallCaps
+  });
+}
+function runFrameWidth(run, fontSize) {
+  if (run.text === " ")
+    return runWidth(run, fontSize);
+  const effectiveFontSize = Math.round(fontSize * (run.fontSizeScale ?? 1));
+  return estimateMarkupFrameWidthPx(run.text, effectiveFontSize, {
+    code: run.code,
+    smallCaps: run.smallCaps
+  });
+}
+function parseInlineRuns(line) {
+  const runs = [];
+  let i = 0;
+  let pendingBold = false;
+  let pendingItalic = false;
+  let pendingCode = false;
+  let pendingBoxed = false;
+  let pendingSmallCaps = false;
+  let pendingBoxPadding;
+  let pendingThickness;
+  let pendingCornerRadius;
+  let currentBoxedGroup;
+  let currentRoundedGroup;
+  let currentCircledGroup;
+  let nextBoxedGroup = 1;
+  let nextRoundedGroup = 1;
+  let nextCircledGroup = 1;
+  let pendingColor;
+  let pendingBaseline;
+  let pendingDyStaffSpaces;
+  let codeDurationCarry = false;
+  let lineBold = false;
+  let lineItalic = false;
+  let lineCode = false;
+  let lineColor;
+  let preserveLineCodeWhitespace = false;
+  const consumeLineStyleSeparator = () => {
+    if (i < line.length && /\s/.test(line[i]))
+      i++;
+  };
+  const skipWs = () => {
+    while (i < line.length && /\s/.test(line[i]))
+      i++;
+  };
+  const tryParseWithColor = () => {
+    if (!line.startsWith("\\with-color", i))
+      return;
+    const savedI = i;
+    i += "\\with-color".length;
+    skipWs();
+    if (i >= line.length || line[i] !== '"') {
+      i = savedI;
+      return;
+    }
+    i++;
+    const start = i;
+    while (i < line.length && line[i] !== '"') {
+      if (line[i] === "\\" && i + 1 < line.length)
+        i += 2;
+      else
+        i++;
+    }
+    const color = line.slice(start, i);
+    if (i < line.length && line[i] === '"')
+      i++;
+    return color || undefined;
+  };
+  for (;; ) {
+    const before = i;
+    if (!preserveLineCodeWhitespace)
+      skipWs();
+    preserveLineCodeWhitespace = false;
+    if (line.startsWith("\\bold", i) && !/[a-z]/i.test(line[i + 5] ?? "")) {
+      i += "\\bold".length;
+      lineBold = true;
+      if (lineCode) {
+        consumeLineStyleSeparator();
+        preserveLineCodeWhitespace = true;
+      }
+      continue;
+    }
+    if (line.startsWith("\\italic", i)) {
+      i += "\\italic".length;
+      lineItalic = true;
+      if (lineCode) {
+        consumeLineStyleSeparator();
+        preserveLineCodeWhitespace = true;
+      }
+      continue;
+    }
+    if (line.startsWith("\\typewriter", i)) {
+      i += "\\typewriter".length;
+      lineCode = true;
+      consumeLineStyleSeparator();
+      preserveLineCodeWhitespace = true;
+      continue;
+    }
+    const color = tryParseWithColor();
+    if (color) {
+      lineColor = color;
+      if (lineCode) {
+        consumeLineStyleSeparator();
+        preserveLineCodeWhitespace = true;
+      }
+      continue;
+    }
+    if (i === before || i >= line.length || line[i] !== "\\")
+      break;
+  }
+  const looksLikeLilyDuration = (text) => /^\d+\.*(?:\*\d+)?$/.test(text);
+  const hasContentAhead = (pos) => {
+    let p = pos;
+    for (;; ) {
+      while (p < line.length && /\s/.test(line[p]))
+        p++;
+      if (p >= line.length)
+        return false;
+      if (line[p] !== "\\")
+        return true;
+      if (line.startsWith("\\bold", p) && !/[a-z]/i.test(line[p + 5] ?? "")) {
+        p += 5;
+        continue;
+      }
+      if (line.startsWith("\\italic", p) && !/[a-z]/i.test(line[p + 7] ?? "")) {
+        p += 7;
+        continue;
+      }
+      if (line.startsWith("\\typewriter", p) && !/[a-z]/i.test(line[p + 11] ?? "")) {
+        p += 11;
+        continue;
+      }
+      if (line.startsWith("\\smallCaps", p) && !/[a-z]/i.test(line[p + 10] ?? "")) {
+        p += 10;
+        continue;
+      }
+      if (line.startsWith("\\boxed-run", p) && !/[a-z]/i.test(line[p + 10] ?? "")) {
+        p += 10;
+        continue;
+      }
+      if (line.startsWith("\\boxed-start", p) && !/[a-z]/i.test(line[p + 12] ?? "")) {
+        p += 12;
+        continue;
+      }
+      if (line.startsWith("\\boxed-end", p) && !/[a-z]/i.test(line[p + 10] ?? "")) {
+        p += 10;
+        continue;
+      }
+      if (line.startsWith("\\rounded-start", p) && !/[a-z]/i.test(line[p + 14] ?? "")) {
+        p += 14;
+        continue;
+      }
+      if (line.startsWith("\\rounded-end", p) && !/[a-z]/i.test(line[p + 12] ?? "")) {
+        p += 12;
+        continue;
+      }
+      if (line.startsWith("\\circled-start", p) && !/[a-z]/i.test(line[p + 14] ?? "")) {
+        p += 14;
+        continue;
+      }
+      if (line.startsWith("\\circled-end", p) && !/[a-z]/i.test(line[p + 12] ?? "")) {
+        p += 12;
+        continue;
+      }
+      const drawLineToken = line.slice(p).match(/^\\drawline#[-+]?\d+(?:\.\d+)?#[-+]?\d+(?:\.\d+)?/);
+      if (drawLineToken) {
+        p += drawLineToken[0].length;
+        continue;
+      }
+      const overrideToken = line.slice(p).match(/^\\(?:boxpad|thickness|cornerradius)#[-+]?\d+(?:\.\d+)?/);
+      if (overrideToken) {
+        p += overrideToken[0].length;
+        continue;
+      }
+      if (line.startsWith("\\sub", p) && !/[a-z]/i.test(line[p + 4] ?? "")) {
+        p += 4;
+        continue;
+      }
+      if (line.startsWith("\\super", p) && !/[a-z]/i.test(line[p + 6] ?? "")) {
+        p += 6;
+        continue;
+      }
+      if (line.startsWith("\\with-color", p)) {
+        p += "\\with-color".length;
+        while (p < line.length && /\s/.test(line[p]))
+          p++;
+        if (p < line.length && line[p] === '"') {
+          p++;
+          while (p < line.length && line[p] !== '"') {
+            if (line[p] === "\\" && p + 1 < line.length)
+              p += 2;
+            else
+              p++;
+          }
+          if (p < line.length)
+            p++;
+        }
+        continue;
+      }
+      return true;
+    }
+  };
+  while (i < line.length) {
+    if (line[i] === "\\") {
+      if (line.startsWith("\\sub", i) && !/[a-z]/i.test(line[i + 4] ?? "") && hasContentAhead(i + "\\sub".length)) {
+        i += "\\sub".length;
+        pendingBaseline = "sub";
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\super", i) && !/[a-z]/i.test(line[i + 6] ?? "") && hasContentAhead(i + "\\super".length)) {
+        i += "\\super".length;
+        pendingBaseline = "super";
+        skipWs();
+        continue;
+      }
+      const raiseLowerMatch = line.slice(i).match(/^\\(raise|lower)#(-?[\d.]+)/);
+      if (raiseLowerMatch) {
+        const dir = raiseLowerMatch[1] === "raise" ? -1 : 1;
+        const amount = parseFloat(raiseLowerMatch[2]);
+        i += raiseLowerMatch[0].length;
+        pendingDyStaffSpaces = dir * amount;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\bold", i) && !/[a-z]/i.test(line[i + 5] ?? "") && hasContentAhead(i + "\\bold".length)) {
+        i += "\\bold".length;
+        pendingBold = true;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\italic", i) && !/[a-z]/i.test(line[i + 7] ?? "") && hasContentAhead(i + "\\italic".length)) {
+        i += "\\italic".length;
+        pendingItalic = true;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\typewriter", i) && !/[a-z]/i.test(line[i + 11] ?? "") && hasContentAhead(i + "\\typewriter".length)) {
+        i += "\\typewriter".length;
+        pendingCode = true;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\smallCaps", i) && !/[a-z]/i.test(line[i + 10] ?? "") && hasContentAhead(i + "\\smallCaps".length)) {
+        i += "\\smallCaps".length;
+        pendingSmallCaps = true;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\boxed-run", i) && !/[a-z]/i.test(line[i + 10] ?? "") && hasContentAhead(i + "\\boxed-run".length)) {
+        i += "\\boxed-run".length;
+        pendingBoxed = true;
+        skipWs();
+        continue;
+      }
+      const boxPadMatch = line.slice(i).match(/^\\boxpad#([-+]?\d+(?:\.\d+)?)/);
+      if (boxPadMatch) {
+        i += boxPadMatch[0].length;
+        pendingBoxPadding = Number(boxPadMatch[1]);
+        skipWs();
+        continue;
+      }
+      const thicknessMatch = line.slice(i).match(/^\\thickness#([-+]?\d+(?:\.\d+)?)/);
+      if (thicknessMatch) {
+        i += thicknessMatch[0].length;
+        pendingThickness = Number(thicknessMatch[1]);
+        skipWs();
+        continue;
+      }
+      const cornerMatch = line.slice(i).match(/^\\cornerradius#([-+]?\d+(?:\.\d+)?)/);
+      if (cornerMatch) {
+        i += cornerMatch[0].length;
+        pendingCornerRadius = Number(cornerMatch[1]);
+        skipWs();
+        continue;
+      }
+      const drawLineMatch = line.slice(i).match(/^\\drawline#([-+]?\d+(?:\.\d+)?)#([-+]?\d+(?:\.\d+)?)/);
+      if (drawLineMatch) {
+        i += drawLineMatch[0].length;
+        runs.push({
+          text: "",
+          drawLineWidthStaffSpaces: Number(drawLineMatch[1]),
+          drawLineDyStaffSpaces: Number(drawLineMatch[2])
+        });
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\boxed-start", i) && !/[a-z]/i.test(line[i + 12] ?? "") && hasContentAhead(i + "\\boxed-start".length)) {
+        i += "\\boxed-start".length;
+        currentBoxedGroup = nextBoxedGroup++;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\boxed-end", i) && !/[a-z]/i.test(line[i + 10] ?? "")) {
+        i += "\\boxed-end".length;
+        currentBoxedGroup = undefined;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\rounded-start", i) && !/[a-z]/i.test(line[i + 14] ?? "") && hasContentAhead(i + "\\rounded-start".length)) {
+        i += "\\rounded-start".length;
+        currentRoundedGroup = nextRoundedGroup++;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\rounded-end", i) && !/[a-z]/i.test(line[i + 12] ?? "")) {
+        i += "\\rounded-end".length;
+        currentRoundedGroup = undefined;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\circled-start", i) && !/[a-z]/i.test(line[i + 14] ?? "") && hasContentAhead(i + "\\circled-start".length)) {
+        i += "\\circled-start".length;
+        currentCircledGroup = nextCircledGroup++;
+        skipWs();
+        continue;
+      }
+      if (line.startsWith("\\circled-end", i) && !/[a-z]/i.test(line[i + 12] ?? "")) {
+        i += "\\circled-end".length;
+        currentCircledGroup = undefined;
+        skipWs();
+        continue;
+      }
+      const color = tryParseWithColor();
+      if (color) {
+        pendingColor = color;
+        skipWs();
+        continue;
+      }
+    }
+    if (/\s/.test(line[i])) {
+      let j2 = i;
+      while (j2 < line.length && /\s/.test(line[j2]))
+        j2++;
+      if (!lineCode && !pendingCode && (line.startsWith("\\sub", j2) && !/[a-z]/i.test(line[j2 + 4] ?? "") && hasContentAhead(j2 + "\\sub".length) || line.startsWith("\\super", j2) && !/[a-z]/i.test(line[j2 + 6] ?? "") && hasContentAhead(j2 + "\\super".length))) {
+        i = j2;
+        continue;
+      }
+      if (lineCode || pendingCode) {
+        for (let si = i;si < j2; si++)
+          runs.push({ text: " ", code: true });
+      } else {
+        runs.push({ text: " " });
+      }
+      i = j2;
+      continue;
+    }
+    let j = i;
+    while (j < line.length && !/\s/.test(line[j]))
+      j++;
+    const token = line.slice(i, j);
+    const applyBold = pendingBold || lineBold;
+    const applyCode = pendingCode || lineCode || codeDurationCarry && looksLikeLilyDuration(token);
+    const applyItalic = pendingItalic || lineItalic;
+    const applyBoxed = pendingBoxed;
+    const applySmallCaps = pendingSmallCaps;
+    const applyBoxedGroup = currentBoxedGroup;
+    const applyRoundedGroup = currentRoundedGroup;
+    const applyCircledGroup = currentCircledGroup;
+    const applyColor = pendingColor ?? lineColor;
+    const applyBaseline = pendingBaseline;
+    const applyDy = pendingDyStaffSpaces;
+    runs.push({
+      text: token,
+      ...applyBold ? { bold: true } : {},
+      ...applyItalic ? { italic: true } : {},
+      ...applyCode ? { code: true } : {},
+      ...applyBoxed ? { boxed: true } : {},
+      ...applyBoxedGroup !== undefined ? { boxedGroup: applyBoxedGroup } : {},
+      ...applyRoundedGroup !== undefined ? { roundedGroup: applyRoundedGroup } : {},
+      ...applyCircledGroup !== undefined ? { circledGroup: applyCircledGroup } : {},
+      ...pendingBoxPadding !== undefined ? { boxPadding: pendingBoxPadding } : {},
+      ...pendingThickness !== undefined ? { thickness: pendingThickness } : {},
+      ...pendingCornerRadius !== undefined ? { cornerRadius: pendingCornerRadius } : {},
+      ...applySmallCaps ? { smallCaps: true } : {},
+      ...applyColor ? { color: applyColor } : {},
+      ...applyBaseline ? { baseline: applyBaseline } : {},
+      ...applyDy !== undefined ? { dyStaffSpaces: applyDy } : {}
+    });
+    if (pendingCode && token.startsWith("\\"))
+      codeDurationCarry = true;
+    else if (codeDurationCarry)
+      codeDurationCarry = false;
+    else
+      codeDurationCarry = false;
+    pendingBold = false;
+    pendingItalic = false;
+    pendingCode = false;
+    pendingBoxed = false;
+    pendingSmallCaps = false;
+    pendingBoxPadding = undefined;
+    pendingThickness = undefined;
+    pendingCornerRadius = undefined;
+    pendingColor = undefined;
+    pendingBaseline = undefined;
+    pendingDyStaffSpaces = undefined;
+    i = j;
+  }
+  return runs;
+}
+function normalizeRunSpacing(runs) {
+  const out = [];
+  for (let i = 0;i < runs.length; i++) {
+    const run = runs[i];
+    const prev = out[out.length - 1];
+    const next = runs[i + 1];
+    if (run.text === " ") {
+      if (run.code) {
+        out.push(run);
+        continue;
+      }
+      const prevText = prev?.text ?? "";
+      const nextText = next?.text ?? "";
+      const nextIsClosingPunct = /^[\)\]\}\.,:;!?]$/.test(nextText);
+      const prevIsOpeningPunct = /^[\(\[\{]$/.test(prevText);
+      const numericHeadingDot = nextText === "." && /^\d+$/.test(prevText);
+      const schemePairDot = nextText === "." && /#'\([^)]*$/.test(prevText);
+      if (nextIsClosingPunct && !numericHeadingDot && !schemePairDot || prevIsOpeningPunct)
+        continue;
+      if (prev?.text === " ")
+        continue;
+      out.push(run);
+      continue;
+    }
+    out.push(run);
+  }
+  while (out.length > 0 && out[out.length - 1].text === " " && !out[out.length - 1].code)
+    out.pop();
+  return out;
+}
+function wrapInlineRuns(runs, fontSize, maxWidth) {
+  const words = [];
+  const spacedBefore = [];
+  let anySpaceRun = false;
+  let sawSpace = false;
+  for (const r of runs) {
+    if (r.text.trim().length === 0) {
+      if (r.text.length > 0) {
+        anySpaceRun = true;
+        sawSpace = true;
+      }
+      continue;
+    }
+    words.push(r);
+    spacedBefore.push(sawSpace);
+    sawSpace = false;
+  }
+  if (words.length === 0)
+    return [[{ text: "" }]];
+  const lines = [];
+  let cur = [];
+  let curW = 0;
+  const isClosingPunct = (text) => /^[\)\]\}\.,:;!?]$/.test(text);
+  const isOpeningPunct = (text) => /^[\(\[\{]$/.test(text);
+  const needsSpaceBefore = (line, next) => {
+    if (line.length === 0)
+      return false;
+    const prev = line[line.length - 1];
+    if (!prev)
+      return false;
+    if (prev.code && next.code)
+      return true;
+    if (isClosingPunct(next.text))
+      return false;
+    if (isOpeningPunct(prev.text))
+      return false;
+    return true;
+  };
+  const spaceRunBefore = (line, next) => {
+    const prev = line[line.length - 1];
+    if (!prev)
+      return { text: " " };
+    return {
+      text: " ",
+      ...prev.bold && next.bold ? { bold: true } : {},
+      ...prev.italic && next.italic ? { italic: true } : {},
+      ...prev.code && next.code ? { code: true } : {},
+      ...prev.smallCaps && next.smallCaps ? { smallCaps: true } : {},
+      ...prev.color && prev.color === next.color ? { color: prev.color } : {},
+      ...prev.fontSizeScale != null && prev.fontSizeScale === next.fontSizeScale ? { fontSizeScale: prev.fontSizeScale } : {}
+    };
+  };
+  const clusters = [];
+  for (let i = 0;i < words.length; i++) {
+    const spaced = anySpaceRun ? spacedBefore[i] : true;
+    if (i > 0 && anySpaceRun && !spaced && clusters.length > 0) {
+      clusters[clusters.length - 1].runs.push(words[i]);
+    } else {
+      clusters.push({ runs: [words[i]], spaced });
+    }
+  }
+  for (const cluster of clusters) {
+    const wW = cluster.runs.reduce((sum, r) => sum + runWidth(r, fontSize), 0);
+    const first = cluster.runs[0];
+    const addSpace = anySpaceRun ? cluster.spaced && cur.length > 0 : needsSpaceBefore(cur, first);
+    const spaceRun = addSpace ? spaceRunBefore(cur, first) : undefined;
+    const addW = (spaceRun ? runWidth(spaceRun, fontSize) : 0) + wW;
+    if (cur.length > 0 && curW + addW > maxWidth) {
+      lines.push(cur);
+      cur = cluster.runs.map((r) => ({ ...r }));
+      curW = wW;
+    } else {
+      if (spaceRun)
+        cur.push(spaceRun);
+      cur.push(...cluster.runs.map((r) => ({ ...r })));
+      curW += addW;
+    }
+  }
+  if (cur.length > 0)
+    lines.push(cur);
+  return lines;
+}
+
 // src/music-rendering/renderer/staffRow/measureNotes/noteText.ts
 var CIRCLED_NOTE_TEXT_PAD_X_SS = 0.3;
 var CIRCLED_NOTE_TEXT_PAD_Y_SS = 0.18;
@@ -74707,20 +75642,45 @@ function estimateNoteTextWidth(noteText, fontSize) {
     smallCaps: noteText.smallCaps
   });
 }
-function renderNoteTextContent(noteText, fontSize) {
-  if (!noteText.runs?.length) {
-    return noteText.smallCaps ? noteText.text.toUpperCase() : noteText.text;
-  }
-  return noteText.runs.map((run, ri) => {
+function effectiveNoteTextRuns(noteText, fontSize) {
+  if (noteText.runs?.length)
+    return noteText.runs;
+  if (!/\\[a-zA-Z]/.test(noteText.text))
+    return null;
+  const parsed = parseInlineRuns(noteText.text).filter((run) => run.text.length > 0);
+  if (parsed.length === 0)
+    return null;
+  return parsed.map((run) => ({
+    text: run.text,
+    ...run.baseline ? {
+      fontSizeScale: 0.7,
+      raiseStaffSpaces: (run.baseline === "super" ? 0.4 : -0.25) * (fontSize / LINE_SPACING)
+    } : run.fontSizeScale != null ? { fontSizeScale: run.fontSizeScale } : {},
+    ...run.dyStaffSpaces != null ? { raiseStaffSpaces: -run.dyStaffSpaces } : {},
+    ...run.bold ? { bold: true } : {},
+    ...run.italic ? { italic: true } : {},
+    ...run.code ? { code: true } : {},
+    ...run.smallCaps ? { smallCaps: true } : {},
+    ...run.color ? { color: run.color } : {}
+  }));
+}
+function noteTextRunTspans(noteText, runs, fontSize, clear) {
+  let appliedDy = 0;
+  return runs.map((run, ri) => {
     const runCode = noteText.code || !!run.code;
     const runBold = noteText.bold || !!run.bold;
     const runItalic = noteText.italic || !!run.italic;
     const runSmallCaps = noteText.smallCaps || !!run.smallCaps;
+    const targetDy = -Math.round((run.raiseStaffSpaces ?? 0) * LINE_SPACING);
+    const dy = targetDy - appliedDy;
+    appliedDy = targetDy;
     const props = {
       fontFamily: runCode ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace' : "serif",
       fontWeight: runBold ? "bold" : undefined,
       fontStyle: runItalic ? "italic" : undefined,
       fontVariant: runSmallCaps ? "small-caps" : undefined,
+      ...dy !== 0 ? { dy } : {},
+      ...clear && ri === clear.afterIndex && clear.dxPx > 0 ? { dx: clear.dxPx } : {},
       ...run.fontSizeScale != null ? { fontSize: Math.round(fontSize * run.fontSizeScale) } : {},
       ...run.color ?? noteText.color ? { style: { fill: run.color ?? noteText.color } } : {}
     };
@@ -74751,7 +75711,11 @@ function renderMeasureNoteText(opts) {
     return;
   const baseSize = LINE_SPACING * (note.noteText.large ? 2.8 : 2.2);
   const scaledSize = note.noteText.fontSizeScale != null ? baseSize * note.noteText.fontSizeScale : baseSize;
-  const textW = estimateNoteTextWidth(note.noteText, scaledSize);
+  const effRuns = effectiveNoteTextRuns(note.noteText, scaledSize);
+  const textW = effRuns ? effRuns.reduce((sum, run) => sum + estimateNoteTextRunWidth(run, scaledSize), 0) : estimateNoteTextWidth(note.noteText, scaledSize);
+  const firstShifted = effRuns?.findIndex((run) => (run.raiseStaffSpaces ?? 0) !== 0) ?? -1;
+  const circledHeadCount = !note.noteText.circled || !effRuns ? effRuns?.length ?? 0 : firstShifted === -1 ? effRuns.length : Math.max(1, firstShifted);
+  const circledW = note.noteText.circled && effRuns ? effRuns.slice(0, circledHeadCount).reduce((sum, run) => sum + estimateNoteTextRunWidth(run, scaledSize), 0) : textW;
   const shapedText = note.noteText.circled || note.noteText.boxed;
   const startAnchored = shapedText || note.noteText.textAnchor === "start";
   const fingeringSide = note.fingering == null ? undefined : note.fingeringBelow === true ? "below" : "above";
@@ -74774,7 +75738,7 @@ function renderMeasureNoteText(opts) {
   const boxedAboveXOffset = note.noteText.boxed && note.noteText.placement !== "below" ? LINE_SPACING * BOXED_NOTE_TEXT_ABOVE_X_OFFSET_SS : 0;
   const anchorX = startAnchored ? noteColumnAnchorX({ noteheadCenterX: nx, noteheadType: nhType, fontInfo }) : nx;
   const textX = anchorX + circledAboveXOffset + boxedAboveXOffset;
-  const shapeTextW = note.noteText.circled ? textW + LINE_SPACING * CIRCLED_NOTE_TEXT_SHAPE_WIDTH_EXTRA_SS : note.noteText.boxed ? textW + LINE_SPACING * BOXED_NOTE_TEXT_SHAPE_WIDTH_EXTRA_SS : textW;
+  const shapeTextW = note.noteText.circled ? circledW + LINE_SPACING * CIRCLED_NOTE_TEXT_SHAPE_WIDTH_EXTRA_SS : note.noteText.boxed ? textW + LINE_SPACING * BOXED_NOTE_TEXT_SHAPE_WIDTH_EXTRA_SS : textW;
   const shapeLeft = startAnchored ? textX : nx - shapeTextW / 2;
   const shapeCenterX = shapeLeft + shapeTextW / 2;
   let circledTextY = note.noteText.circled ? textY - Math.round(scaledSize * 0.1) : textY;
@@ -74841,7 +75805,11 @@ function renderMeasureNoteText(opts) {
       eventId: note.eventId
     });
   }
-  els.push(el("text", noteTextProps, renderNoteTextContent(note.noteText, scaledSize), `ntxt${yOffset}-${mi}-${ni}`));
+  const circleClear = note.noteText.circled && effRuns && circledHeadCount < effRuns.length ? {
+    afterIndex: circledHeadCount,
+    dxPx: Math.max(0, Math.round(shapeTextW / 2 + circR - circledW))
+  } : undefined;
+  els.push(el("text", noteTextProps, effRuns ? noteTextRunTspans(note.noteText, effRuns, scaledSize, circleClear) : note.noteText.smallCaps ? note.noteText.text.toUpperCase() : note.noteText.text, `ntxt${yOffset}-${mi}-${ni}`));
 }
 
 // src/music-rendering/renderer/staffRow/measureNotes/tempoMarks.ts
@@ -81724,7 +82692,7 @@ function paginateSystems(input) {
   let page = 0;
   let y = titleH;
   let breakCursor = titleH + firstPageReservedHeight;
-  const placementHeights = systemHeights;
+  const placementHeights = debugFlag("LILYJS_PER_SYSTEM_PLACEMENT") && input.forceDp && input.forceDp.natural.length === systemHeights.length ? input.forceDp.natural : systemHeights;
   for (let i = 0;i < systemHeights.length; i++) {
     const h = placementHeights[i];
     const atPageStart = i === 0 || pageOfSystem[i - 1] !== page;
@@ -82011,7 +82979,7 @@ function renderScoreToSvgModel(options) {
   const lastSystemAdvance = contentBottom + lyricH;
   const pageBreakSystemAdvances = systems.map((_s, ri) => ri === systems.length - 1 ? lastSystemAdvance : pageBreakSystemH);
   const visibleSystemAdvance = Math.max(pageBreakSystemH, systemH - LINE_SPACING * 0.1);
-  const naturalSystemAdvances = systems.map((_s, ri) => ri === systems.length - 1 ? lastSystemAdvance : visibleSystemAdvance);
+  const naturalSystemAdvances = debugFlag("LILYJS_PER_SYSTEM_PLACEMENT") && perSystemAdvances ? perSystemAdvances.natural : systems.map((_s, ri) => ri === systems.length - 1 ? lastSystemAdvance : visibleSystemAdvance);
   const pageForceDp = debugFlag("LILYJS_PAGE_FORCE_DP_OFF") ? undefined : perSystemAdvances;
   const pagePlan = !singlePageBreaking && pageHeightBudget != null && Number.isFinite(pageHeightBudget) && pageHeightBudget > 0 && naturalH + pageZeroReservedHeight > pageHeightBudget ? paginateSystems({
     systemHeights: pageBreakSystemAdvances,
@@ -85206,6 +86174,11 @@ function documentInfoFromTune(tune) {
     tagline: tune.info?.tagline ?? tune.header?.tagline,
     taglineLines: tune.info?.taglineLines ?? tune.header?.taglineLines,
     taglineBox: tune.info?.taglineBox ?? tune.header?.taglineBox,
+    taglineBaselineSkip: tune.info?.taglineBaselineSkip ?? tune.header?.taglineBaselineSkip,
+    copyright: headerField(tune, "copyright"),
+    copyrightLines: tune.info?.copyrightLines ?? tune.header?.copyrightLines,
+    copyrightColumns: tune.info?.copyrightColumns ?? tune.header?.copyrightColumns,
+    copyrightBaselineSkip: tune.info?.copyrightBaselineSkip ?? tune.header?.copyrightBaselineSkip,
     raggedLast: tune.raggedLast,
     raggedLastBottom: tune.raggedLastBottom,
     raggedRight: tune.raggedRight,
@@ -85288,535 +86261,6 @@ function renderHeaderToSvgModel(opts) {
     elements: layout.elements,
     layout: "fixed"
   };
-}
-
-// src/music-rendering/renderer/markup/textRuns.ts
-var MUSIC_GLYPH_ADVANCE_STAFF_SPACES = {
-  "": 4.076,
-  "": 1.8
-};
-function runWidth(run, fontSize) {
-  const effectiveFontSize = Math.round(fontSize * (run.fontSizeScale ?? 1));
-  if (run.text === " ")
-    return estimateMarkupAdvanceWidthPx(" ", effectiveFontSize);
-  if (run.musicGlyph) {
-    const staffSpacePx = effectiveFontSize / 4;
-    return Array.from(run.text).reduce((sum, glyph) => sum + (MUSIC_GLYPH_ADVANCE_STAFF_SPACES[glyph] ?? 1) * staffSpacePx, 0);
-  }
-  return estimateMarkupAdvanceWidthPx(run.text, effectiveFontSize, {
-    code: run.code,
-    smallCaps: run.smallCaps
-  });
-}
-function runFrameWidth(run, fontSize) {
-  if (run.text === " ")
-    return runWidth(run, fontSize);
-  const effectiveFontSize = Math.round(fontSize * (run.fontSizeScale ?? 1));
-  return estimateMarkupFrameWidthPx(run.text, effectiveFontSize, {
-    code: run.code,
-    smallCaps: run.smallCaps
-  });
-}
-function parseInlineRuns(line) {
-  const runs = [];
-  let i = 0;
-  let pendingBold = false;
-  let pendingItalic = false;
-  let pendingCode = false;
-  let pendingBoxed = false;
-  let pendingSmallCaps = false;
-  let pendingBoxPadding;
-  let pendingThickness;
-  let pendingCornerRadius;
-  let currentBoxedGroup;
-  let currentRoundedGroup;
-  let currentCircledGroup;
-  let nextBoxedGroup = 1;
-  let nextRoundedGroup = 1;
-  let nextCircledGroup = 1;
-  let pendingColor;
-  let pendingBaseline;
-  let pendingDyStaffSpaces;
-  let codeDurationCarry = false;
-  let lineBold = false;
-  let lineItalic = false;
-  let lineCode = false;
-  let lineColor;
-  let preserveLineCodeWhitespace = false;
-  const consumeLineStyleSeparator = () => {
-    if (i < line.length && /\s/.test(line[i]))
-      i++;
-  };
-  const skipWs = () => {
-    while (i < line.length && /\s/.test(line[i]))
-      i++;
-  };
-  const tryParseWithColor = () => {
-    if (!line.startsWith("\\with-color", i))
-      return;
-    const savedI = i;
-    i += "\\with-color".length;
-    skipWs();
-    if (i >= line.length || line[i] !== '"') {
-      i = savedI;
-      return;
-    }
-    i++;
-    const start = i;
-    while (i < line.length && line[i] !== '"') {
-      if (line[i] === "\\" && i + 1 < line.length)
-        i += 2;
-      else
-        i++;
-    }
-    const color = line.slice(start, i);
-    if (i < line.length && line[i] === '"')
-      i++;
-    return color || undefined;
-  };
-  for (;; ) {
-    const before = i;
-    if (!preserveLineCodeWhitespace)
-      skipWs();
-    preserveLineCodeWhitespace = false;
-    if (line.startsWith("\\bold", i) && !/[a-z]/i.test(line[i + 5] ?? "")) {
-      i += "\\bold".length;
-      lineBold = true;
-      if (lineCode) {
-        consumeLineStyleSeparator();
-        preserveLineCodeWhitespace = true;
-      }
-      continue;
-    }
-    if (line.startsWith("\\italic", i)) {
-      i += "\\italic".length;
-      lineItalic = true;
-      if (lineCode) {
-        consumeLineStyleSeparator();
-        preserveLineCodeWhitespace = true;
-      }
-      continue;
-    }
-    if (line.startsWith("\\typewriter", i)) {
-      i += "\\typewriter".length;
-      lineCode = true;
-      consumeLineStyleSeparator();
-      preserveLineCodeWhitespace = true;
-      continue;
-    }
-    const color = tryParseWithColor();
-    if (color) {
-      lineColor = color;
-      if (lineCode) {
-        consumeLineStyleSeparator();
-        preserveLineCodeWhitespace = true;
-      }
-      continue;
-    }
-    if (i === before || i >= line.length || line[i] !== "\\")
-      break;
-  }
-  const looksLikeLilyDuration = (text) => /^\d+\.*(?:\*\d+)?$/.test(text);
-  const hasContentAhead = (pos) => {
-    let p = pos;
-    for (;; ) {
-      while (p < line.length && /\s/.test(line[p]))
-        p++;
-      if (p >= line.length)
-        return false;
-      if (line[p] !== "\\")
-        return true;
-      if (line.startsWith("\\bold", p) && !/[a-z]/i.test(line[p + 5] ?? "")) {
-        p += 5;
-        continue;
-      }
-      if (line.startsWith("\\italic", p) && !/[a-z]/i.test(line[p + 7] ?? "")) {
-        p += 7;
-        continue;
-      }
-      if (line.startsWith("\\typewriter", p) && !/[a-z]/i.test(line[p + 11] ?? "")) {
-        p += 11;
-        continue;
-      }
-      if (line.startsWith("\\smallCaps", p) && !/[a-z]/i.test(line[p + 10] ?? "")) {
-        p += 10;
-        continue;
-      }
-      if (line.startsWith("\\boxed-run", p) && !/[a-z]/i.test(line[p + 10] ?? "")) {
-        p += 10;
-        continue;
-      }
-      if (line.startsWith("\\boxed-start", p) && !/[a-z]/i.test(line[p + 12] ?? "")) {
-        p += 12;
-        continue;
-      }
-      if (line.startsWith("\\boxed-end", p) && !/[a-z]/i.test(line[p + 10] ?? "")) {
-        p += 10;
-        continue;
-      }
-      if (line.startsWith("\\rounded-start", p) && !/[a-z]/i.test(line[p + 14] ?? "")) {
-        p += 14;
-        continue;
-      }
-      if (line.startsWith("\\rounded-end", p) && !/[a-z]/i.test(line[p + 12] ?? "")) {
-        p += 12;
-        continue;
-      }
-      if (line.startsWith("\\circled-start", p) && !/[a-z]/i.test(line[p + 14] ?? "")) {
-        p += 14;
-        continue;
-      }
-      if (line.startsWith("\\circled-end", p) && !/[a-z]/i.test(line[p + 12] ?? "")) {
-        p += 12;
-        continue;
-      }
-      const drawLineToken = line.slice(p).match(/^\\drawline#[-+]?\d+(?:\.\d+)?#[-+]?\d+(?:\.\d+)?/);
-      if (drawLineToken) {
-        p += drawLineToken[0].length;
-        continue;
-      }
-      const overrideToken = line.slice(p).match(/^\\(?:boxpad|thickness|cornerradius)#[-+]?\d+(?:\.\d+)?/);
-      if (overrideToken) {
-        p += overrideToken[0].length;
-        continue;
-      }
-      if (line.startsWith("\\sub", p) && !/[a-z]/i.test(line[p + 4] ?? "")) {
-        p += 4;
-        continue;
-      }
-      if (line.startsWith("\\super", p) && !/[a-z]/i.test(line[p + 6] ?? "")) {
-        p += 6;
-        continue;
-      }
-      if (line.startsWith("\\with-color", p)) {
-        p += "\\with-color".length;
-        while (p < line.length && /\s/.test(line[p]))
-          p++;
-        if (p < line.length && line[p] === '"') {
-          p++;
-          while (p < line.length && line[p] !== '"') {
-            if (line[p] === "\\" && p + 1 < line.length)
-              p += 2;
-            else
-              p++;
-          }
-          if (p < line.length)
-            p++;
-        }
-        continue;
-      }
-      return true;
-    }
-  };
-  while (i < line.length) {
-    if (line[i] === "\\") {
-      if (line.startsWith("\\sub", i) && !/[a-z]/i.test(line[i + 4] ?? "") && hasContentAhead(i + "\\sub".length)) {
-        i += "\\sub".length;
-        pendingBaseline = "sub";
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\super", i) && !/[a-z]/i.test(line[i + 6] ?? "") && hasContentAhead(i + "\\super".length)) {
-        i += "\\super".length;
-        pendingBaseline = "super";
-        skipWs();
-        continue;
-      }
-      const raiseLowerMatch = line.slice(i).match(/^\\(raise|lower)#(-?[\d.]+)/);
-      if (raiseLowerMatch) {
-        const dir = raiseLowerMatch[1] === "raise" ? -1 : 1;
-        const amount = parseFloat(raiseLowerMatch[2]);
-        i += raiseLowerMatch[0].length;
-        pendingDyStaffSpaces = dir * amount;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\bold", i) && !/[a-z]/i.test(line[i + 5] ?? "") && hasContentAhead(i + "\\bold".length)) {
-        i += "\\bold".length;
-        pendingBold = true;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\italic", i) && !/[a-z]/i.test(line[i + 7] ?? "") && hasContentAhead(i + "\\italic".length)) {
-        i += "\\italic".length;
-        pendingItalic = true;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\typewriter", i) && !/[a-z]/i.test(line[i + 11] ?? "") && hasContentAhead(i + "\\typewriter".length)) {
-        i += "\\typewriter".length;
-        pendingCode = true;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\smallCaps", i) && !/[a-z]/i.test(line[i + 10] ?? "") && hasContentAhead(i + "\\smallCaps".length)) {
-        i += "\\smallCaps".length;
-        pendingSmallCaps = true;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\boxed-run", i) && !/[a-z]/i.test(line[i + 10] ?? "") && hasContentAhead(i + "\\boxed-run".length)) {
-        i += "\\boxed-run".length;
-        pendingBoxed = true;
-        skipWs();
-        continue;
-      }
-      const boxPadMatch = line.slice(i).match(/^\\boxpad#([-+]?\d+(?:\.\d+)?)/);
-      if (boxPadMatch) {
-        i += boxPadMatch[0].length;
-        pendingBoxPadding = Number(boxPadMatch[1]);
-        skipWs();
-        continue;
-      }
-      const thicknessMatch = line.slice(i).match(/^\\thickness#([-+]?\d+(?:\.\d+)?)/);
-      if (thicknessMatch) {
-        i += thicknessMatch[0].length;
-        pendingThickness = Number(thicknessMatch[1]);
-        skipWs();
-        continue;
-      }
-      const cornerMatch = line.slice(i).match(/^\\cornerradius#([-+]?\d+(?:\.\d+)?)/);
-      if (cornerMatch) {
-        i += cornerMatch[0].length;
-        pendingCornerRadius = Number(cornerMatch[1]);
-        skipWs();
-        continue;
-      }
-      const drawLineMatch = line.slice(i).match(/^\\drawline#([-+]?\d+(?:\.\d+)?)#([-+]?\d+(?:\.\d+)?)/);
-      if (drawLineMatch) {
-        i += drawLineMatch[0].length;
-        runs.push({
-          text: "",
-          drawLineWidthStaffSpaces: Number(drawLineMatch[1]),
-          drawLineDyStaffSpaces: Number(drawLineMatch[2])
-        });
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\boxed-start", i) && !/[a-z]/i.test(line[i + 12] ?? "") && hasContentAhead(i + "\\boxed-start".length)) {
-        i += "\\boxed-start".length;
-        currentBoxedGroup = nextBoxedGroup++;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\boxed-end", i) && !/[a-z]/i.test(line[i + 10] ?? "")) {
-        i += "\\boxed-end".length;
-        currentBoxedGroup = undefined;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\rounded-start", i) && !/[a-z]/i.test(line[i + 14] ?? "") && hasContentAhead(i + "\\rounded-start".length)) {
-        i += "\\rounded-start".length;
-        currentRoundedGroup = nextRoundedGroup++;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\rounded-end", i) && !/[a-z]/i.test(line[i + 12] ?? "")) {
-        i += "\\rounded-end".length;
-        currentRoundedGroup = undefined;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\circled-start", i) && !/[a-z]/i.test(line[i + 14] ?? "") && hasContentAhead(i + "\\circled-start".length)) {
-        i += "\\circled-start".length;
-        currentCircledGroup = nextCircledGroup++;
-        skipWs();
-        continue;
-      }
-      if (line.startsWith("\\circled-end", i) && !/[a-z]/i.test(line[i + 12] ?? "")) {
-        i += "\\circled-end".length;
-        currentCircledGroup = undefined;
-        skipWs();
-        continue;
-      }
-      const color = tryParseWithColor();
-      if (color) {
-        pendingColor = color;
-        skipWs();
-        continue;
-      }
-    }
-    if (/\s/.test(line[i])) {
-      let j2 = i;
-      while (j2 < line.length && /\s/.test(line[j2]))
-        j2++;
-      if (!lineCode && !pendingCode && (line.startsWith("\\sub", j2) && !/[a-z]/i.test(line[j2 + 4] ?? "") && hasContentAhead(j2 + "\\sub".length) || line.startsWith("\\super", j2) && !/[a-z]/i.test(line[j2 + 6] ?? "") && hasContentAhead(j2 + "\\super".length))) {
-        i = j2;
-        continue;
-      }
-      if (lineCode || pendingCode) {
-        for (let si = i;si < j2; si++)
-          runs.push({ text: " ", code: true });
-      } else {
-        runs.push({ text: " " });
-      }
-      i = j2;
-      continue;
-    }
-    let j = i;
-    while (j < line.length && !/\s/.test(line[j]))
-      j++;
-    const token = line.slice(i, j);
-    const applyBold = pendingBold || lineBold;
-    const applyCode = pendingCode || lineCode || codeDurationCarry && looksLikeLilyDuration(token);
-    const applyItalic = pendingItalic || lineItalic;
-    const applyBoxed = pendingBoxed;
-    const applySmallCaps = pendingSmallCaps;
-    const applyBoxedGroup = currentBoxedGroup;
-    const applyRoundedGroup = currentRoundedGroup;
-    const applyCircledGroup = currentCircledGroup;
-    const applyColor = pendingColor ?? lineColor;
-    const applyBaseline = pendingBaseline;
-    const applyDy = pendingDyStaffSpaces;
-    runs.push({
-      text: token,
-      ...applyBold ? { bold: true } : {},
-      ...applyItalic ? { italic: true } : {},
-      ...applyCode ? { code: true } : {},
-      ...applyBoxed ? { boxed: true } : {},
-      ...applyBoxedGroup !== undefined ? { boxedGroup: applyBoxedGroup } : {},
-      ...applyRoundedGroup !== undefined ? { roundedGroup: applyRoundedGroup } : {},
-      ...applyCircledGroup !== undefined ? { circledGroup: applyCircledGroup } : {},
-      ...pendingBoxPadding !== undefined ? { boxPadding: pendingBoxPadding } : {},
-      ...pendingThickness !== undefined ? { thickness: pendingThickness } : {},
-      ...pendingCornerRadius !== undefined ? { cornerRadius: pendingCornerRadius } : {},
-      ...applySmallCaps ? { smallCaps: true } : {},
-      ...applyColor ? { color: applyColor } : {},
-      ...applyBaseline ? { baseline: applyBaseline } : {},
-      ...applyDy !== undefined ? { dyStaffSpaces: applyDy } : {}
-    });
-    if (pendingCode && token.startsWith("\\"))
-      codeDurationCarry = true;
-    else if (codeDurationCarry)
-      codeDurationCarry = false;
-    else
-      codeDurationCarry = false;
-    pendingBold = false;
-    pendingItalic = false;
-    pendingCode = false;
-    pendingBoxed = false;
-    pendingSmallCaps = false;
-    pendingBoxPadding = undefined;
-    pendingThickness = undefined;
-    pendingCornerRadius = undefined;
-    pendingColor = undefined;
-    pendingBaseline = undefined;
-    pendingDyStaffSpaces = undefined;
-    i = j;
-  }
-  return runs;
-}
-function normalizeRunSpacing(runs) {
-  const out = [];
-  for (let i = 0;i < runs.length; i++) {
-    const run = runs[i];
-    const prev = out[out.length - 1];
-    const next = runs[i + 1];
-    if (run.text === " ") {
-      if (run.code) {
-        out.push(run);
-        continue;
-      }
-      const prevText = prev?.text ?? "";
-      const nextText = next?.text ?? "";
-      const nextIsClosingPunct = /^[\)\]\}\.,:;!?]$/.test(nextText);
-      const prevIsOpeningPunct = /^[\(\[\{]$/.test(prevText);
-      const numericHeadingDot = nextText === "." && /^\d+$/.test(prevText);
-      const schemePairDot = nextText === "." && /#'\([^)]*$/.test(prevText);
-      if (nextIsClosingPunct && !numericHeadingDot && !schemePairDot || prevIsOpeningPunct)
-        continue;
-      if (prev?.text === " ")
-        continue;
-      out.push(run);
-      continue;
-    }
-    out.push(run);
-  }
-  while (out.length > 0 && out[out.length - 1].text === " " && !out[out.length - 1].code)
-    out.pop();
-  return out;
-}
-function wrapInlineRuns(runs, fontSize, maxWidth) {
-  const words = [];
-  const spacedBefore = [];
-  let anySpaceRun = false;
-  let sawSpace = false;
-  for (const r of runs) {
-    if (r.text.trim().length === 0) {
-      if (r.text.length > 0) {
-        anySpaceRun = true;
-        sawSpace = true;
-      }
-      continue;
-    }
-    words.push(r);
-    spacedBefore.push(sawSpace);
-    sawSpace = false;
-  }
-  if (words.length === 0)
-    return [[{ text: "" }]];
-  const lines = [];
-  let cur = [];
-  let curW = 0;
-  const isClosingPunct = (text) => /^[\)\]\}\.,:;!?]$/.test(text);
-  const isOpeningPunct = (text) => /^[\(\[\{]$/.test(text);
-  const needsSpaceBefore = (line, next) => {
-    if (line.length === 0)
-      return false;
-    const prev = line[line.length - 1];
-    if (!prev)
-      return false;
-    if (prev.code && next.code)
-      return true;
-    if (isClosingPunct(next.text))
-      return false;
-    if (isOpeningPunct(prev.text))
-      return false;
-    return true;
-  };
-  const spaceRunBefore = (line, next) => {
-    const prev = line[line.length - 1];
-    if (!prev)
-      return { text: " " };
-    return {
-      text: " ",
-      ...prev.bold && next.bold ? { bold: true } : {},
-      ...prev.italic && next.italic ? { italic: true } : {},
-      ...prev.code && next.code ? { code: true } : {},
-      ...prev.smallCaps && next.smallCaps ? { smallCaps: true } : {},
-      ...prev.color && prev.color === next.color ? { color: prev.color } : {},
-      ...prev.fontSizeScale != null && prev.fontSizeScale === next.fontSizeScale ? { fontSizeScale: prev.fontSizeScale } : {}
-    };
-  };
-  const clusters = [];
-  for (let i = 0;i < words.length; i++) {
-    const spaced = anySpaceRun ? spacedBefore[i] : true;
-    if (i > 0 && anySpaceRun && !spaced && clusters.length > 0) {
-      clusters[clusters.length - 1].runs.push(words[i]);
-    } else {
-      clusters.push({ runs: [words[i]], spaced });
-    }
-  }
-  for (const cluster of clusters) {
-    const wW = cluster.runs.reduce((sum, r) => sum + runWidth(r, fontSize), 0);
-    const first = cluster.runs[0];
-    const addSpace = anySpaceRun ? cluster.spaced && cur.length > 0 : needsSpaceBefore(cur, first);
-    const spaceRun = addSpace ? spaceRunBefore(cur, first) : undefined;
-    const addW = (spaceRun ? runWidth(spaceRun, fontSize) : 0) + wW;
-    if (cur.length > 0 && curW + addW > maxWidth) {
-      lines.push(cur);
-      cur = cluster.runs.map((r) => ({ ...r }));
-      curW = wW;
-    } else {
-      if (spaceRun)
-        cur.push(spaceRun);
-      cur.push(...cluster.runs.map((r) => ({ ...r })));
-      curW += addW;
-    }
-  }
-  if (cur.length > 0)
-    lines.push(cur);
-  return lines;
 }
 
 // src/music-rendering/renderer/markup/layout.ts
@@ -87488,7 +87932,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.8.0",
+  version: "0.8.1",
   type: "module",
   exports: {
     ".": {
@@ -87561,7 +88005,8 @@ var APP_VERSION = package_default.version ?? "0.0.0";
 
 // src/music-rendering/renderer/document/tagline.ts
 var TAGLINE_FRAME_THICKNESS_SS = 0.1;
-var TAGLINE_LINE_HEIGHT_EM = 1.35;
+var DEFAULT_BASELINE_SKIP_SS = 3;
+var FOOTER_COLUMN_BASELINE_SKIP_SS = DEFAULT_BASELINE_SKIP_SS;
 var TAGLINE_ASCENT_EM = 0.76;
 var TAGLINE_DESCENT_EM = 0.24;
 var TAGLINE_INK_DESCENDER_EM = 0.217;
@@ -87569,7 +88014,7 @@ var DESCENDER_GLYPHS = /[gjpqy]/;
 function taglineInkDescentEm(text) {
   return DESCENDER_GLYPHS.test(text) ? TAGLINE_INK_DESCENDER_EM : 0;
 }
-function wrapTaglineLines(text, fontSize, maxWidthPx) {
+function wrapMarkupTextLines(text, fontSize, maxWidthPx) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines = [];
   let line = "";
@@ -87595,49 +88040,104 @@ function resolveTaglineText(tagline, _lilypondVersion) {
   }
   return `Music engraving by LilyJS ${APP_VERSION}—www.lilyJS.org`;
 }
+function lineRunTspans(line, fontSize, keyPrefix) {
+  const lineScale = line.fontSizeScale ?? 1;
+  let lastVisibleScale = lineScale;
+  return (line.runs ?? []).map((run, runIndex) => {
+    const isSpace = run.text.trim().length === 0;
+    const scale = run.fontSizeScale ?? (isSpace ? lastVisibleScale : lineScale);
+    if (!isSpace)
+      lastVisibleScale = run.fontSizeScale ?? lineScale;
+    return el("tspan", {
+      fontSize: fontSize * scale,
+      ...run.italic ? { fontStyle: "italic" } : {},
+      ...run.bold ? { fontWeight: "bold" } : {},
+      ...run.sans ? { fontFamily: SANS_TEXT_STACK } : {},
+      ...run.color ? { fill: run.color } : {}
+    }, run.text, `${keyPrefix}-run-${runIndex}`);
+  });
+}
+function maxLineFontScale(line) {
+  const scales = (line.runs ?? []).filter((run) => run.text.trim().length > 0).map((run) => run.fontSizeScale ?? line.fontSizeScale ?? 1);
+  return scales.length > 0 ? Math.max(...scales) : line.fontSizeScale ?? 1;
+}
+function estimateLineWidthPx(line, baseFontSize) {
+  const lineScale = line.fontSizeScale ?? 1;
+  if (!line.runs || line.runs.length === 0) {
+    return estimateMarkupAdvanceWidthPx(line.text, baseFontSize * lineScale);
+  }
+  let width = 0;
+  let lastVisibleScale = lineScale;
+  for (const run of line.runs) {
+    const isSpace = run.text.trim().length === 0;
+    const scale = run.fontSizeScale ?? (isSpace ? lastVisibleScale : lineScale);
+    if (!isSpace)
+      lastVisibleScale = run.fontSizeScale ?? lineScale;
+    width += estimateMarkupAdvanceWidthPx(run.text, baseFontSize * scale);
+  }
+  return width;
+}
 function buildDocumentTagline(input) {
-  const { taglineText, taglineLines, taglineBox, totalWidth, totalHeight, staffSizeScale = 1, bottomOffsetPx, wrapWidthPx, bottomMarginPx, autoHeightPage = false } = input;
-  if (!taglineText)
+  const { taglineText, copyrightText, copyrightLines, copyrightColumns, copyrightBaselineSkip, taglineLines, taglineBox, taglineBaselineSkip, totalWidth, totalHeight, staffSizeScale = 1, bottomOffsetPx, wrapWidthPx, bottomMarginPx, autoHeightPage = false } = input;
+  const hasCopyright = Boolean(copyrightText) || (copyrightLines?.length ?? 0) > 0;
+  if (!taglineText && !hasCopyright)
     return { elements: [], grobs: [] };
   const fontSize = TAGLINE_FONT_SIZE * staffSizeScale;
   const boxPaddingPx = (taglineBox?.padding ?? 0) * LINE_SPACING * staffSizeScale;
   const marginDerived = bottomMarginPx != null && (!autoHeightPage || taglineBox);
-  const bottomOffset = marginDerived ? bottomMarginPx + boxPaddingPx + fontSize * (taglineBox ? TAGLINE_DESCENT_EM : taglineInkDescentEm(taglineText)) : bottomOffsetPx ?? TAGLINE_BOTTOM_OFFSET * staffSizeScale;
+  const bottomOffset = marginDerived ? bottomMarginPx + boxPaddingPx + fontSize * (taglineBox ? TAGLINE_DESCENT_EM : taglineInkDescentEm(taglineText ?? copyrightText ?? "")) : bottomOffsetPx ?? TAGLINE_BOTTOM_OFFSET * staffSizeScale;
   const anchor = {
     x: totalWidth / 2,
     y: totalHeight - bottomOffset
   };
-  const box = {
-    x: anchor.x - Math.max(taglineText.length * fontSize * 0.28, fontSize),
-    y: anchor.y - fontSize,
-    width: Math.max(taglineText.length * fontSize * 0.56, fontSize * 2),
-    height: fontSize * 1.15
-  };
+  const elements = [];
+  const grobs2 = [];
   const paddingPx = boxPaddingPx;
   const maxLineWidthPx = Math.max(fontSize * 4, (wrapWidthPx ?? totalWidth * 0.86) - paddingPx * 2);
-  const lines = taglineLines && taglineLines.length > 1 ? [...taglineLines] : taglineBox?.wordwrap ? wrapTaglineLines(taglineText, fontSize, maxLineWidthPx) : [taglineText];
-  const lineHeight = fontSize * TAGLINE_LINE_HEIGHT_EM;
+  const lines = !taglineText ? [] : taglineLines && taglineLines.length > 1 ? [...taglineLines] : taglineBox?.wordwrap ? wrapMarkupTextLines(taglineText, fontSize, maxLineWidthPx).map((text) => ({ text })) : [{ text: taglineText }];
+  const lineHeight = (taglineBaselineSkip ?? DEFAULT_BASELINE_SKIP_SS) * LINE_SPACING * staffSizeScale;
   const baselines = lines.map((_, index) => anchor.y - (lines.length - 1 - index) * lineHeight);
-  const textElements = lines.map((line, index) => el("text", {
-    x: anchor.x,
-    y: baselines[index],
-    fontSize,
-    fontFamily: ROMAN_TEXT_STACK,
-    textAnchor: "middle",
-    fill: "currentColor",
-    ...taglineBox ? {
-      textLength: estimateMarkupAdvanceWidthPx(line, fontSize),
-      lengthAdjust: "spacingAndGlyphs"
-    } : {},
-    "data-lily-element": "tagline"
-  }, line, lines.length > 1 ? `tagline-${index}` : "tagline"));
+  const lineWidths = lines.map((line) => estimateLineWidthPx(line, fontSize));
+  const textElements = lines.map((line, index) => {
+    const lineScale = line.fontSizeScale ?? 1;
+    const pin = taglineBox ? { textLength: lineWidths[index], lengthAdjust: "spacingAndGlyphs" } : {};
+    if (!line.runs || line.runs.length === 0) {
+      return el("text", {
+        x: anchor.x,
+        y: baselines[index],
+        fontSize: fontSize * lineScale,
+        fontFamily: ROMAN_TEXT_STACK,
+        textAnchor: "middle",
+        fill: "currentColor",
+        ...pin,
+        "data-lily-element": "tagline"
+      }, line.text, lines.length > 1 ? `tagline-${index}` : "tagline");
+    }
+    const tspans = lineRunTspans(line, fontSize, `tagline-${index}`);
+    return el("text", {
+      x: anchor.x,
+      y: baselines[index],
+      fontSize: fontSize * lineScale,
+      fontFamily: ROMAN_TEXT_STACK,
+      textAnchor: "middle",
+      fill: "currentColor",
+      "data-lily-element": "tagline"
+    }, tspans, `tagline-${index}`);
+  });
+  const box = {
+    x: anchor.x - Math.max((taglineText ?? "").length * fontSize * 0.28, fontSize),
+    y: anchor.y - fontSize,
+    width: Math.max((taglineText ?? "").length * fontSize * 0.56, fontSize * 2),
+    height: fontSize * 1.15
+  };
   const frameElements = [];
-  if (taglineBox) {
-    const widestLinePx = Math.max(...lines.map((line) => estimateMarkupAdvanceWidthPx(line, fontSize)));
+  if (taglineBox && lines.length > 0) {
+    const widestLinePx = Math.max(...lineWidths);
     const thickness = TAGLINE_FRAME_THICKNESS_SS * LINE_SPACING * staffSizeScale;
     const left = anchor.x - widestLinePx / 2 - paddingPx;
     const right = anchor.x + widestLinePx / 2 + paddingPx;
-    const top = baselines[0] - fontSize * TAGLINE_ASCENT_EM - paddingPx;
+    const firstLineFontSize = fontSize * (lines[0].fontSizeScale ?? 1);
+    const top = baselines[0] - firstLineFontSize * TAGLINE_ASCENT_EM - paddingPx;
     const bottom = anchor.y + fontSize * TAGLINE_DESCENT_EM + paddingPx;
     const strut = (x, y, w, h, piece) => el("rect", {
       x,
@@ -87654,9 +88154,8 @@ function buildDocumentTagline(input) {
     box.width = right - left;
     box.height = bottom - top;
   }
-  return {
-    elements: [...frameElements, ...textElements],
-    grobs: [{
+  if (taglineText) {
+    grobs2.push({
       id: "document:tagline:0",
       type: "text",
       semanticId: "document:tagline",
@@ -87676,7 +88175,122 @@ function buildDocumentTagline(input) {
         element: "tagline",
         text: taglineText
       }
-    }]
+    });
+  }
+  if (copyrightColumns && copyrightColumns.length > 0) {
+    const wordSpacePx = 0.6 * LINE_SPACING * staffSizeScale;
+    const skipPx = (copyrightBaselineSkip ?? DEFAULT_BASELINE_SKIP_SS) * LINE_SPACING * staffSizeScale;
+    const pitchPx = (above, below) => Math.max(skipPx, fontSize * (TAGLINE_DESCENT_EM * maxLineFontScale(above) + TAGLINE_ASCENT_EM * maxLineFontScale(below)));
+    const columnWidths = copyrightColumns.map((column) => Math.max(...column.lines.map((line) => estimateLineWidthPx(line, fontSize))));
+    const columnDepths = copyrightColumns.map((column) => {
+      let depth = 0;
+      for (let i = 1;i < column.lines.length; i++) {
+        depth += pitchPx(column.lines[i - 1], column.lines[i]);
+      }
+      return depth;
+    });
+    const totalW = columnWidths.reduce((a, b) => a + b, 0) + wordSpacePx * (copyrightColumns.length - 1);
+    const bottomAnchor = lines.length > 0 ? baselines[0] - FOOTER_COLUMN_BASELINE_SKIP_SS * LINE_SPACING * staffSizeScale : anchor.y;
+    const firstRowBaseline = bottomAnchor - Math.max(...columnDepths);
+    let columnLeft = anchor.x - totalW / 2;
+    copyrightColumns.forEach((column, colIndex) => {
+      const width = columnWidths[colIndex];
+      const textAnchor = column.align === "right" ? "end" : column.align === "center" ? "middle" : "start";
+      const x = column.align === "right" ? columnLeft + width : column.align === "center" ? columnLeft + width / 2 : columnLeft;
+      let baseline = firstRowBaseline;
+      column.lines.forEach((line, rowIndex) => {
+        if (rowIndex > 0)
+          baseline += pitchPx(column.lines[rowIndex - 1], line);
+        elements.push(el("text", {
+          x,
+          y: baseline,
+          fontSize: fontSize * (line.fontSizeScale ?? 1),
+          fontFamily: ROMAN_TEXT_STACK,
+          textAnchor,
+          fill: "currentColor",
+          "data-lily-element": "copyright"
+        }, line.runs && line.runs.length > 0 ? lineRunTspans(line, fontSize, `copyright-${colIndex}-${rowIndex}`) : line.text, `copyright-${colIndex}-${rowIndex}`));
+      });
+      columnLeft += width + wordSpacePx;
+    });
+    const blockBox = {
+      x: anchor.x - totalW / 2,
+      y: firstRowBaseline - fontSize * TAGLINE_ASCENT_EM,
+      width: totalW,
+      height: bottomAnchor - firstRowBaseline + fontSize * (TAGLINE_ASCENT_EM + TAGLINE_DESCENT_EM)
+    };
+    grobs2.push({
+      id: "document:copyright:0",
+      type: "text",
+      semanticId: "document:copyright",
+      bbox: blockBox,
+      staffSpaceBBox: {
+        x: blockBox.x / LINE_SPACING,
+        y: blockBox.y / LINE_SPACING,
+        width: blockBox.width / LINE_SPACING,
+        height: blockBox.height / LINE_SPACING
+      },
+      anchor: { x: anchor.x, y: anchor.y },
+      staffSpaceAnchor: { x: anchor.x / LINE_SPACING, y: anchor.y / LINE_SPACING },
+      attributes: {
+        element: "copyright",
+        text: copyrightText ?? copyrightColumns.flatMap((c) => c.lines.map((l) => l.text)).join(" ")
+      }
+    });
+  } else if (copyrightText || copyrightLines && copyrightLines.length > 0) {
+    const rows = copyrightLines && copyrightLines.length > 0 ? [...copyrightLines] : [{ text: copyrightText }];
+    const bottomBaseline = lines.length > 0 ? baselines[0] - FOOTER_COLUMN_BASELINE_SKIP_SS * LINE_SPACING * staffSizeScale : anchor.y;
+    const rowBaselines = new Array(rows.length);
+    rowBaselines[rows.length - 1] = bottomBaseline;
+    for (let i = rows.length - 2;i >= 0; i--) {
+      const skipPx = (copyrightBaselineSkip ?? DEFAULT_BASELINE_SKIP_SS) * LINE_SPACING * staffSizeScale;
+      const contactPx = fontSize * (TAGLINE_DESCENT_EM * maxLineFontScale(rows[i]) + TAGLINE_ASCENT_EM * maxLineFontScale(rows[i + 1]));
+      rowBaselines[i] = rowBaselines[i + 1] - Math.max(skipPx, contactPx);
+    }
+    rows.forEach((row, i) => {
+      elements.push(el("text", {
+        x: anchor.x,
+        y: rowBaselines[i],
+        fontSize: fontSize * (row.fontSizeScale ?? 1),
+        fontFamily: ROMAN_TEXT_STACK,
+        textAnchor: "middle",
+        fill: "currentColor",
+        "data-lily-element": "copyright"
+      }, row.runs && row.runs.length > 0 ? lineRunTspans(row, fontSize, `copyright-${i}`) : row.text, rows.length > 1 ? `copyright-${i}` : "copyright"));
+    });
+    const flatCopyright = copyrightText ?? rows.map((row) => row.text).join(" ");
+    const copyrightWidth = Math.max(...rows.map((row) => estimateLineWidthPx(row, fontSize)));
+    const copyrightBox = {
+      x: anchor.x - copyrightWidth / 2,
+      y: rowBaselines[0] - fontSize * TAGLINE_ASCENT_EM,
+      width: copyrightWidth,
+      height: bottomBaseline - rowBaselines[0] + fontSize * (TAGLINE_ASCENT_EM + TAGLINE_DESCENT_EM)
+    };
+    grobs2.push({
+      id: "document:copyright:0",
+      type: "text",
+      semanticId: "document:copyright",
+      bbox: copyrightBox,
+      staffSpaceBBox: {
+        x: copyrightBox.x / LINE_SPACING,
+        y: copyrightBox.y / LINE_SPACING,
+        width: copyrightBox.width / LINE_SPACING,
+        height: copyrightBox.height / LINE_SPACING
+      },
+      anchor: { x: anchor.x, y: bottomBaseline },
+      staffSpaceAnchor: {
+        x: anchor.x / LINE_SPACING,
+        y: bottomBaseline / LINE_SPACING
+      },
+      attributes: {
+        element: "copyright",
+        text: flatCopyright
+      }
+    });
+  }
+  return {
+    elements: [...frameElements, ...textElements, ...elements],
+    grobs: grobs2
   };
 }
 
@@ -88620,6 +89234,11 @@ function finalizeDocumentSvgModel(input) {
     taglineText,
     taglineLines,
     taglineBox,
+    taglineBaselineSkip,
+    copyrightText,
+    copyrightLines,
+    copyrightColumns,
+    copyrightBaselineSkip,
     taglineBottomOffsetPx,
     taglineBottomMarginPx,
     targetPageIndex,
@@ -88641,10 +89260,17 @@ function finalizeDocumentSvgModel(input) {
   const exportWidthMm = isAutoWidthPageBreaking(pageBreaking) ? documentSvgUnitsToMm(totalWidth) : documentInfo?.paperWidthMm ?? 210;
   const exportHeightMm = isAutoHeightPageBreaking(pageBreaking) ? documentSvgUnitsToMm(totalHeight) : documentInfo?.paperHeightMm ?? 297;
   const isLastDocumentPage = targetPageIndex >= maxPageIndexReached;
-  const tagline = isLastDocumentPage ? buildDocumentTagline({
-    taglineText: taglineText ?? null,
+  const isFirstDocumentPage = targetPageIndex === 0;
+  const hasCopyright = Boolean(copyrightText) || (copyrightLines?.length ?? 0) > 0;
+  const tagline = isLastDocumentPage || isFirstDocumentPage && hasCopyright ? buildDocumentTagline({
+    taglineText: isLastDocumentPage ? taglineText ?? null : null,
+    copyrightText: isFirstDocumentPage ? copyrightText ?? null : null,
+    copyrightLines: isFirstDocumentPage ? copyrightLines : undefined,
+    copyrightColumns: isFirstDocumentPage ? copyrightColumns : undefined,
+    copyrightBaselineSkip,
     taglineLines,
     taglineBox,
+    taglineBaselineSkip,
     totalWidth,
     totalHeight,
     staffSizeScale,
@@ -89425,6 +90051,11 @@ function renderDocumentToSvgModel(opts) {
     taglineText,
     taglineLines: documentInfo?.taglineLines,
     taglineBox: documentInfo?.taglineBox,
+    taglineBaselineSkip: documentInfo?.taglineBaselineSkip,
+    copyrightText: documentInfo?.copyright,
+    copyrightLines: documentInfo?.copyrightLines,
+    copyrightColumns: documentInfo?.copyrightColumns,
+    copyrightBaselineSkip: documentInfo?.copyrightBaselineSkip,
     taglineBottomOffsetPx: taglineBottomOffsetForPage,
     taglineBottomMarginPx: mmToPx(documentInfo?.bottomMarginMm ?? 10),
     targetPageIndex,
@@ -89453,6 +90084,11 @@ function documentInfoFromMusicDocumentInfo(info) {
     tagline: info.header?.tagline,
     taglineLines: info.header?.taglineLines,
     taglineBox: info.header?.taglineBox,
+    taglineBaselineSkip: info.header?.taglineBaselineSkip,
+    copyright: typeof info.header?.copyright === "string" ? info.header.copyright : undefined,
+    copyrightLines: info.header?.copyrightLines,
+    copyrightColumns: info.header?.copyrightColumns,
+    copyrightBaselineSkip: info.header?.copyrightBaselineSkip,
     raggedLast: info.raggedLast,
     raggedLastBottom: info.raggedLastBottom,
     raggedRight: info.raggedRight,
