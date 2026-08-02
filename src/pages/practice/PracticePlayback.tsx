@@ -173,6 +173,7 @@ export default function PracticePlayback({
   backingSelectionRef.current = backingSelection
   const backingArrangementRef = useRef<BackingLayer[]>([])
   const printedOnsetsRef = useRef<number[]>([])
+  const noteEventsRef = useRef<NotePlaybackEvent[]>([])
   const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [], pizzicato: [] })
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
@@ -254,6 +255,7 @@ export default function PracticePlayback({
     [parsed],
   )
   printedOnsetsRef.current = printedOnsets
+  noteEventsRef.current = noteEvents
 
   const backingArrangement = useMemo<BackingLayer[]>(
     () => (parsed?.score && isStyle(backingSelection) ? buildBackingArrangement(parsed.score, backingSelection, meterNumerator) : []),
@@ -305,12 +307,23 @@ export default function PracticePlayback({
     setActiveChordIndex(-1)
   }, [applyNoteHighlight])
 
-  /** Stop but REMEMBER the beat, so the next start resumes from here. */
+  /**
+   * Stop, but keep BOTH the resume point and the on-screen position.
+   *
+   * stopPlayback() clears the chord and note highlights because ending a take
+   * should leave a clean score — but a pause must show where you stopped, or
+   * you cannot find your place before pressing space again.
+   */
   const pausePlayback = useCallback(() => {
     const beat = clockRef.current?.currentBeat
     stopPlayback()
-    resumeBeatRef.current = beat != null && beat > 0 ? beat : null
-  }, [stopPlayback])
+    const at = beat != null && beat > 0 ? beat : null
+    resumeBeatRef.current = at
+    if (at !== null) {
+      setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, at))
+      applyNoteHighlight(noteEventIdsAtBeat(noteEventsRef.current, at))
+    }
+  }, [stopPlayback, applyNoteHighlight])
 
   const startPlayback = useCallback(async (resumeFromBeat?: number) => {
     if (!schedule || schedule.totalBeats === 0) return
