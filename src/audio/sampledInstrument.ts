@@ -34,7 +34,11 @@ const STRINGS: SampleSet = {
     { midiNote: 67, note: 'G4' }, { midiNote: 71, note: 'B4' }, { midiNote: 74, note: 'D5' },
     { midiNote: 77, note: 'F5' }, { midiNote: 81, note: 'A5' }, { midiNote: 84, note: 'C6' },
   ],
-  attackS: 0.03, releaseS: 0.28, gain: 0.9, loopSustain: true, reverbWet: 0.32, voices: 2, detuneCents: 7,
+  // A bowed section does not speak instantly and does not stop dead: a slower
+  // attack and a long tail are most of what separates "sampled strings" from
+  // "synth pad". Three lightly detuned voices widen the section without the
+  // chorusing a large detune produces.
+  attackS: 0.09, releaseS: 0.85, gain: 0.9, loopSustain: true, reverbWet: 0.38, voices: 3, detuneCents: 9,
 }
 
 const BASS: SampleSet = {
@@ -44,7 +48,9 @@ const BASS: SampleSet = {
     { midiNote: 40, note: 'E2' }, { midiNote: 43, note: 'G2' }, { midiNote: 48, note: 'C3' },
     { midiNote: 52, note: 'E3' }, { midiNote: 55, note: 'G3' },
   ],
-  attackS: 0.005, releaseS: 0.2, gain: 1.25, loopSustain: false, reverbWet: 0.1, voices: 1, detuneCents: 0,
+  // Upright bass: quick but not clicky, and it rings — a 0.2 s release cut the
+  // note off before the next downbeat, which read as a synth blip.
+  attackS: 0.008, releaseS: 0.45, gain: 1.25, loopSustain: false, reverbWet: 0.14, voices: 1, detuneCents: 0,
 }
 
 const GUITAR: SampleSet = {
@@ -55,7 +61,7 @@ const GUITAR: SampleSet = {
     { midiNote: 64, note: 'E4' }, { midiNote: 67, note: 'G4' }, { midiNote: 72, note: 'C5' },
     { midiNote: 76, note: 'E5' },
   ],
-  attackS: 0.004, releaseS: 0.14, gain: 0.85, loopSustain: false, reverbWet: 0.16, voices: 2, detuneCents: 6,
+  attackS: 0.004, releaseS: 0.18, gain: 0.85, loopSustain: false, reverbWet: 0.18, voices: 2, detuneCents: 6,
 }
 
 const PIZZICATO: SampleSet = {
@@ -66,9 +72,11 @@ const PIZZICATO: SampleSet = {
     { midiNote: 60, note: 'C4' }, { midiNote: 64, note: 'E4' }, { midiNote: 67, note: 'G4' },
     { midiNote: 72, note: 'C5' },
   ],
-  // Section pizzicato: instant pluck, natural ring, two detuned voices for
-  // orchestral width, a bit of the same hall as the bowed ensemble.
-  attackS: 0.003, releaseS: 0.22, gain: 1.0, loopSustain: false, reverbWet: 0.26, voices: 2, detuneCents: 6,
+  // Section pizzicato: a pluck is instant, then decays — the ring has to be
+  // allowed to continue past the note's written length or every chick sounds
+  // clipped. Two detuned voices give the orchestral width, and it shares some
+  // of the bowed section's hall.
+  attackS: 0.003, releaseS: 0.55, gain: 1.0, loopSustain: false, reverbWet: 0.3, voices: 2, detuneCents: 6,
 }
 
 export const SAMPLE_SETS: Record<InstrumentId, SampleSet> = { strings: STRINGS, bass: BASS, guitar: GUITAR, pizzicato: PIZZICATO }

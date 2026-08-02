@@ -151,6 +151,41 @@ export function buildChordSchedule(score: ScoreLike): ChordScheduleResult {
   return { events, totalBeats, beatsPerBar, pulseBeats, bpm }
 }
 
+/**
+ * Onset beat of every PRINTED chord symbol, in document order.
+ *
+ * `buildChordSchedule` merges consecutive identical chords so the drone does
+ * not re-articulate, which means its event indices do NOT line up with the
+ * symbols drawn in the score (| g1:m | g1:m | is one event but two symbols).
+ * The UI highlight needs the printed sequence, or it cannot tell which "Gm"
+ * is currently sounding.
+ */
+export function printedChordOnsets(score: ScoreLike): number[] {
+  const measures = score.parts[0]?.measures ?? []
+  const onsets: number[] = []
+  let cursorQN = 0
+  for (const measure of measures) {
+    for (const symbol of measure.chordSymbols) {
+      if (symbol.eventId !== null) continue
+      if (!parseChordLabel(symbol.text)) continue
+      const offsetQN = symbol.offset ? (symbol.offset.num / symbol.offset.den) * 4 : 0
+      onsets.push(cursorQN + offsetQN)
+    }
+    cursorQN += measureDurationQN(measure)
+  }
+  return onsets.sort((a, b) => a - b)
+}
+
+/** Index of the printed chord sounding at `beat`, or -1 before the first. */
+export function printedChordIndexAtBeat(onsets: readonly number[], beat: number): number {
+  let idx = -1
+  for (let i = 0; i < onsets.length; i++) {
+    if (beat >= onsets[i]! - 1e-6) idx = i
+    else break
+  }
+  return idx
+}
+
 /** The chord event starting exactly at `beat`, if any (for scheduler wiring). */
 export function chordStartingAtBeat(events: ChordEvent[], beat: number): ChordEvent | undefined {
   return events.find(e => Math.abs(e.startBeat - beat) < 1e-6)

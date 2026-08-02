@@ -39,7 +39,8 @@ import {
 } from '../../audio/backingStyles'
 import {
   buildChordSchedule,
-  chordSoundingAtBeat,
+  printedChordIndexAtBeat,
+  printedChordOnsets,
   chordsStartingInWindow,
   type ChordScheduleResult,
 } from '../../audio/chordSchedule'
@@ -133,14 +134,16 @@ export default function PracticePlayback({
   const [bpm, setBpm] = useState(DEFAULT_BPM)
   const [countIn, setCountIn] = useState(true)
   const [loop, setLoop] = useState(false)
-  const [metronomeVol, setMetronomeVol] = useState(0.85)
+  // The click is a reference, not the music: default it BELOW the backing so
+  // starting playback does not drown the accompaniment.
+  const [metronomeVol, setMetronomeVol] = useState(0.45)
   const [metronomeOn, setMetronomeOn] = useState(true)
   // Backing: Off / Drone / a musical style, with a single volume.
   const [backingSelection, setBackingSelection] = useState<BackingSelection>('drone')
-  const [backingVol, setBackingVol] = useState(0.5)
+  const [backingVol, setBackingVol] = useState(0.65)
   // Transpose the exercise to a target key (0 = original).
   const [transposeSemitones, setTransposeSemitones] = useState(0)
-  const [activeChordLabel, setActiveChordLabel] = useState<string | null>(null)
+  const [activeChordIndex, setActiveChordIndex] = useState<number>(-1)
   const [isCountingIn, setIsCountingIn] = useState(false)
   const [shareStatus, setShareStatus] = useState('')
   const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
@@ -169,6 +172,7 @@ export default function PracticePlayback({
   const backingSelectionRef = useRef(backingSelection)
   backingSelectionRef.current = backingSelection
   const backingArrangementRef = useRef<BackingLayer[]>([])
+  const printedOnsetsRef = useRef<number[]>([])
   const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [], pizzicato: [] })
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
@@ -244,9 +248,16 @@ export default function PracticePlayback({
 
   // Active-style arrangement (one or more instrument layers) — rebuilt when the
   // exercise or style changes, read live via the ref inside onBeat.
+  // Printed chord onsets (unmerged) — the highlight indexes into these.
+  const printedOnsets = useMemo(
+    () => (parsed?.score ? printedChordOnsets(parsed.score) : []),
+    [parsed],
+  )
+  printedOnsetsRef.current = printedOnsets
+
   const backingArrangement = useMemo<BackingLayer[]>(
-    () => (parsed?.score && isStyle(backingSelection) ? buildBackingArrangement(parsed.score, backingSelection) : []),
-    [parsed, backingSelection],
+    () => (parsed?.score && isStyle(backingSelection) ? buildBackingArrangement(parsed.score, backingSelection, meterNumerator) : []),
+    [parsed, backingSelection, meterNumerator],
   )
   backingArrangementRef.current = backingArrangement
   // Per-instrument preload notes, so switching styles never falls back to synth.
@@ -274,6 +285,8 @@ export default function PracticePlayback({
   }, [])
 
   // ── Transport ───────────────────────────────────────────────────────────────
+  const resumeBeatRef = useRef<number | null>(null)
+
   const stopPlayback = useCallback(() => {
     clockRef.current?.stop()
     clockRef.current = null
@@ -289,10 +302,17 @@ export default function PracticePlayback({
     applyNoteHighlight([])
     setIsPlaying(false)
     setIsCountingIn(false)
-    setActiveChordLabel(null)
+    setActiveChordIndex(-1)
   }, [applyNoteHighlight])
 
-  const startPlayback = useCallback(async () => {
+  /** Stop but REMEMBER the beat, so the next start resumes from here. */
+  const pausePlayback = useCallback(() => {
+    const beat = clockRef.current?.currentBeat
+    stopPlayback()
+    resumeBeatRef.current = beat != null && beat > 0 ? beat : null
+  }, [stopPlayback])
+
+  const startPlayback = useCallback(async (resumeFromBeat?: number) => {
     if (!schedule || schedule.totalBeats === 0) return
     stopPlayback()
     setTrainerCompleted(false)
@@ -429,7 +449,7 @@ export default function PracticePlayback({
       noteAnchorRef.current = { beat: rawBeat, time: ctx.currentTime }
       if (rawBeat < 0) return
       const beat = shouldLoop ? rawBeat % total : rawBeat
-      setActiveChordLabel(chordSoundingAtBeat(schedule.events, beat)?.label ?? null)
+      setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, beat))
     })
 
     // Note cursor: interpolate the fraction into the current beat from the
@@ -458,7 +478,7 @@ export default function PracticePlayback({
     clockRef.current = clock
     droneRef.current = drone
     instrumentsRef.current = instruments
-    clock.start()
+    clock.start(resumeFromBeat)
     setIsPlaying(true)
   }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
 
@@ -492,6 +512,30 @@ export default function PracticePlayback({
   useEffect(() => {
     setTrainerCompleted(false)
   }, [trainerOn, trainerMode, trainerStart, trainerEnd, trainerStep, trainerMin, exercise.id])
+
+  // Space bar toggles playback. Pausing keeps the position (and the score's
+  // highlight), so pressing it again continues from the same bar rather than
+  // restarting the take.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      // Never steal the key from a control the user is operating.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' ||
+          target?.isContentEditable) return
+      e.preventDefault()
+      if (isPlaying) {
+        pausePlayback()
+      } else {
+        const from = resumeBeatRef.current
+        resumeBeatRef.current = null
+        void startPlayback(from ?? undefined)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isPlaying, pausePlayback, startPlayback])
 
   // Tear down audio when the view unmounts or the exercise changes
   useEffect(() => stopPlayback, [stopPlayback, exercise.id])
@@ -569,12 +613,24 @@ export default function PracticePlayback({
   useEffect(() => {
     const container = scoreContainerRef.current
     if (!container) return
-    container.querySelectorAll<SVGTextElement>('[data-lily-chord-label]').forEach(el => {
-      const active = activeChordLabel !== null && el.getAttribute('data-lily-chord-label') === activeChordLabel
+    // Highlight the sounding INSTANCE, not every symbol with the same text —
+    // matching on the label lit up all four "Gm" at once. Printed symbols and
+    // printedChordOnsets are both in document order, so the index aligns.
+    const symbols = [...container.querySelectorAll<SVGElement>('[data-lily-chord-label]')]
+    symbols.forEach((el, i) => {
+      const active = i === activeChordIndex
       el.style.fill = active ? '#fbbf24' : ''
       el.style.fontWeight = active ? 'bold' : ''
+      // A maj7 chord draws its triangle as a SEPARATE element right after the
+      // text, with no chord-label of its own, so it needs colouring too or the
+      // "Bb" lights up while its triangle stays white.
+      let sibling = el.nextElementSibling as SVGElement | null
+      while (sibling && sibling.getAttribute('data-lily-chord-suffix')) {
+        sibling.style.fill = active ? '#fbbf24' : ''
+        sibling = sibling.nextElementSibling as SVGElement | null
+      }
     })
-  }, [activeChordLabel])
+  }, [activeChordIndex])
 
   const handleRendered = useCallback((container: HTMLDivElement) => {
     scoreContainerRef.current = container

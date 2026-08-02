@@ -22,6 +22,17 @@ export const BACKING_STYLE_LABELS: Record<BackingStyle, string> = {
   gypsy: 'Gypsy Jazz',
 }
 
+/**
+ * Small deterministic per-note velocity shading, so repeated chords are not
+ * mechanically identical. Keyed on the beat and pitch rather than random, so a
+ * take is reproducible and tests stay stable.
+ */
+export function humanizeVelocity(velocity: number, startBeat: number, midi: number): number {
+  const phase = Math.sin(startBeat * 12.9898 + midi * 78.233) * 43758.5453
+  const jitter = (phase - Math.floor(phase) - 0.5) * 8 // +/- 4
+  return Math.max(1, Math.min(127, Math.round(velocity + jitter)))
+}
+
 export interface TimedNote {
   /** 0-based start in quarter-note beats from score start. */
   startBeat: number
@@ -153,9 +164,10 @@ function waltz(score: ScoreLike): BackingLayer[] {
  * the off) under two rhythm guitars chopping the chord — beats 2 & 4 accented
  * and short. The two guitars come from the guitar instrument's ensemble voices.
  */
-function gypsy(score: ScoreLike): BackingLayer[] {
+function gypsy(score: ScoreLike, meterNumerator = 4): BackingLayer[] {
   const bass: TimedNote[] = []
   const guitar: TimedNote[] = []
+  const triple = meterNumerator === 3
   for (const b of buildChordBackingSchedule(score)) {
     if (b.midis.length === 0) continue
     const rootPc = ((b.midis[0]! % 12) + 12) % 12
@@ -163,10 +175,24 @@ function gypsy(score: ScoreLike): BackingLayer[] {
     const bassFifth = bassRoot + 7
     const end = b.startBeat + b.durationBeats
     for (let t = b.startBeat; t < end - 1e-6; t += 1) {
-      const onBeat = Math.round(t) % 2 === 0 // beats 1 & 3 of a 4/4 bar
-      bass.push({ startBeat: t, durationBeats: Math.min(0.9, end - t), midi: onBeat ? bassRoot : bassFifth, velocity: 104 })
+      const beatInBar = triple
+        ? ((Math.round(t - b.startBeat) % 3) + 3) % 3
+        : Math.round(t) % 2
+      // Valse musette: bass on beat 1 only, guitar chops on 2 and 3. La pompe:
+      // bass every beat (root/fifth alternating), guitar chopping every beat
+      // with the off-beats accented.
+      const onBeat = triple ? beatInBar === 0 : beatInBar === 0
+      if (!triple || onBeat) {
+        bass.push({
+          startBeat: t,
+          durationBeats: Math.min(triple ? 1.6 : 0.9, end - t),
+          midi: onBeat ? bassRoot : bassFifth,
+          velocity: 104,
+        })
+      }
+      if (triple && onBeat) continue // beat 1 is the bass alone
       const chopDur = Math.min(onBeat ? 0.3 : 0.25, end - t) // less staccato
-      const velocity = onBeat ? 52 : 116 // strongly accent the off-beats (the "chick")
+      const velocity = triple ? (beatInBar === 1 ? 108 : 96) : onBeat ? 52 : 116
       for (const midi of b.midis) guitar.push({ startBeat: t, durationBeats: chopDur, midi, velocity })
     }
   }
@@ -177,10 +203,20 @@ function gypsy(score: ScoreLike): BackingLayer[] {
 }
 
 /** Build the full arrangement (one or more instrument layers) for a style. */
-export function buildBackingArrangement(score: ScoreLike, style: BackingStyle): BackingLayer[] {
-  if (style === 'gypsy') return gypsy(score)
-  if (style === 'waltz') return waltz(score)
-  return [{ instrument: 'strings', notes: buildBackingSchedule(score, style) }]
+export function buildBackingArrangement(
+  score: ScoreLike,
+  style: BackingStyle,
+  meterNumerator = 4,
+): BackingLayer[] {
+  const layers =
+    style === 'gypsy' ? gypsy(score, meterNumerator)
+    : style === 'waltz' ? waltz(score)
+    : [{ instrument: 'strings' as InstrumentId, notes: buildBackingSchedule(score, style) }]
+  // Shade velocities so a repeated chord is not four identical hits.
+  return layers.map((layer) => ({
+    ...layer,
+    notes: layer.notes.map((n) => ({ ...n, velocity: humanizeVelocity(n.velocity, n.startBeat, n.midi) })),
+  }))
 }
 
 /**
@@ -190,7 +226,10 @@ export function buildBackingArrangement(score: ScoreLike, style: BackingStyle): 
  */
 const STYLE_METERS: Partial<Record<BackingStyle, readonly number[]>> = {
   waltz: [3],
-  gypsy: [2, 4],
+  // La pompe is a duple figure, but gypsy jazz has its own triple-metre form —
+  // the valse musette — so 3/4 is offered too and `gypsy()` swings the pattern
+  // to match the bar (it was hidden entirely on a 3/4 tune before).
+  gypsy: [2, 3, 4],
 }
 
 /** Whether a style suits the meter — Waltz needs 3/4, Gypsy Jazz a duple/quadruple meter. */
@@ -231,7 +270,7 @@ export function declaredBackingSelection(
 
 /** MIDI notes to preload per instrument so any style plays gaplessly. */
 export function prepareMidisByInstrument(score: ScoreLike): Record<InstrumentId, number[]> {
-  const gyp = buildBackingArrangement(score, 'gypsy')
+  const gyp = [...buildBackingArrangement(score, 'gypsy', 4), ...buildBackingArrangement(score, 'gypsy', 3)]
   const wal = buildBackingArrangement(score, 'waltz')
   const midisOf = (layers: BackingLayer[], id: InstrumentId) =>
     layers.filter((l) => l.instrument === id).flatMap((l) => l.notes.map((n) => n.midi))

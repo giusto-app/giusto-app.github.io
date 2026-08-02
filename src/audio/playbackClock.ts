@@ -98,11 +98,23 @@ export class PlaybackClock {
     return () => this.endedCallbacks.delete(cb)
   }
 
-  /** Must be preceded by a resumed AudioContext (user gesture). */
-  start(): void {
+  /** Beat the transport would next schedule — the resume point after stop(). */
+  get currentBeat(): number {
+    return this.nextBeat
+  }
+
+  /**
+   * Must be preceded by a resumed AudioContext (user gesture).
+   *
+   * `fromBeat` resumes mid-piece (space-bar pause/resume) instead of restarting
+   * at the count-in; it skips the count-in, which belongs to starting a take.
+   */
+  start(fromBeat?: number): void {
     if (this._isPlaying) return
     this._isPlaying = true
-    this.nextBeat = -this.opts.countInBeats || 0 // `|| 0` normalizes -0
+    this.nextBeat = fromBeat !== undefined
+      ? fromBeat
+      : -this.opts.countInBeats || 0 // `|| 0` normalizes -0
     // Small offset so the first beat is comfortably schedulable.
     this.nextBeatTime = this.ctx.currentTime + 0.05
     this.visualQueue = []
