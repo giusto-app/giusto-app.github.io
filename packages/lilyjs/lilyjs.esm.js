@@ -536,9 +536,11 @@ class Chord {
 class Slur {
   startEventId;
   endEventId;
-  constructor(startEventId, endEventId) {
+  phrasing;
+  constructor(startEventId, endEventId, phrasing = false) {
     this.startEventId = startEventId;
     this.endEventId = endEventId;
+    this.phrasing = phrasing;
   }
 }
 
@@ -660,6 +662,7 @@ class Measure {
   repeatStart;
   repeatEnd;
   systemBreak;
+  systemBreakOffsets;
   barlineStart;
   barlineEnd;
   staffMeasures;
@@ -684,6 +687,8 @@ class Measure {
     this.repeatStart = options.repeatStart ?? false;
     this.repeatEnd = options.repeatEnd ?? false;
     this.systemBreak = options.systemBreak ?? false;
+    if (options.systemBreakOffsets?.length)
+      this.systemBreakOffsets = [...options.systemBreakOffsets];
     this.barlineStart = options.barlineStart;
     this.barlineEnd = options.barlineEnd;
     this.staffMeasures = options.staffMeasures ?? [];
@@ -966,7 +971,7 @@ function isDigit(ch) {
   return ch >= "0" && ch <= "9";
 }
 function isAlpha(ch) {
-  return ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z";
+  return ch >= "a" && ch <= "z" || ch >= "A" && ch <= "Z" || ch >= "";
 }
 function isAlphaNum(ch) {
   return isAlpha(ch) || isDigit(ch) || ch === "_" || ch === "-";
@@ -1878,6 +1883,31 @@ function tokenToLoc(token) {
   };
 }
 
+// src/music-input/lilypond/phases/parser/markupArity.generated.ts
+var LILYPOND_MARKUP_ARITY = {
+  "abs-fontsize": 2,
+  combine: 2,
+  "filled-box": 3,
+  fontsize: 2,
+  "general-align": 3,
+  halign: 2,
+  "hcenter-in": 2,
+  if: 2,
+  lower: 2,
+  magnify: 2,
+  override: 2,
+  "pad-around": 2,
+  "pad-markup": 2,
+  "pad-to-box": 3,
+  "pad-x": 2,
+  raise: 2,
+  rotate: 2,
+  translate: 2,
+  unless: 2,
+  "with-color": 2,
+  "with-url": 2
+};
+
 // src/music-input/lilypond/phases/parser/markup.ts
 function parseTopLevelMarkup(state, cmdToken) {
   const rawTokenText = (tok) => {
@@ -2074,13 +2104,11 @@ function isTextLikeMarkupToken(kind) {
   return kind === "string" || kind === "word" || kind === "number" || kind === "scheme_block" || kind === "note" || kind === "rest" || kind === "tie" || kind === "slur_open" || kind === "slur_close" || kind === "beam_open" || kind === "beam_close" || kind === "barcheck" || kind === "slash" || kind === "equals";
 }
 function markupCommandArgTarget(command) {
-  if (command === "filled-box")
-    return 3;
+  const declared = LILYPOND_MARKUP_ARITY[command];
+  if (declared != null)
+    return declared;
   if (command === "hspace" || command === "vspace")
     return 1;
-  if (command === "with-color" || command === "fontsize" || command === "combine" || command === "raise" || command === "lower") {
-    return 2;
-  }
   return 1;
 }
 function skipMarkupWhitespaceAndComments(src, startPos) {
@@ -3577,6 +3605,17 @@ function parseOverrideText(text) {
     return { cornerRadius: value };
   return null;
 }
+function overrideTargetAndStyle(node) {
+  if (node.type !== "markupCommand" || node.command !== "override")
+    return null;
+  const style = parseOverrideFromChildren([node], 0)?.style;
+  if (!style)
+    return null;
+  const target = node.args.find((arg) => arg.type !== "markupText");
+  if (!target)
+    return null;
+  return { target, style };
+}
 function parseOverrideFromChildren(children, index) {
   const first = children[index];
   if (first?.type !== "markupCommand" || first.command !== "override")
@@ -3750,6 +3789,16 @@ function composeGraphicalMarkupNode(node, extractPlainPayload, ctx = {}) {
       widthStaffSpaces: Math.max(0, x1 - x0)
     };
   }
+  if (cmd === "draw-line") {
+    const dest = parsePairLiteral(node.args[0]?.type === "markupText" ? node.args[0].text : undefined);
+    if (!dest)
+      return null;
+    const [dx, dy] = dest;
+    return {
+      graphics: [{ type: "drawLine", dx, dy, thickness: 1, ...ctx.color ? { color: ctx.color } : {} }],
+      widthStaffSpaces: Math.max(0, dx)
+    };
+  }
   if (cmd === "hspace") {
     const amount = parseMarkupNumber(node.args[0]?.type === "markupText" ? node.args[0].text : undefined) ?? 0;
     return { graphics: [], widthStaffSpaces: amount };
@@ -3768,6 +3817,9 @@ function composeGraphicalMarkupNode(node, extractPlainPayload, ctx = {}) {
       graphics = graphics.concat(composed.graphics);
       payload = mergePayload(payload, composed.payload);
       widthStaffSpaces = Math.max(widthStaffSpaces, composed.widthStaffSpaces);
+    }
+    if (payload && graphics.some((g) => g.type === "drawLine")) {
+      payload = { ...payload, style: { ...payload.style, hasDrawLine: true } };
     }
     return graphics.length > 0 || payload ? { graphics, ...payload ? { payload } : {}, widthStaffSpaces } : null;
   }
@@ -3817,7 +3869,31 @@ function styleFromContext(ctx) {
     ...ctx.color ? { color: ctx.color } : {},
     ...ctx.code ? { code: true } : {},
     ...ctx.smallCaps ? { smallCaps: true } : {},
-    ...ctx.fontSizeScale != null ? { fontSizeScale: ctx.fontSizeScale } : {}
+    ...ctx.fontSizeScale != null ? { fontSizeScale: ctx.fontSizeScale } : {},
+    ...ctx.raiseStaffSpaces ? { raiseStaffSpaces: ctx.raiseStaffSpaces } : {}
+  };
+}
+var ABSOLUTE_FONT_SIZE = {
+  huge: 2,
+  large: 1,
+  normalsize: 0,
+  small: -1,
+  tiny: -2,
+  teeny: -3
+};
+function magstep(n) {
+  return Math.pow(2, n / 6);
+}
+function levelOf(ctx) {
+  return ctx.fontSizeLevel ?? 0;
+}
+function makeLevelScoper(baseLevel) {
+  return function withFontSizeLevel(ctx, level) {
+    return {
+      ...ctx,
+      fontSizeLevel: level,
+      fontSizeScale: Math.max(magstep(level - baseLevel), MIN_FONT_SCALE)
+    };
   };
 }
 function musicGlyphChar(glyphName) {
@@ -3832,13 +3908,13 @@ function musicGlyphChar(glyphName) {
   };
   return glyphs[glyphName];
 }
-function hasRunUnsupportedCommand(node) {
+function hasRunUnsupportedCommand(node, extra) {
   if (node.type === "markupText")
     return false;
   if (node.type === "markupBlock")
-    return node.children.some(hasRunUnsupportedCommand);
+    return node.children.some((c) => hasRunUnsupportedCommand(c, extra));
   if (node.type === "markupList")
-    return node.items.some(hasRunUnsupportedCommand);
+    return node.items.some((c) => hasRunUnsupportedCommand(c, extra));
   const supported = new Set([
     "bold",
     "italic",
@@ -3851,7 +3927,13 @@ function hasRunUnsupportedCommand(node) {
     "larger",
     "smaller",
     "small",
+    "tiny",
+    "teeny",
+    "normalsize",
     "fontsize",
+    "raise",
+    "lower",
+    "halign",
     "with-color",
     "line",
     "concat",
@@ -3864,7 +3946,9 @@ function hasRunUnsupportedCommand(node) {
     "vspace",
     "musicglyph"
   ]);
-  return !supported.has(node.command) || node.args.some(hasRunUnsupportedCommand);
+  if (!supported.has(node.command) && !extra?.has(node.command))
+    return true;
+  return node.args.some((a) => hasRunUnsupportedCommand(a, extra));
 }
 function trimRuns(runs) {
   const out = runs.slice();
@@ -3906,11 +3990,15 @@ function synthesizeWordwrapRunsFromText(text) {
   }
   return runs.some((run) => run.wordwrapUnit) ? runs : undefined;
 }
-function extractScopedMarkupRuns(children, style) {
-  if (children.some(hasRunUnsupportedCommand))
+function extractScopedMarkupRuns(children, style, opts = {}) {
+  const extra = opts.allowBaselineShifts ? new Set(["super", "sub"]) : undefined;
+  if (children.some((c) => hasRunUnsupportedCommand(c, extra)))
     return;
+  const baseLevel = opts.baseFontSizeLevel ?? 0;
+  const withFontSizeLevel = makeLevelScoper(baseLevel);
   const runs = [];
   let lastChunk = "";
+  let concatLeadPending = false;
   const appendRun = (raw, ctx) => {
     if (raw.length === 0)
       return;
@@ -3919,7 +4007,9 @@ function extractScopedMarkupRuns(children, style) {
     const text = isWordwrapUnit ? unescaped.trim() : unescaped;
     if (text.trim().length === 0)
       return;
-    if (shouldInsertSpace(lastChunk, text)) {
+    const allowSpace = !ctx.concat || concatLeadPending;
+    concatLeadPending = false;
+    if (allowSpace && shouldInsertSpace(lastChunk, text)) {
       runs.push({ text: " " });
       lastChunk = " ";
     }
@@ -3982,25 +4072,46 @@ function extractScopedMarkupRuns(children, style) {
       return visitList(node.args, { ...ctx, smallCaps: true });
     if (cmd === "wordwrap" || cmd === "justify")
       return visitList(node.args, { ...ctx, wordwrap: true });
-    if (cmd === "large")
-      return visitList(node.args, { ...ctx, fontSizeScale: (ctx.fontSizeScale ?? 1) * Math.pow(2, 1 / 6) });
-    if (cmd === "huge")
-      return visitList(node.args, { ...ctx, fontSizeScale: (ctx.fontSizeScale ?? 1) * Math.pow(2, 2 / 6) });
-    if (cmd === "larger")
-      return visitList(node.args, { ...ctx, fontSizeScale: (ctx.fontSizeScale ?? 1) * Math.pow(2, 1 / 6) });
-    if (cmd === "smaller" || cmd === "small") {
-      return visitList(node.args, {
-        ...ctx,
-        fontSizeScale: Math.max((ctx.fontSizeScale ?? 1) * Math.pow(2, -1 / 6), MIN_FONT_SCALE)
-      });
+    if (cmd != null && cmd in ABSOLUTE_FONT_SIZE) {
+      return visitList(node.args, withFontSizeLevel(ctx, ABSOLUTE_FONT_SIZE[cmd]));
     }
+    if (cmd === "larger")
+      return visitList(node.args, withFontSizeLevel(ctx, levelOf(ctx) + 1));
+    if (cmd === "smaller")
+      return visitList(node.args, withFontSizeLevel(ctx, levelOf(ctx) - 1));
     if (cmd === "fontsize") {
       const numArg = node.args[0];
       const contentArgs = node.args.slice(1);
       const n = numArg?.type === "markupText" ? parseFloat(numArg.text) : NaN;
-      const scale = Number.isFinite(n) ? Math.max((ctx.fontSizeScale ?? 1) * Math.pow(2, n / 6), MIN_FONT_SCALE) : ctx.fontSizeScale ?? 1;
-      return visitList(contentArgs, { ...ctx, fontSizeScale: scale });
+      const next = Number.isFinite(n) ? levelOf(ctx) + n : levelOf(ctx);
+      return visitList(contentArgs, withFontSizeLevel(ctx, next));
     }
+    if (cmd === "raise" || cmd === "lower") {
+      const numArg = node.args[0];
+      const contentArgs = node.args.slice(1);
+      const n = numArg?.type === "markupText" ? parseFloat(numArg.text) : NaN;
+      if (!Number.isFinite(n))
+        return visitList(node.args, ctx);
+      const delta = cmd === "raise" ? n : -n;
+      return visitList(contentArgs, {
+        ...ctx,
+        raiseStaffSpaces: (ctx.raiseStaffSpaces ?? 0) + delta
+      });
+    }
+    if (cmd === "super" || cmd === "sub") {
+      const level = levelOf(ctx);
+      const offset = (cmd === "super" ? 1 : -0.75) * magstep(level);
+      return visitList(node.args, {
+        ...withFontSizeLevel(ctx, level - 3),
+        raiseStaffSpaces: (ctx.raiseStaffSpaces ?? 0) + offset
+      });
+    }
+    if (cmd === "concat") {
+      concatLeadPending = true;
+      return visitList(node.args, { ...ctx, concat: true });
+    }
+    if (cmd === "halign")
+      return visitList(node.args.slice(1), ctx);
     if (cmd === "with-color") {
       const color = colorFromNode(node.args[0]);
       return visitList(node.args.slice(1), { ...ctx, ...color ? { color } : {} });
@@ -4031,8 +4142,62 @@ function extractScopedMarkupRuns(children, style) {
     }
     visitList(node.args, ctx);
   };
-  visitList(children, {});
+  visitList(children, { fontSizeLevel: baseLevel });
   return normalizeRunsAgainstGlobalStyle(runs, style);
+}
+
+// src/music-input/lilypond/markup-payload/tokenSink.ts
+function createMarkupTokenSink() {
+  const out = [];
+  let lastChunk = "";
+  const appendControlToken = (cmd) => {
+    out.push(" ");
+    out.push(cmd);
+    lastChunk = cmd;
+  };
+  return {
+    out,
+    appendText(raw) {
+      if (raw.length === 0)
+        return;
+      const text = unescapeMarkupString(raw);
+      if (text.trim().length === 0 && lastChunk.length === 0)
+        return;
+      if (text.trim().length === 0 && lastChunk.length > 0 && lastChunk[lastChunk.length - 1] <= " ") {
+        return;
+      }
+      if (shouldInsertSpace(lastChunk, text))
+        out.push(" ");
+      out.push(text);
+      lastChunk = text;
+    },
+    appendCommandToken(cmd) {
+      if (shouldInsertSpace(lastChunk, cmd))
+        out.push(" ");
+      out.push(cmd);
+      lastChunk = cmd;
+    },
+    appendControlToken,
+    appendNewline() {
+      out.push(`
+`);
+      lastChunk = `
+`;
+    },
+    appendSpace() {
+      out.push(" ");
+      lastChunk = " ";
+    },
+    appendShapeOverrideTokens(ctx) {
+      if (ctx.boxPadding != null)
+        appendControlToken(`\\boxpad#${ctx.boxPadding}`);
+      if (ctx.thickness != null)
+        appendControlToken(`\\thickness#${ctx.thickness}`);
+      if (ctx.cornerRadius != null)
+        appendControlToken(`\\cornerradius#${ctx.cornerRadius}`);
+    },
+    lastChunkRef: () => lastChunk
+  };
 }
 
 // src/music-input/lilypond/markup-payload/text.ts
@@ -4043,55 +4208,14 @@ function extractMarkupPayload(children, opts = {}) {
     if (graphicalPayload)
       return graphicalPayload;
   }
-  const out = [], style = {};
-  let lastChunk = "";
+  const style = {};
   let meaningfulTextNodeCount = 0, codeMeaningfulTextNodeCount = 0, italicMeaningfulTextNodeCount = 0, boldMeaningfulTextNodeCount = 0;
   let coloredMeaningfulTextNodeCount = 0, largeMeaningfulTextNodeCount = 0, hugeMeaningfulTextNodeCount = 0, smallCapsMeaningfulTextNodeCount = 0;
   let lastMeaningfulText = "";
   let uniformColor, uniformFontSizeScale;
   let mixedColor = false, mixedFontSizeScale = false;
-  const appendText = (raw) => {
-    if (raw.length === 0)
-      return;
-    const text2 = unescapeMarkupString(raw);
-    if (text2.trim().length === 0 && lastChunk.length === 0)
-      return;
-    if (text2.trim().length === 0 && lastChunk.length > 0 && lastChunk[lastChunk.length - 1] <= " ")
-      return;
-    if (shouldInsertSpace(lastChunk, text2))
-      out.push(" ");
-    out.push(text2);
-    lastChunk = text2;
-  };
-  const appendCommandToken = (cmd) => {
-    if (shouldInsertSpace(lastChunk, cmd))
-      out.push(" ");
-    out.push(cmd);
-    lastChunk = cmd;
-  };
-  const appendControlToken = (cmd) => {
-    out.push(" ");
-    out.push(cmd);
-    lastChunk = cmd;
-  };
-  const appendNewline = () => {
-    out.push(`
-`);
-    lastChunk = `
-`;
-  };
-  const appendSpace = () => {
-    out.push(" ");
-    lastChunk = " ";
-  };
-  const appendShapeOverrideTokens = (ctx) => {
-    if (ctx.boxPadding != null)
-      appendControlToken(`\\boxpad#${ctx.boxPadding}`);
-    if (ctx.thickness != null)
-      appendControlToken(`\\thickness#${ctx.thickness}`);
-    if (ctx.cornerRadius != null)
-      appendControlToken(`\\cornerradius#${ctx.cornerRadius}`);
-  };
+  const sink = createMarkupTokenSink();
+  const { appendText, appendCommandToken, appendControlToken, appendNewline, appendSpace, appendShapeOverrideTokens } = sink;
   const recordInlineShape = () => {
     style.hasInlineShape = true;
   };
@@ -4148,7 +4272,7 @@ function extractMarkupPayload(children, opts = {}) {
       let pendingOverride = {};
       for (let i = 0;i < node.children.length; i++) {
         const child = node.children[i];
-        const parsedOverride = parseOverrideFromChildren(node.children, i);
+        const parsedOverride = overrideTargetAndStyle(child) ? null : parseOverrideFromChildren(node.children, i);
         if (parsedOverride) {
           pendingOverride = { ...pendingOverride, ...parsedOverride.style };
           i = parsedOverride.nextIndex - 1;
@@ -4176,6 +4300,11 @@ function extractMarkupPayload(children, opts = {}) {
     }
     if (node.type === "markupCommand") {
       const cmd = node.command;
+      const overrideTarget = overrideTargetAndStyle(node);
+      if (overrideTarget) {
+        visit(overrideTarget.target, { ...ctx, ...overrideTarget.style });
+        return;
+      }
       if (cmd === "bold") {
         if (node.args.length > 0)
           appendCommandToken("\\bold");
@@ -4212,7 +4341,8 @@ function extractMarkupPayload(children, opts = {}) {
             return;
           }
         }
-        if (node.args.length > 0)
+        const hasNestedCommand = node.args.some((arg) => arg.type === "markupBlock" && arg.children.some((child) => child.type === "markupCommand"));
+        if (node.args.length > 0 && !hasNestedCommand)
           appendCommandToken("\\typewriter");
         for (const arg of node.args) {
           if (arg.type === "markupBlock") {
@@ -4287,7 +4417,7 @@ function extractMarkupPayload(children, opts = {}) {
         return;
       }
       if (cmd === "circle") {
-        const hasInlinePrefix = out.some((chunk) => chunk.trim().length > 0);
+        const hasInlinePrefix = sink.out.some((chunk) => chunk.trim().length > 0);
         if (hasInlinePrefix) {
           recordInlineShape();
           appendShapeOverrideTokens(ctx);
@@ -4363,7 +4493,7 @@ function extractMarkupPayload(children, opts = {}) {
             return;
           }
         }
-        const hasInlinePrefix = out.some((chunk) => chunk.trim().length > 0);
+        const hasInlinePrefix = sink.out.some((chunk) => chunk.trim().length > 0);
         if (hasInlinePrefix) {
           recordInlineShape();
           appendShapeOverrideTokens(ctx);
@@ -4382,7 +4512,7 @@ function extractMarkupPayload(children, opts = {}) {
         return;
       }
       if (cmd === "rounded-box") {
-        const hasInlinePrefix = out.some((chunk) => chunk.trim().length > 0);
+        const hasInlinePrefix = sink.out.some((chunk) => chunk.trim().length > 0);
         if (hasInlinePrefix) {
           recordInlineShape();
           appendShapeOverrideTokens(ctx);
@@ -4475,7 +4605,7 @@ function extractMarkupPayload(children, opts = {}) {
         let pendingOverride = {};
         for (let i = 0;i < args.length; i++) {
           const arg = args[i];
-          const parsedOverride = parseOverrideFromChildren(args, i);
+          const parsedOverride = overrideTargetAndStyle(arg) ? null : parseOverrideFromChildren(args, i);
           if (parsedOverride) {
             pendingOverride = { ...pendingOverride, ...parsedOverride.style };
             i = parsedOverride.nextIndex - 1;
@@ -4483,8 +4613,8 @@ function extractMarkupPayload(children, opts = {}) {
           }
           if (arg.type === "markupText" && arg.text.trim().length === 0)
             continue;
-          if (!first && lastChunk !== `
-` && !/\s$/.test(lastChunk))
+          if (!first && sink.lastChunkRef() !== `
+` && !/\s$/.test(sink.lastChunkRef()))
             appendSpace();
           const inlineArg = arg.type === "markupBlock" ? { ...arg, children: arg.children.filter((child) => !(child.type === "markupText" && child.text.trim().length === 0)) } : arg;
           const childCtx = Object.keys(pendingOverride).length > 0 ? { ...ctx, ...pendingOverride } : ctx;
@@ -4555,9 +4685,15 @@ function extractMarkupPayload(children, opts = {}) {
         return;
       }
       if (cmd === "hspace" || cmd === "pad-markup" || cmd === "pad-x" || cmd === "pad-y" || cmd === "translate" || cmd === "translate-scaled") {
+        for (const arg of node.args)
+          if (arg.type !== "markupText")
+            visit(arg, ctx);
         return;
       }
       if (cmd === "override" || cmd === "revert" || cmd === "set" || cmd === "once" || cmd === "undo" || cmd === "tweak") {
+        for (const arg of node.args)
+          if (arg.type !== "markupText")
+            visit(arg, ctx);
         return;
       }
       if (cmd === "musicglyph") {
@@ -4600,7 +4736,7 @@ function extractMarkupPayload(children, opts = {}) {
   if (meaningfulTextNodeCount > 0 && coloredMeaningfulTextNodeCount === meaningfulTextNodeCount && !mixedColor && uniformColor) {
     style.color = uniformColor;
   }
-  let text = out.join("");
+  let text = sink.out.join("");
   if (!style.code) {
     text = text.replace(/[ \t]+\n/g, `
 `);
@@ -4631,6 +4767,26 @@ function extractMarkupPayload(children, opts = {}) {
   return { text, style, ...runs ? { runs } : {} };
 }
 // src/music-input/lilypond/markup-payload/blocks.ts
+var TRANSPARENT_MARKUP_WRAPPERS = new Set([
+  "vcenter",
+  "box",
+  "rounded-box",
+  "circle",
+  "ellipse",
+  "oval",
+  "override",
+  "pad-to-box",
+  "pad-around",
+  "pad-markup",
+  "pad-x",
+  "whiteout",
+  "with-url",
+  "with-color",
+  "hcenter-in",
+  "translate",
+  "raise",
+  "lower"
+]);
 function findColumnChildren(nodes) {
   const meaningful = nodes.filter(isMeaningfulMarkupNode);
   const first = meaningful[0];
@@ -4639,8 +4795,14 @@ function findColumnChildren(nodes) {
   if (first.type === "markupList")
     return first.items;
   const fromCommand = (node) => {
-    if (node.command === "vcenter")
-      return findColumnChildren(node.args);
+    if (TRANSPARENT_MARKUP_WRAPPERS.has(node.command)) {
+      for (const arg of node.args) {
+        const found = findColumnChildren([arg]);
+        if (found && found.length > 0)
+          return found;
+      }
+      return null;
+    }
     const isColCmd = node.command === "column" || node.command === "center-column" || node.command === "right-column" || node.command === "left-column";
     if (!isColCmd)
       return null;
@@ -5114,10 +5276,25 @@ function parseAttachedText(state, position, markerTok) {
       loc: tokenToLoc(markerTok)
     };
   }
-  if (check(state, "command") && current(state).value === "markup") {
-    const markupTok = advance(state);
-    const markup = parseTopLevelMarkup(state, markupTok);
-    const payload = extractMarkupPayload(markup.children);
+  const markupVariableBody = (() => {
+    if (!check(state, "command"))
+      return null;
+    const name = current(state).value;
+    if (name === "markup")
+      return null;
+    const body = state.variables.get(name)?.body;
+    return body?.type === "markupBlock" && body.children ? { children: body.children } : null;
+  })();
+  if (markupVariableBody || check(state, "command") && current(state).value === "markup") {
+    let children;
+    if (markupVariableBody) {
+      advance(state);
+      children = markupVariableBody.children;
+    } else {
+      const markupTok = advance(state);
+      children = parseTopLevelMarkup(state, markupTok).children;
+    }
+    const payload = extractMarkupPayload(children);
     if (!payload.text)
       return null;
     return {
@@ -5698,6 +5875,16 @@ function parseCommandDispatch(state, parseMusic, parseCommand) {
         direction: cmdName === "stemUp" ? "up" : cmdName === "stemDown" ? "down" : "neutral",
         loc: tokenToLoc(cmdToken)
       };
+    case "voiceOne":
+    case "voiceTwo":
+    case "voiceThree":
+    case "voiceFour":
+    case "oneVoice":
+      return {
+        type: "stemDirection",
+        direction: cmdName === "voiceOne" || cmdName === "voiceThree" ? "up" : cmdName === "voiceTwo" || cmdName === "voiceFour" ? "down" : "neutral",
+        loc: tokenToLoc(cmdToken)
+      };
     case "once": {
       const next = state.tokens[state.pos];
       if (next?.kind === "command" && next.value === "omit") {
@@ -5778,7 +5965,7 @@ function parseCommandDispatch(state, parseMusic, parseCommand) {
       const barTypeToken = match(state, "string");
       return {
         type: "bar",
-        barType: barTypeToken?.value || "||",
+        barType: barTypeToken ? barTypeToken.value : "||",
         loc: tokenToLoc(cmdToken)
       };
     }
@@ -7167,6 +7354,7 @@ function transformMusic(node, ctx, variables) {
         ctx: bodyResult.ctx
       };
     }
+    case "compressMMRests":
     case "musicScale": {
       const scaleNode = node;
       const bodyResult = transformMusic(scaleNode.body, currentCtx, variables);
@@ -7890,6 +8078,37 @@ function emitChordModeChord(chord, ctx, durationScale) {
   };
   ctx.notes.push(emitted);
 }
+function collectChordChanges(node) {
+  switch (node.type) {
+    case "set": {
+      const setNode = node;
+      if (setNode.property?.split(".").pop() !== "chordChanges")
+        return;
+      const value = setNode.value;
+      if (typeof value === "boolean")
+        return value;
+      if (value === "#t" || value === "##t")
+        return true;
+      if (value === "#f" || value === "##f")
+        return false;
+      return;
+    }
+    case "sequential":
+    case "simultaneous": {
+      for (const el of node.elements) {
+        const found = collectChordChanges(el);
+        if (found !== undefined)
+          return found;
+      }
+      return;
+    }
+    case "relative":
+    case "fixed":
+      return collectChordChanges(node.body);
+    default:
+      return;
+  }
+}
 function collectChordModeChords(node) {
   switch (node.type) {
     case "chordMode":
@@ -8333,6 +8552,9 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
       const chords = collectChordModeChords(cn.body);
       if (chords.length > 0)
         ctx.chordNames.push(...chords);
+      const chordChanges = collectChordChanges(cn.body);
+      if (chordChanges !== undefined)
+        ctx.chordChanges = chordChanges;
       break;
     }
     case "staffContext": {
@@ -8349,6 +8571,10 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
         const value = setBooleanValue(setNode.value);
         if (value != null)
           ctx.printInitialRepeatBar = value;
+      } else if (setNode.property?.split(".").pop() === "chordChanges") {
+        const value = setBooleanValue(setNode.value);
+        if (value != null)
+          ctx.chordChanges = value;
       } else if (isMidiInstrumentProperty(setNode.property) && typeof setNode.value === "string") {
         ctx.midiInstrument = setNode.value;
       } else if ((setNode.property === "instrumentName" || setNode.property.endsWith(".instrumentName")) && typeof setNode.value === "string" && ctx.instrumentName === undefined) {
@@ -8782,7 +9008,7 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
       if (node.barType === "\\break") {
         ctx.structuralEvents.push({ type: "systemBreak", at: ctx.notes.length });
         ctx.systemBreaks.push(ctx.notes.length);
-      } else if (node.barType === "||" || node.barType === "|." || node.barType === "|" && ctx.cadenzaEnabled || node.barType === ".|:" || node.barType === ".|:-|" || node.barType === ":|.") {
+      } else if (node.barType === "" || node.barType === "||" || node.barType === "|." || node.barType === "|" && ctx.cadenzaEnabled || node.barType === ".|:" || node.barType === ".|:-|" || node.barType === ":|.") {
         ctx.structuralEvents.push({
           type: "barline",
           at: ctx.notes.length,
@@ -8841,6 +9067,103 @@ function emitMusic(node, ctx, durationScale = 1, semitoneShift = 0, diatonicShif
       break;
     }
   }
+}
+
+// src/music-input/lilypond/phases/emit/taglineMarkup.ts
+function taglineTextFromMarkup(raw) {
+  const parts = [];
+  let i = 0;
+  const n = raw.length;
+  while (i < n) {
+    const c = raw[i];
+    if (c === "\\") {
+      i++;
+      while (i < n && /[a-zA-Z-]/.test(raw[i]))
+        i++;
+    } else if (c === "#") {
+      i++;
+      if (raw[i] === "'")
+        i++;
+      if (raw[i] === "(") {
+        let depth = 0;
+        do {
+          if (raw[i] === "(")
+            depth++;
+          else if (raw[i] === ")")
+            depth--;
+          i++;
+        } while (i < n && depth > 0);
+      } else if (raw[i] === '"') {
+        i++;
+        while (i < n && raw[i] !== '"')
+          i++;
+        i++;
+      } else {
+        while (i < n && /\S/.test(raw[i]) && raw[i] !== "{" && raw[i] !== "}")
+          i++;
+      }
+    } else if (c === '"') {
+      i++;
+      let s = "";
+      while (i < n && raw[i] !== '"')
+        s += raw[i++];
+      i++;
+      if (s)
+        parts.push(s);
+    } else if (c === "{" || c === "}" || /\s/.test(c)) {
+      i++;
+    } else {
+      let w = "";
+      while (i < n && /\S/.test(raw[i]) && !'{}"\\#'.includes(raw[i]))
+        w += raw[i++];
+      if (w)
+        parts.push(w);
+    }
+  }
+  return parts.join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
+}
+function taglineLinesFromMarkup(raw) {
+  try {
+    const { tokens } = lex(raw, "nederlands");
+    const { ast } = parse(tokens, raw, "nederlands");
+    const block = ast?.children.find((child) => child.type === "markupBlock");
+    if (!block)
+      return [];
+    const blocks = extractMarkupPayloadBlocks(block.children);
+    return blocks.map((b) => b.text.trim()).filter((t) => t.length > 0);
+  } catch {
+    return [];
+  }
+}
+var TITLE_FIELD_FONT_SIZE_LEVEL = {
+  title: 4,
+  subtitle: 1,
+  subsubtitle: -1
+};
+function headerRunsFromMarkup(raw, field) {
+  try {
+    const { tokens } = lex(raw, "nederlands");
+    const { ast } = parse(tokens, raw, "nederlands");
+    const block = ast?.children.find((child) => child.type === "markupBlock");
+    if (!block)
+      return;
+    const runs = extractScopedMarkupRuns(block.children, {}, {
+      baseFontSizeLevel: TITLE_FIELD_FONT_SIZE_LEVEL[field] ?? 0,
+      allowBaselineShifts: true
+    });
+    return runs && runs.length > 1 ? runs : undefined;
+  } catch {
+    return;
+  }
+}
+function taglineBoxFromMarkup(raw) {
+  if (!/\\box\b/.test(raw))
+    return;
+  const padding = /box-padding\s*\.\s*([\d.]+)/.exec(raw);
+  return {
+    padding: padding ? Number(padding[1]) : 0.2,
+    wordwrap: /\\wordwrap\b/.test(raw)
+  };
 }
 
 // src/music-input/lilypond/helpers/paper.ts
@@ -9071,67 +9394,6 @@ function applyLayoutSetting(target, rawKey, rawValue) {
       target.barNumberVisibility = visibility;
   }
 }
-function taglineTextFromMarkup(raw) {
-  const parts = [];
-  let i = 0;
-  const n = raw.length;
-  while (i < n) {
-    const c = raw[i];
-    if (c === "\\") {
-      i++;
-      while (i < n && /[a-zA-Z-]/.test(raw[i]))
-        i++;
-    } else if (c === "#") {
-      i++;
-      if (raw[i] === "'")
-        i++;
-      if (raw[i] === "(") {
-        let depth = 0;
-        do {
-          if (raw[i] === "(")
-            depth++;
-          else if (raw[i] === ")")
-            depth--;
-          i++;
-        } while (i < n && depth > 0);
-      } else if (raw[i] === '"') {
-        i++;
-        while (i < n && raw[i] !== '"')
-          i++;
-        i++;
-      } else {
-        while (i < n && /\S/.test(raw[i]) && raw[i] !== "{" && raw[i] !== "}")
-          i++;
-      }
-    } else if (c === '"') {
-      i++;
-      let s = "";
-      while (i < n && raw[i] !== '"')
-        s += raw[i++];
-      i++;
-      if (s)
-        parts.push(s);
-    } else if (c === "{" || c === "}" || /\s/.test(c)) {
-      i++;
-    } else {
-      let w = "";
-      while (i < n && /\S/.test(raw[i]) && !'{}"\\#'.includes(raw[i]))
-        w += raw[i++];
-      if (w)
-        parts.push(w);
-    }
-  }
-  return parts.join(" ").replace(/\s+([,.;:!?])/g, "$1").trim();
-}
-function taglineBoxFromMarkup(raw) {
-  if (!/\\box\b/.test(raw))
-    return;
-  const padding = /box-padding\s*\.\s*([\d.]+)/.exec(raw);
-  return {
-    padding: padding ? Number(padding[1]) : 0.2,
-    wordwrap: /\\wordwrap\b/.test(raw)
-  };
-}
 function extractMeta(ast) {
   const info = {};
   const paper = {};
@@ -9144,11 +9406,16 @@ function extractMeta(ast) {
       const header = child;
       for (const [rawKey, rawVal] of header.fields.entries()) {
         const key = rawKey.toLowerCase();
-        const val = rawVal;
+        const val = typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup") ? taglineTextFromMarkup(rawVal) : rawVal;
         switch (key) {
           case "title":
             if (typeof val === "string")
               info.title = val;
+            if (typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup")) {
+              const runs = headerRunsFromMarkup(rawVal, "title");
+              if (runs)
+                info.titleRuns = runs;
+            }
             break;
           case "composer":
             if (typeof val === "string")
@@ -9157,6 +9424,11 @@ function extractMeta(ast) {
           case "subtitle":
             if (typeof val === "string")
               info.subtitle = val;
+            if (typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup")) {
+              const runs = headerRunsFromMarkup(rawVal, "subtitle");
+              if (runs)
+                info.subtitleRuns = runs;
+            }
             break;
           case "subsubtitle":
             if (typeof val === "string")
@@ -9166,6 +9438,14 @@ function extractMeta(ast) {
             if (typeof val === "boolean") {
               info.tagline = val;
             } else if (typeof val === "string") {
+              if (typeof rawVal === "string" && rawVal.trimStart().startsWith("\\markup")) {
+                const lines = taglineLinesFromMarkup(rawVal);
+                if (lines.length > 1)
+                  info.taglineLines = lines;
+                const rawBox = taglineBoxFromMarkup(rawVal);
+                if (rawBox)
+                  info.taglineBox = rawBox;
+              }
               if (val.trimStart().startsWith("\\markup")) {
                 info.tagline = taglineTextFromMarkup(val);
                 const box = taglineBoxFromMarkup(val);
@@ -9253,6 +9533,12 @@ function extractMeta(ast) {
             const b = coerceBool(rawVal);
             if (b !== undefined)
               paper.raggedLast = b;
+            break;
+          }
+          case "ragged-last-bottom": {
+            const b = coerceBool(rawVal);
+            if (b !== undefined)
+              paper.raggedLastBottom = b;
             break;
           }
           case "ragged-right": {
@@ -9405,6 +9691,7 @@ function tuneFromContext(ctx, meta = {}) {
     ...ctx.lyricLines.length ? { lyricLines: ctx.lyricLines } : {},
     ...ctx.repeatRegions.length ? { repeatRegions: ctx.repeatRegions } : {},
     ...ctx.printInitialRepeatBar ? { printInitialRepeatBar: true } : {},
+    ...ctx.chordChanges != null ? { chordChanges: ctx.chordChanges } : {},
     ...ctx.percentRepeatRegions.length ? { percentRepeatRegions: ctx.percentRepeatRegions } : {},
     ...ctx.voltaRegions.length ? { voltaRegions: ctx.voltaRegions } : {},
     ...meta,
@@ -10390,6 +10677,7 @@ function documentMetaFromTune(tune) {
     info: tune.info,
     lilypondVersion: tune.lilypondVersion,
     raggedLast: tune.raggedLast,
+    raggedLastBottom: tune.raggedLastBottom,
     raggedRight: tune.raggedRight,
     firstIndent: tune.firstIndent,
     paperFont: tune.paperFont,
@@ -10423,6 +10711,7 @@ function parsedDocumentInfoFromTune(tune, ast) {
     info: tune.info,
     lilypondVersion: tune.lilypondVersion,
     raggedLast: tune.raggedLast,
+    raggedLastBottom: tune.raggedLastBottom,
     raggedRight: tune.raggedRight,
     firstIndent: tune.firstIndent,
     paperFont: tune.paperFont,
@@ -10526,28 +10815,24 @@ function buildParsedDocumentBlocks(ast, tune) {
   if (ast) {
     const metaNodes = ast.children.filter((child) => child.type === "header" || child.type === "paper" || child.type === "version" || child.type === "layout");
     const layoutNodes = ast.children.filter((child) => child.type === "layout");
-    const pendingTopMusic = [];
-    const flushTopMusic = () => {
-      if (pendingTopMusic.length === 0)
-        return;
+    const emitTopMusic = (node) => {
       const topTune = emit({
         type: "root",
-        children: [...metaNodes, ...pendingTopMusic],
+        children: [...metaNodes, node],
         loc: ast.loc
       });
-      if (hasRenderableMusic(topTune)) {
-        const range = pendingTopMusic[0] ? sourceRangeFromNode2(pendingTopMusic[0]) : undefined;
-        nextBlocks.push({
-          type: "score",
-          score: parsedScoreFromTune(topTune, {
-            music: pendingTopMusic,
-            layoutNodes,
-            range
-          }),
+      if (!hasRenderableMusic(topTune))
+        return;
+      const range = sourceRangeFromNode2(node);
+      nextBlocks.push({
+        type: "score",
+        score: parsedScoreFromTune(topTune, {
+          music: [node],
+          layoutNodes,
           range
-        });
-      }
-      pendingTopMusic.length = 0;
+        }),
+        range
+      });
     };
     for (const child of ast.children) {
       if (child.type === "header" || child.type === "paper" || child.type === "version" || child.type === "layout")
@@ -10555,16 +10840,14 @@ function buildParsedDocumentBlocks(ast, tune) {
       if (child.type === "schemeVariableDefinition" || child.type === "schemeFunctionDefinition" || child.type === "schemeOption")
         continue;
       if (child.type === "schemeFunctionCall") {
-        flushTopMusic();
         nextBlocks.push({ type: "diagnostic", severity: "warning", message: `Unexpanded Scheme function call: \\${child.name}`, range: sourceRangeFromNode2(child) });
         continue;
       }
       if (isTopMusicNodeType(child.type)) {
-        pendingTopMusic.push(child);
+        emitTopMusic(child);
         continue;
       }
       if (child.type === "markupBlock") {
-        flushTopMusic();
         const fillLineCols = extractFillLineColumns(child.children);
         if (fillLineCols) {
           nextBlocks.push({
@@ -10589,7 +10872,6 @@ function buildParsedDocumentBlocks(ast, tune) {
         continue;
       }
       if (child.type === "markupList") {
-        flushTopMusic();
         for (const item of child.items) {
           if (item.type === "markupText" && item.text.trim().length === 0)
             continue;
@@ -10603,7 +10885,6 @@ function buildParsedDocumentBlocks(ast, tune) {
         continue;
       }
       if (child.type === "staffGroupContext") {
-        flushTopMusic();
         const sgNode = child;
         const staves = emitStaffGroup(sgNode);
         if (staves.length >= 2) {
@@ -10617,7 +10898,6 @@ function buildParsedDocumentBlocks(ast, tune) {
         continue;
       }
       if (child.type === "book" || child.type === "bookpart") {
-        flushTopMusic();
         const bookNode = child;
         const blocks = [];
         for (const scoreLike of bookNode.scores ?? []) {
@@ -10644,7 +10924,6 @@ function buildParsedDocumentBlocks(ast, tune) {
         continue;
       }
       if (child.type === "scoreBlock") {
-        flushTopMusic();
         const scoreNode = child;
         if (scoreNode.midi && !scoreNode.layout)
           continue;
@@ -10694,7 +10973,6 @@ function buildParsedDocumentBlocks(ast, tune) {
         });
       }
     }
-    flushTopMusic();
     if (nextBlocks.length > 0) {
       return normalizeScoreMetadata(applyDocumentDebugSkylines(applyDocumentGlobalStaffSize(nextBlocks, tune.globalStaffSize), tune.debugSkylines));
     }
@@ -10726,7 +11004,14 @@ function buildParsedDocument(ast, tune, diagnostics = []) {
 // src/music-input/lilypond/phases/index.ts
 function detectLanguageDirective(source) {
   const m = source.match(/\\language\s+"([^"]+)"/i);
-  return m?.[1] ? normalizeLyLanguage(m[1]) : undefined;
+  if (m?.[1])
+    return normalizeLyLanguage(m[1]);
+  for (const inc of source.matchAll(/\\include\s+"([^"./\\]+)\.ly"/gi)) {
+    const language = inc[1] ? normalizeLyLanguage(inc[1]) : undefined;
+    if (language)
+      return language;
+  }
+  return;
 }
 function parseLilyPond(source, opts = {}) {
   return runModularPipeline(source, opts);
@@ -10922,7 +11207,7 @@ function firstChangeInRange(changeEvents, changeType, start, end) {
   }
   return;
 }
-function groupMeasures(notes, timeSig2, partialDuration, engravingEvents2) {
+function groupMeasures(notes, timeSig2, partialDuration, engravingEvents2, forcedLineBreaks) {
   let barLen = barLengthQN(timeSig2);
   const measures = [];
   let current2 = [];
@@ -10933,6 +11218,8 @@ function groupMeasures(notes, timeSig2, partialDuration, engravingEvents2) {
   const changeEvents = normalizeChangeEvents(engravingEvents2);
   const changeEventsByAt = indexChangeEventsByAt(changeEvents);
   const forcedSplitBoundaries = repeatAndVoltaSplitBoundaries(engravingEvents2);
+  for (const at of forcedLineBreaks ?? [])
+    forcedSplitBoundaries.add(at);
   function belongsToCurrentPolyphonicTail(note, boundaryStartQN, boundaryTargetLen) {
     if (!note)
       return false;
@@ -10982,7 +11269,7 @@ function groupMeasures(notes, timeSig2, partialDuration, engravingEvents2) {
           targetLen = barLen;
         }
         cadenza = ev.value;
-      } else if (ev.changeType === "barline" && cadenza && current2.length) {
+      } else if (ev.changeType === "barline" && current2.length && (cadenza || ev.value === "")) {
         measures.push(current2);
         current2 = [];
         acc = 0;
@@ -11131,6 +11418,29 @@ function clefByMeasure(measures, initialClef = "treble", engravingEvents2) {
   }
   return clefs;
 }
+// src/music-rendering/engraving/lineThickness.ts
+var DEFAULT_STAFF_SIZE_PT = 20;
+function layoutLineThicknessSs(staffSizePt = DEFAULT_STAFF_SIZE_PT) {
+  const staffSpacePt = staffSizePt / 4;
+  const x1 = 4.125;
+  const x0 = 5;
+  const f1 = 0.47;
+  const f0 = 0.5;
+  const thicknessPt = (f1 * (staffSpacePt - x0) + f0 * (x1 - staffSpacePt)) / (x1 - x0);
+  return thicknessPt / staffSpacePt;
+}
+var GROB_THICKNESS = {
+  staffLine: 1,
+  stem: 1.3,
+  hairpin: 1,
+  tupletBracket: 1.6,
+  barLineHair: 1.9,
+  barLineThick: 6
+};
+function grobThicknessSs(grob, staffSizePt = DEFAULT_STAFF_SIZE_PT) {
+  return GROB_THICKNESS[grob] * layoutLineThicknessSs(staffSizePt);
+}
+
 // src/music-rendering/engraving/paperDefaults.ts
 var SPACING_224 = {
   "system-system-spacing": {
@@ -11301,6 +11611,17 @@ var SPACING_INCREMENT = LINE_SPACING * 1.2;
 var MIN_MEASURE_W = LINE_SPACING * 7;
 var STEM_H = Math.round(LINE_SPACING * 3.5);
 var STEM_H_FLAG = LINE_SPACING * 3.65;
+var STEM_LENGTHS_BY_FLAG_COUNT_SS = [3.5, 3.5, 3.5, 4.25, 5, 6, 7, 8, 9];
+function flagCountForDuration(dur2) {
+  if (!(dur2 > 0) || dur2 >= 1)
+    return 0;
+  return Math.max(0, Math.round(Math.log2(1 / dur2)));
+}
+function stemLengthForDuration(dur2) {
+  const flags = flagCountForDuration(dur2);
+  const idx = Math.min(flags, STEM_LENGTHS_BY_FLAG_COUNT_SS.length - 1);
+  return LINE_SPACING * STEM_LENGTHS_BY_FLAG_COUNT_SS[idx];
+}
 var STEM_W = LINE_SPACING * 0.14;
 var BEAM_H = LINE_SPACING * 0.4;
 var BEAM_INTER_GAP = LINE_SPACING * 0.41;
@@ -11320,8 +11641,9 @@ var WIDE_BARLINE_W = Math.round(LINE_SPACING * 1.4);
 var STEM_OPTICAL = Math.round(LINE_SPACING * 0.3);
 var NH_RX = LINE_SPACING * 0.5;
 var LEDGER_LINE_EXTENSION = LINE_SPACING * 0.35;
+var STAFF_LINE_THICKNESS = LINE_SPACING * layoutLineThicknessSs();
 var DOT_OFFSET = NH_RX + Math.round(LINE_SPACING * 0.5);
-var DOT_R = Math.round(LINE_SPACING * 0.2);
+var DOT_R = (LINE_SPACING - STAFF_LINE_THICKNESS) / 4;
 var BRAVURA_MUSIC_SIZE = LINE_SPACING * 4;
 var BRAVURA_CLEF_SIZE = LINE_SPACING * 4;
 var BRAVURA_KEY_SIZE = LINE_SPACING * 4;
@@ -11331,7 +11653,9 @@ var BRAVURA_ART_SIZE = LINE_SPACING * 3.1;
 var BRAVURA_GRACE_SIZE = LINE_SPACING * 2.6;
 var GRACE_STEM_H = LINE_SPACING * 2;
 var GRACE_BEAM_H = BEAM_H * 0.65;
-var GRACE_SPACING = Math.round(LINE_SPACING * 1.8);
+var GRACE_SPACING_INCREMENT = LINE_SPACING * 0.8;
+var GRACE_NOTE_MIN_W = LINE_SPACING * 1.6 * 0.8;
+var SPRING_INTO_GRACE_FACTOR = 0.8;
 var GRACE_NH_RX = Math.round(NH_RX * 0.65);
 var MUSIC_FONT_SCALES = {
   Petaluma: 0.88
@@ -11358,10 +11682,13 @@ var TAGLINE_FONT_SIZE = CANONICAL_STAFF_SPACE_PX * 2.2;
 var TAGLINE_BOTTOM_OFFSET = CANONICAL_STAFF_SPACE_PX * 6.1653;
 var CHORD_NAME_FONT_SIZE = LINE_SPACING * 2.2 * Math.pow(2, 1.5 / 6);
 var TEMPO_TEXT_FONT_SIZE = LINE_SPACING * 2.2;
+var TEMPO_NOTE_GLYPH_FONT_SIZE = LINE_SPACING * 4 * Math.pow(2, -1 / 6);
 var REHEARSAL_MARK_FONT_SIZE = LINE_SPACING * 2.2 * Math.pow(2, 2 / 6);
 var REHEARSAL_MARK_PAD = LINE_SPACING * 0.352;
+var REHEARSAL_MARK_STAFF_PADDING_SS = 0.8;
 var REHEARSAL_MARK_PAD_X = REHEARSAL_MARK_PAD;
 var FINGERING_FONT_SIZE = Math.round(LINE_SPACING * 1.2);
+var FINGERING_MUSIC_SCALE = Math.pow(2, -5 / 6);
 var VOLTA_NUMBER_FONT_SIZE = Math.round(LINE_SPACING * 1.55);
 var TUPLET_NUMBER_FONT_SIZE = Math.round(LINE_SPACING * 1.746);
 var TIME_SIG_Y_OFFSETS = {
@@ -11378,7 +11705,6 @@ var MM_REST_MIN_W = Math.round(LINE_SPACING * 3);
 var MM_REST_MAX_W = Math.round(LINE_SPACING * 9.25);
 var MM_REST_CAP_W = LINE_SPACING * 0.2;
 var MM_REST_CAP_RY = LINE_SPACING * 0.08;
-var MM_REST_NUM_SIZE = Math.round(LINE_SPACING * 4 / 3);
 function mmToPx(mm) {
   return Math.round(mm * 96 / 25.4);
 }
@@ -11436,6 +11762,9 @@ var C_CLEF = "";
 var NOTEHEAD_WHOLE = "";
 var NOTEHEAD_HALF = "";
 var NOTEHEAD_BLACK = "";
+var NOTEHEAD_WHOLE_OVERSIZED = "";
+var NOTEHEAD_HALF_OVERSIZED = "";
+var NOTEHEAD_BLACK_OVERSIZED = "";
 var NOTEHEAD_DIAMOND_WHITE = "";
 var DOWNBOW = "";
 var UPBOW = "";
@@ -11470,6 +11799,8 @@ var FLAG_32UP = "";
 var FLAG_32DOWN = "";
 var FLAG_64UP = "";
 var FLAG_64DOWN = "";
+var FLAG_128UP = "";
+var FLAG_128DOWN = "";
 var SYM_SHARP = "";
 var SYM_FLAT = "";
 var SYM_NATURAL = "";
@@ -11517,6 +11848,8 @@ var _DYN_LETTERS = {
 function dynGlyph(dyn) {
   return DYN_GLYPH[dyn] ?? dyn.split("").map((c) => _DYN_LETTERS[c] ?? c).join("");
 }
+var BRACKET_TOP = "";
+var BRACKET_BOTTOM = "";
 
 // src/music-rendering/engraving/accidentals.ts
 var ACC_HEIGHT_STEPS = 4;
@@ -11872,8 +12205,53 @@ function restGlyphOpticalScale(glyph) {
     return 1.05;
   return 1;
 }
+var NOTEHEAD_WIDTH_SS = {
+  filled: 1.18,
+  half: 1.18,
+  whole: 1.688
+};
+var DRAWN_NOTEHEAD_WIDTH_SS = {
+  filled: 1.316,
+  half: 1.316,
+  whole: 1.836
+};
+function drawnHeadWidthSs(d, isRest = false) {
+  if (isRest)
+    return REST_WIDTH_SS[restGlyph(d)] ?? DRAWN_NOTEHEAD_WIDTH_SS.filled;
+  return DRAWN_NOTEHEAD_WIDTH_SS[noteheadType(d)];
+}
+var ACCIDENTAL_WIDTH_SS = {
+  natural: 0.672,
+  flat: 0.904,
+  doubleFlat: 1.644,
+  sharp: 0.996,
+  doubleSharp: 0.988
+};
+var REST_WIDTH_SS = {
+  [REST_WHOLE]: 1.128,
+  [REST_HALF]: 1.128,
+  [REST_QUARTER]: 1.076,
+  [REST_EIGHTH]: 0.988,
+  [REST_16TH]: 1.28,
+  [REST_32]: 1.452,
+  [REST_64]: 1.692,
+  [REST_128]: 1.94
+};
+function leftHeadEndSs(d, isRest = false) {
+  if (isRest)
+    return REST_WIDTH_SS[restGlyph(d)] ?? NOTEHEAD_WIDTH_SS.filled;
+  return NOTEHEAD_WIDTH_SS[noteheadType(d)];
+}
+var EMMENTALER_HEAD_END_RATIO = 1.304 / 1.18;
+function spacingLeftHeadEndSs(d, isRest = false) {
+  if (isRest)
+    return leftHeadEndSs(d, true);
+  return NOTEHEAD_WIDTH_SS[noteheadType(d)] * EMMENTALER_HEAD_END_RATIO;
+}
 function flagGlyph(d, up) {
   const base = isDotted(d) ? d * 2 / 3 : d;
+  if (Math.abs(base - 0.03125) < 0.005)
+    return up ? FLAG_128UP : FLAG_128DOWN;
   if (Math.abs(base - 0.0625) < 0.01)
     return up ? FLAG_64UP : FLAG_64DOWN;
   if (Math.abs(base - 0.125) < 0.01)
@@ -11885,8 +12263,8 @@ function flagGlyph(d, up) {
   return null;
 }
 // src/music-rendering/engraving/fingering.ts
-function fingeringY(ny, stemUp, fingeringBelow, topY, btmY, fontSize) {
-  const placeBelow = fingeringBelow || stemUp;
+function fingeringY(ny, _stemUp, fingeringBelow, topY, btmY, fontSize) {
+  const placeBelow = fingeringBelow === true;
   const capH = Math.round(fontSize * 0.75);
   const minGap = Math.round(LINE_SPACING * 0.5);
   return placeBelow ? Math.max(ny + LINE_SPACING + capH, btmY + minGap + capH) : Math.min(ny - LINE_SPACING, topY - LINE_SPACING);
@@ -12149,20 +12527,46 @@ function minColumnGap(leftCol, rightCol, padding = 0) {
 }
 var SKYLINE_VERTICAL_PADDING = LINE_SPACING * 0.08;
 var NOTEHEAD_HALF_H = 0.55;
+var EXTRA_SPACING_WIDTH_SS = [0.1, 0.1];
+var ACCIDENTAL_EXTRA_SPACING_WIDTH_SS = [0.2, 0];
 var ACCIDENTAL_HALF_H = 1.5;
 var FLAG_INK_H = 2.5;
-function eventColumnBands(event) {
+function accidentalWidthSsFor(kind) {
+  switch (kind) {
+    case "natural":
+      return ACCIDENTAL_WIDTH_SS.natural;
+    case "flat":
+      return ACCIDENTAL_WIDTH_SS.flat;
+    case "sharp":
+      return ACCIDENTAL_WIDTH_SS.sharp;
+    default:
+      return ACCIDENTAL_WIDTH_SS.sharp;
+  }
+}
+function eventColumnBands(event, opts = {}) {
   const scale = extentScale(event);
   const fullTop = STAFF_TOP - LINE_SPACING * 2;
   const fullBottom = BOTTOM_LINE_Y + LINE_SPACING * 2;
-  if (event.isRest || event.step == null) {
+  if (event.isRest) {
     const extent = eventColumnExtent(event);
     return [{
-      kind: event.isRest ? "rest" : "notehead",
+      kind: "rest",
       top: fullTop,
       bottom: fullBottom,
       left: extent.left,
       right: extent.right
+    }];
+  }
+  const headEndSs = opts.headEnd === "spacing" ? spacingLeftHeadEndSs : leftHeadEndSs;
+  const headHalfW = headEndSs(event.duration, false) / 2 * LINE_SPACING * scale;
+  if (event.step == null) {
+    const extent = eventColumnExtent(event.isBeamed == null ? { ...event, isBeamed: true } : event);
+    return [{
+      kind: "notehead",
+      top: fullTop,
+      bottom: fullBottom,
+      left: Math.max(extent.left, headHalfW) + EXTRA_SPACING_WIDTH_SS[0] * LINE_SPACING,
+      right: Math.max(extent.right, headHalfW) + EXTRA_SPACING_WIDTH_SS[1] * LINE_SPACING
     }];
   }
   const bands = [];
@@ -12177,8 +12581,8 @@ function eventColumnBands(event) {
       kind: "notehead",
       top: y - LINE_SPACING * NOTEHEAD_HALF_H * scale,
       bottom: y + LINE_SPACING * NOTEHEAD_HALF_H * scale,
-      left: -dx + NH_RX * scale,
-      right: dx + NH_RX * scale
+      left: -dx + headHalfW,
+      right: dx + headHalfW
     });
     if (dots > 0) {
       bands.push({
@@ -12216,16 +12620,24 @@ function eventColumnBands(event) {
   }
   const accidentalColumns = event.accidentalColumns ?? 0;
   if (accidentalColumns > 0) {
+    const accWidthSs = accidentalWidthSsFor(event.accidentalKind);
     const ys = steps.map(stepY);
     bands.push({
       kind: "accidental",
       top: Math.min(...ys) - LINE_SPACING * ACCIDENTAL_HALF_H,
       bottom: Math.max(...ys) + LINE_SPACING * ACCIDENTAL_HALF_H,
-      left: (NH_RX + ACC_NOTEHEAD_GAP + accidentalColumns * ACC_EXTRA_W) * scale,
-      right: -(NH_RX + ACC_NOTEHEAD_GAP) * scale
+      left: headHalfW + (ACC_NOTEHEAD_GAP + accidentalColumns * accWidthSs * LINE_SPACING) * scale,
+      right: -(headHalfW + ACC_NOTEHEAD_GAP * scale)
     });
   }
-  return bands;
+  return bands.map((band) => {
+    const [growLeft, growRight] = band.kind === "accidental" ? ACCIDENTAL_EXTRA_SPACING_WIDTH_SS : EXTRA_SPACING_WIDTH_SS;
+    return {
+      ...band,
+      left: band.left + growLeft * LINE_SPACING,
+      right: band.right + growRight * LINE_SPACING
+    };
+  });
 }
 function minColumnGapSkyline(leftBands, rightBands, opts = {}) {
   const padding = opts.padding ?? 0;
@@ -12345,6 +12757,7 @@ function scaledMusicOptionalAttrs(item) {
 // src/music-rendering/layout/springModel.ts
 var SPACING_INCREMENT_SS = 1.2;
 var SHORTEST_DURATION_SPACE = 2;
+var BASE_SHORTEST_DURATION_QN = 0.75;
 function durationSpaceSs(durationQN, globalShortestQN, options) {
   const increment = options?.incrementSs ?? SPACING_INCREMENT_SS;
   const sds = options?.shortestDurationSpace ?? SHORTEST_DURATION_SPACE;
@@ -12352,6 +12765,25 @@ function durationSpaceSs(durationQN, globalShortestQN, options) {
     return sds * increment;
   const ratio = durationQN / globalShortestQN;
   return ratio < 1 ? (sds + ratio - 1) * increment : (sds + Math.log2(ratio)) * increment;
+}
+function commonShortestDurationQN(perMeasureShortestQN, baseShortestQN = BASE_SHORTEST_DURATION_QN) {
+  const counts = new Map;
+  for (const d of perMeasureShortestQN) {
+    if (!(d > 0))
+      continue;
+    counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  if (counts.size === 0)
+    return baseShortestQN;
+  let best = baseShortestQN;
+  let bestCount = -1;
+  for (const [d, c] of counts) {
+    if (c > bestCount || c === bestCount && d < best) {
+      best = d;
+      bestCount = c;
+    }
+  }
+  return Math.min(baseShortestQN, best);
 }
 function makeSpring(idealSs, minSs) {
   const ideal = Math.max(0, idealSs);
@@ -12390,6 +12822,71 @@ function notePairSpring(input) {
   const spring = makeSpring(ideal, min);
   spring.inverseStretchStrength = fraction * Math.max(0.1, space - min);
   return spring;
+}
+var GRACE_SHORTEST_DURATION_SPACE = 1.6;
+var GRACE_SPACING_INCREMENT_SS = 0.8;
+var GRACE_ENTRY_SPRING_SCALE = 0.8;
+function graceNotePairSpring(input) {
+  const len = durationSpaceSs(input.deltaGraceQN, Math.max(input.graceShortestQN, 0.000000001), {
+    incrementSs: GRACE_SPACING_INCREMENT_SS,
+    shortestDurationSpace: GRACE_SHORTEST_DURATION_SPACE
+  });
+  const min = GRACE_SPACING_INCREMENT_SS;
+  const spring = makeSpring(len, min);
+  spring.inverseStretchStrength = GRACE_SPACING_INCREMENT_SS / 2;
+  return spring;
+}
+function scaleSpring(spring, factor) {
+  return {
+    idealDistanceSs: spring.idealDistanceSs * factor,
+    minDistanceSs: spring.minDistanceSs * factor,
+    inverseStretchStrength: spring.inverseStretchStrength * factor,
+    inverseCompressStrength: Math.max(0.000000001, spring.inverseCompressStrength * factor)
+  };
+}
+function rodForce(springs, left, right, distSs) {
+  const range = springs.slice(left, right);
+  if (!range.length)
+    return Number.POSITIVE_INFINITY;
+  const idealLen = range.reduce((sum, s) => sum + s.idealDistanceSs, 0);
+  const stretching = distSs > idealLen;
+  const stiffness = range.reduce((sum, s) => sum + (stretching ? s.inverseStretchStrength : s.inverseCompressStrength), 0);
+  if (stiffness <= 0)
+    return Number.POSITIVE_INFINITY;
+  return solveSpringChain(range, distSs).force;
+}
+function addRod(springs, left, right, distSs) {
+  if (!Number.isFinite(distSs))
+    return;
+  if (left < 0 || right > springs.length || right <= left)
+    return;
+  let minTotal = 0;
+  for (let i = left;i < right; i++)
+    minTotal += springs[i].minDistanceSs;
+  if (minTotal > distSs)
+    return;
+  const blockForce = rodForce(springs, left, right, distSs);
+  if (!Number.isFinite(blockForce)) {
+    let idealTotal = 0;
+    for (let i = left;i < right; i++)
+      idealTotal += springs[i].idealDistanceSs;
+    if (idealTotal >= distSs)
+      return;
+    const factor = idealTotal !== 0 ? distSs / idealTotal : distSs / (right - left);
+    for (let i = left;i < right; i++) {
+      const spring = springs[i];
+      springs[i] = {
+        ...spring,
+        idealDistanceSs: idealTotal > 0 ? spring.idealDistanceSs * factor : factor
+      };
+    }
+    return;
+  }
+  for (let i = left;i < right; i++) {
+    const spring = springs[i];
+    const force = Math.max(blockForce, blockingForce(spring));
+    springs[i] = { ...spring, minDistanceSs: springLength(spring, force) };
+  }
 }
 function solveSpringChain(springs, targetLengthSs) {
   const total = (f) => springs.reduce((sum, s) => sum + springLength(s, f), 0);
@@ -12586,11 +13083,13 @@ function mergeBuildings(a, b) {
 var EXTRA_SPACING_WIDTH = [-0.1, 0.1];
 var ACCIDENTAL_EXTRA_SPACING_WIDTH = [-0.2, 0];
 var NOTE_COLUMN_SKYLINE_VERTICAL_PADDING = 0.15;
+var SPACING_SPANNER_PADDING_SS = 0.1;
 var HEAD_W = 1;
 var HEAD_HALF_H = 0.5;
 var STEM_W2 = 0.14;
+var LINE_THICKNESS = 0.1;
 var DOT_OFFSET2 = HEAD_W + 0.5;
-var DOT_R2 = 0.2;
+var DOT_R2 = (1 - LINE_THICKNESS) / 4;
 function widen(x, esw) {
   return [x[0] + esw[0], x[1] + esw[1]];
 }
@@ -12653,9 +13152,9 @@ function barlineSkylines(halfHeight = 2, thickness = 0.19, verticalPadding = 0) 
     conditionalLeft: new Skyline(-1)
   };
 }
-function paperColumnMinimumDistance(left, right) {
+function paperColumnMinimumDistance(left, right, paddingSs = SPACING_SPANNER_PADDING_SS) {
   const rightFacing = right.left.merge(right.conditionalLeft);
-  return Math.max(0, rightFacing.distance(left.right));
+  return Math.max(0, paddingSs + rightFacing.distance(left.right));
 }
 
 // src/music-rendering/layout/spacingModel.ts
@@ -12704,10 +13203,35 @@ function isPercentRepeatOnlyMeasure(measure2) {
     return false;
   return realEvents.every((note) => note.isPercentRepeatPlaceholder);
 }
+function beamGroupStemDirections(measure2) {
+  const stepsByGroup = new Map;
+  for (const note of measure2) {
+    if (!note.beamGroupId || note.isGrace || note.isRest || note.duration <= 0)
+      continue;
+    if (isStructuralMarkerNote(note))
+      continue;
+    let steps = stepsByGroup.get(note.beamGroupId);
+    if (!steps) {
+      steps = [];
+      stepsByGroup.set(note.beamGroupId, steps);
+    }
+    steps.push(noteStep(note.noteName, note.octave));
+    for (const chordNote of note.chordNotes ?? []) {
+      steps.push(noteStep(chordNote.noteName, chordNote.octave));
+    }
+  }
+  const directions = new Map;
+  for (const [groupId, steps] of stepsByGroup) {
+    if (steps.length)
+      directions.set(groupId, beamStemUpForSteps(steps));
+  }
+  return directions;
+}
 function spacingEventsForMeasure(measure2) {
   const events2 = [];
   let percentRepeatOnly = true;
   let percentRepeatDuration2 = 0;
+  const beamDirections = beamGroupStemDirections(measure2);
   for (const note of measure2) {
     if (note.isGrace || note.duration <= 0 || isStructuralMarkerNote(note))
       continue;
@@ -12724,7 +13248,10 @@ function spacingEventsForMeasure(measure2) {
       hasOrnament: hasOrnamentArticulation(note.articulations),
       ...note.lyricWidth ? { lyricWidth: note.lyricWidth } : {},
       ...note.isRest ? {} : {
-        stemUp: note.stemDirection != null ? note.stemDirection === "up" : noteStep(note.noteName, note.octave) < 4,
+        stemUp: note.stemDirection != null ? note.stemDirection === "up" : (note.beamGroupId != null ? beamDirections.get(note.beamGroupId) : undefined) ?? stemUpForSteps([
+          noteStep(note.noteName, note.octave),
+          ...(note.chordNotes ?? []).map((chordNote) => noteStep(chordNote.noteName, chordNote.octave))
+        ]),
         step: noteStep(note.noteName, note.octave),
         isBeamed: note.beamGroupId != null,
         ...note.chordNotes?.length ? { chordSteps: note.chordNotes.map((cn) => noteStep(cn.noteName, cn.octave)) } : {}
@@ -12776,7 +13303,7 @@ function spacingDurationsForMeasure(measure2) {
   }
   return durations;
 }
-function polyphonicColumnDurations(measure2) {
+function polyphonicColumnEvents(measure2) {
   let hasSecondary = false;
   for (const note of measure2) {
     if (note.voiceDuration != null && !note.isGrace) {
@@ -12795,7 +13322,7 @@ function polyphonicColumnDurations(measure2) {
   }
   if (!(measureLenQN > 0))
     return null;
-  const onsets = [];
+  const entries = [];
   let primaryCursor = 0;
   for (const note of measure2) {
     if (note.isGrace || isStructuralMarkerNote(note))
@@ -12804,31 +13331,101 @@ function polyphonicColumnDurations(measure2) {
       if (!(note.voiceDuration > 0))
         continue;
       const raw = note.voiceOffsetQN ?? 0;
-      onsets.push((raw % measureLenQN + measureLenQN) % measureLenQN);
+      entries.push({
+        onset: (raw % measureLenQN + measureLenQN) % measureLenQN,
+        note,
+        isPrimary: false
+      });
     } else {
       if (note.duration <= 0)
         continue;
-      onsets.push(primaryCursor);
+      entries.push({ onset: primaryCursor, note, isPrimary: true });
       primaryCursor += note.duration;
     }
   }
-  if (!onsets.length)
+  if (!entries.length)
     return null;
   const EPS3 = 0.000001;
-  onsets.sort((a, b) => a - b);
-  const distinct = [];
-  for (const onset of onsets) {
-    if (!distinct.length || onset - distinct[distinct.length - 1] > EPS3)
-      distinct.push(onset);
+  entries.sort((a, b) => a.onset - b.onset);
+  const columns = [];
+  for (const entry of entries) {
+    const last = columns[columns.length - 1];
+    if (!last || entry.onset - last.onset > EPS3) {
+      columns.push({
+        onset: entry.onset,
+        notes: [entry.note],
+        primaries: entry.isPrimary ? [entry.note] : []
+      });
+    } else {
+      last.notes.push(entry.note);
+      if (entry.isPrimary)
+        last.primaries.push(entry.note);
+    }
   }
-  const durations = [];
-  for (let i = 0;i < distinct.length; i++) {
-    const next = i + 1 < distinct.length ? distinct[i + 1] : measureLenQN;
-    const gap = next - distinct[i];
-    if (gap > EPS3)
-      durations.push(gap);
+  const beamDirections = beamGroupStemDirections(measure2);
+  const events2 = [];
+  for (let i = 0;i < columns.length; i++) {
+    const column = columns[i];
+    const next = i + 1 < columns.length ? columns[i + 1].onset : measureLenQN;
+    const gap = next - column.onset;
+    if (gap <= EPS3)
+      continue;
+    const sounding = column.notes.filter((note) => !note.isRest);
+    const representative = column.primaries[0] ?? column.notes[0];
+    const steps = [];
+    for (const note of sounding) {
+      steps.push(noteStep(note.noteName, note.octave));
+      for (const chordNote of note.chordNotes ?? []) {
+        steps.push(noteStep(chordNote.noteName, chordNote.octave));
+      }
+    }
+    const distinctSteps = [...new Set(steps)];
+    const resolvedStemUp = (note) => note.stemDirection != null ? note.stemDirection === "up" : (note.beamGroupId != null ? beamDirections.get(note.beamGroupId) : undefined) ?? stemUpForSteps([
+      noteStep(note.noteName, note.octave),
+      ...(note.chordNotes ?? []).map((cn) => noteStep(cn.noteName, cn.octave))
+    ]);
+    let unanimousStemUp;
+    for (const note of sounding) {
+      const up = resolvedStemUp(note);
+      if (unanimousStemUp === undefined)
+        unanimousStemUp = up;
+      else if (unanimousStemUp !== up) {
+        unanimousStemUp = undefined;
+        break;
+      }
+    }
+    const rendersFlag = sounding.some((note) => note.beamGroupId == null && flagGlyph(note.duration, true) != null);
+    let lyricWidth = 0;
+    let dynamic;
+    let hasFingering = false;
+    let hasOrnament = false;
+    for (const note of column.notes) {
+      if ((note.lyricWidth ?? 0) > lyricWidth)
+        lyricWidth = note.lyricWidth;
+      if (dynamic == null && note.dynamic != null)
+        dynamic = note.dynamic;
+      if (note.fingering != null)
+        hasFingering = true;
+      if (hasOrnamentArticulation(note.articulations))
+        hasOrnament = true;
+    }
+    events2.push({
+      duration: gap,
+      musicScale: noteMusicScale(representative),
+      isRest: sounding.length === 0,
+      dynamic,
+      hasFingering,
+      hasOrnament,
+      ...lyricWidth > 0 ? { lyricWidth } : {},
+      ...distinctSteps.length ? {
+        step: distinctSteps[0],
+        ...distinctSteps.length > 1 ? { chordSteps: distinctSteps.slice(1) } : {},
+        isBeamed: !rendersFlag,
+        ...unanimousStemUp !== undefined ? { stemUp: unanimousStemUp } : {}
+      } : {}
+    });
   }
-  return durations.length ? durations : null;
+  return events2.length ? events2 : null;
 }
 function applyTerminalShortTail(events2, _shortestDur, _active) {
   return events2;
@@ -12855,14 +13452,14 @@ function measureWidthForSpacingEvents(realEventsIn, shortestDur, opts) {
   return Math.max(minMeasureW, allOrdinaryAttacks ? attackSpan : total, attackSpan);
 }
 function measureWidthWithShortest(m, shortestDur, opts) {
-  const columnDurations = polyphonicColumnDurations(m);
-  if (columnDurations) {
+  const columnEvents = polyphonicColumnEvents(m);
+  if (columnEvents) {
     let localShortest = shortestDur;
-    for (const duration3 of columnDurations) {
-      if (duration3 < localShortest)
-        localShortest = duration3;
+    for (const event of columnEvents) {
+      if (event.duration < localShortest)
+        localShortest = event.duration;
     }
-    return measureWidthForSpacingEvents(columnDurations.map((duration3) => ({ duration: duration3 })), localShortest, {
+    return measureWidthForSpacingEvents(columnEvents, localShortest, {
       firstOrdinaryOffset: opts?.firstOrdinaryOffset,
       chainLeadingGapW: opts?.chainLeadingGapW,
       chainFullTail: opts?.chainFullTail,
@@ -12890,8 +13487,11 @@ function lyricNaturalWidth(m) {
     span += lyricPairRod(visible[k], visible[k + 1]);
   }
   const firstW = visible[0]?.lyricWidth ?? 0;
-  const lastW = visible[visible.length - 1]?.lyricWidth ?? 0;
-  return span + firstW / 2 + lastW / 2;
+  const last = visible[visible.length - 1];
+  const lastW = last?.lyricWidth ?? 0;
+  const lastRendersFlag = last != null && !last.isRest && !last.beamGroupId && flagGlyph(last.duration, true) != null;
+  const lastInkTail = lastRendersFlag ? (NH_RX + FLAG_ADV_W) * noteMusicScale(last) + LINE_SPACING : 0;
+  return span + firstW / 2 + Math.max(lastW / 2, lastInkTail);
 }
 function barlineTailReserveW(lastHasFlag) {
   return lastHasFlag ? 0 : Math.round(LINE_SPACING * 0.5);
@@ -12951,6 +13551,7 @@ var POST_BARLINE_FIRST_NOTE_GAP_FLOOR = LINE_SPACING * 1.6;
 var COMPACT_SHORT_POST_BARLINE_FIRST_NOTE_GAP_FLOOR = LINE_SPACING * 1.1;
 var DENSE_ACCIDENTAL_FOLLOWING_ATTACK_GAP = LINE_SPACING * 2.55;
 var DENSE_REMOTE_ACCIDENTAL_FOLLOWING_ATTACK_GAP = LINE_SPACING * 2.05;
+var SPACING_SPANNER_PADDING_SS2 = 0.1;
 var ORDINARY_FINAL_ATTACK_TAIL = Math.round(LINE_SPACING * 2.6);
 var ORDINARY_FINAL_LONG_ATTACK_TAIL = Math.round(LINE_SPACING * 3.45);
 var SPARSE_FIRST_SPRING_EXPANSION_RATIO = 2.1;
@@ -13124,17 +13725,27 @@ function minimumAttackSpan(events2, shortestDur, firstOrdinaryOffset = ORDINARY_
   span += chainFullTail ? Math.max(lastWidth, finalAttackTail(lastEvent, lastWidth)) : finalAttackTail(lastEvent, lastWidth);
   return span;
 }
-function systemSpacingReferenceDur(measures) {
-  let shortest = Infinity;
+var BASE_SHORTEST_DURATION_QN2 = 0.75;
+function systemSpacingReferenceDur(measures, baseShortestDurationQN = BASE_SHORTEST_DURATION_QN2) {
+  const perMeasureShortest = [];
   for (const measure2 of measures) {
+    let shortest = Infinity;
     for (const duration3 of spacingDurationsForMeasure(measure2)) {
-      if (duration3 < shortest)
+      if (duration3 > 0 && duration3 < shortest)
         shortest = duration3;
     }
+    for (const note of measure2) {
+      if (note.isGrace || isStructuralMarkerNote(note))
+        continue;
+      const vd = note.voiceDuration;
+      if (vd != null && vd > 0 && vd < shortest)
+        shortest = vd;
+    }
+    if (Number.isFinite(shortest))
+      perMeasureShortest.push(shortest);
   }
-  if (!Number.isFinite(shortest))
-    return 1;
-  return shortest;
+  const cap = baseShortestDurationQN > 0 ? baseShortestDurationQN : BASE_SHORTEST_DURATION_QN2;
+  return commonShortestDurationQN(perMeasureShortest, cap);
 }
 function systemKeySignatureStartX(indentX = 0) {
   return CLEF_X + KEY_SIGNATURE_CLEF_DISTANCE + indentX;
@@ -13203,12 +13814,15 @@ function denseBeamedPairFloor(prevNote, nextNote, shortestDur, prevIsBeamed, nex
   }
   return noteSpaceW(prevDur, shortestDur) * noteMusicScale(prevNote) * DENSE_32ND_SPRING_MIN_RATIO;
 }
-function solveSpringWidths(durations, shortestDur, targetTotal, musicScales = [], stemInfo = [], chainFullTail = false) {
+function solveSpringWidths(durations, shortestDur, targetTotal, musicScales = [], stemInfo = [], chainFullTail = false, chainForce) {
   const springs = buildEventSprings(durations, shortestDur, musicScales, stemInfo);
   if (!springs.length)
     return [];
   if (chainFullTail)
     applyBarlineStretchStiffening(springs, durations, shortestDur);
+  if (chainForce != null && Number.isFinite(chainForce)) {
+    return springs.map((spring) => springLength(spring, chainForce) * LINE_SPACING);
+  }
   const solution = solveSpringChain(springs, targetTotal / LINE_SPACING);
   return solution.lengthsSs.map((len) => len * LINE_SPACING);
 }
@@ -13221,9 +13835,7 @@ function applyBarlineStretchStiffening(springs, durations, shortestDur) {
     return;
   const NOTE_BAR_SKYLINE_MIN_SS = 1.6;
   const effectiveMin = Math.max(sp.minDistanceSs, NOTE_BAR_SKYLINE_MIN_SS);
-  const halfGapIdeal = (sp.idealDistanceSs + effectiveMin) / 2;
-  const factor = Math.max(0, Math.min(1, halfGapIdeal / sp.idealDistanceSs));
-  springs[li] = { ...sp, inverseStretchStrength: sp.inverseStretchStrength * factor };
+  springs[li] = sp;
 }
 function measureSpringAggregate(durations, shortestDur, musicScales = [], stemInfo = []) {
   const springs = buildEventSprings(durations, shortestDur, musicScales, stemInfo);
@@ -13236,6 +13848,46 @@ function measureSpringAggregate(durations, shortestDur, musicScales = [], stemIn
     inverseStretch += s.inverseStretchStrength;
   }
   return { idealPx, minPx, inverseStretch };
+}
+var SAME_DIRECTION_CORRECTION_SS = 0.25;
+var BARLINE_CORRECTION_HALVING = 0.5;
+var STAFF_BOTTOM_STEP = 0;
+var STAFF_TOP_STEP = 8;
+function headPositionSpan(info) {
+  if (info == null || info.isRest || info.step == null)
+    return null;
+  let down = info.step;
+  let up = info.step;
+  for (const step of info.chordSteps ?? []) {
+    if (step < down)
+      down = step;
+    if (step > up)
+      up = step;
+  }
+  return { down, up };
+}
+function sameDirectionCorrectionSs(left, right, leftDuration, leftIsBeamed) {
+  if (left == null || right == null)
+    return 0;
+  if (!(leftDuration > 0) || leftDuration >= 4)
+    return 0;
+  if (leftDuration < 1 && !leftIsBeamed)
+    return 0;
+  if (Math.min(left.up, right.up) >= Math.max(left.down, right.down))
+    return 0;
+  const lowestIsRight = left.down > right.up;
+  const [lower, higher] = lowestIsRight ? [right, left] : [left, right];
+  const delta = higher.down - lower.up;
+  if (!(delta > 1))
+    return 0;
+  return lowestIsRight ? -SAME_DIRECTION_CORRECTION_SS : SAME_DIRECTION_CORRECTION_SS;
+}
+function measureEventSprings(events2, shortestDur, spaceToBarline = true) {
+  const springs = buildEventSprings(events2.map((event) => event.duration), shortestDur, events2.map((event) => spacingEventScale(event)), events2.map((event) => event));
+  if (spaceToBarline) {
+    applyBarlineStretchStiffening(springs, events2.map((event) => event.duration), shortestDur);
+  }
+  return springs;
 }
 function buildEventSprings(durations, shortestDur, musicScales = [], stemInfo = []) {
   if (!durations.length)
@@ -13252,7 +13904,7 @@ function buildEventSprings(durations, shortestDur, musicScales = [], stemInfo = 
       globalShortestQN: Math.max(shortestDur, 0.000000001),
       incrementSs: SPACING_INCREMENT / LINE_SPACING
     });
-    const wholeHeadExcessSs = dur2 >= 4 ? 1.7 - SPACING_INCREMENT / LINE_SPACING : 0;
+    const headEndExcessSs = spacingLeftHeadEndSs(dur2, !!stemInfo[i]?.isRest) - SPACING_INCREMENT / LINE_SPACING;
     const leftUp = stemInfo[i]?.stemUp;
     const rightUp = stemInfo[i + 1]?.stemUp;
     const leftStep = stemInfo[i]?.step;
@@ -13266,10 +13918,21 @@ function buildEventSprings(durations, shortestDur, musicScales = [], stemInfo = 
       const overlapSteps = Math.min(hiL, hiR) - Math.max(loL, loR);
       const overlapScale = Math.max(0, Math.min(overlapSteps / STEM_STEPS, 1));
       stemDirCorrectionSs = (leftUp ? 0.5 : -0.5) * overlapScale;
+    } else if (leftUp != null && rightUp != null && leftUp === rightUp) {
+      const rightHasAccidental = (stemInfo[i + 1]?.accidentalColumns ?? 0) > 0;
+      if (!rightHasAccidental) {
+        stemDirCorrectionSs = sameDirectionCorrectionSs(headPositionSpan(stemInfo[i]), headPositionSpan(stemInfo[i + 1]), durations[i], !!stemInfo[i]?.isBeamed);
+      }
+    } else if (rightUp == null && leftUp != null && leftStep != null && i === durations.length - 1 && durations[i] < 4) {
+      const STEM_STEPS = 7;
+      const [loStem, hiStem] = leftUp ? [leftStep, leftStep + STEM_STEPS] : [leftStep - STEM_STEPS, leftStep];
+      const overlapSteps = Math.min(hiStem, STAFF_TOP_STEP) - Math.max(loStem, STAFF_BOTTOM_STEP);
+      const overlapScale = Math.max(0, Math.min(overlapSteps / STEM_STEPS, 1));
+      stemDirCorrectionSs = (leftUp ? 0.5 : -0.5) * overlapScale * BARLINE_CORRECTION_HALVING;
     }
     return {
-      idealDistanceSs: Math.max((s.minDistanceSs + wholeHeadExcessSs) * scale, (s.idealDistanceSs + wholeHeadExcessSs + stemDirCorrectionSs) * scale),
-      minDistanceSs: (s.minDistanceSs + wholeHeadExcessSs) * scale,
+      idealDistanceSs: Math.max((s.minDistanceSs + headEndExcessSs) * scale, (s.idealDistanceSs + headEndExcessSs + stemDirCorrectionSs) * scale),
+      minDistanceSs: (s.minDistanceSs + headEndExcessSs) * scale,
       inverseStretchStrength: s.inverseStretchStrength * scale,
       inverseCompressStrength: Math.max(0.000000001, s.inverseCompressStrength * scale)
     };
@@ -13351,7 +14014,7 @@ function buildMeasureRods(measure2, noteAccCols, noteAccidentalKinds, noteSteps)
         accidentalColumns
       });
       minDist = minColumnGapSkyline(fromBands, toBands, {
-        accidentalPadding: accidentalColumns > 0 ? accidentalClearance(accidentalKind) : 0
+        padding: LINE_SPACING * SPACING_SPANNER_PADDING_SS2
       });
     } else {
       const fromExtent = eventColumnExtent({
@@ -13610,6 +14273,26 @@ function enforceMeasureLeftBoundaryRod(noteXs, measure2, noteAreaStartX, content
     for (const idx of realIndices)
       noteXs[idx] += shift;
   }
+  const overrun = noteXs[lastIdx] - maxLastX;
+  if (overrun > PIXEL_EPSILON) {
+    const slack = Math.max(0, noteXs[firstIdx] - minFirstX);
+    const shiftLeft = Math.min(overrun, slack);
+    if (shiftLeft > 0) {
+      for (const idx of realIndices)
+        noteXs[idx] -= shiftLeft;
+    }
+    let residual = overrun - shiftLeft;
+    for (let pos = realIndices.length - 2;pos >= 0 && residual > PIXEL_EPSILON; pos--) {
+      const gap = noteXs[realIndices[pos + 1]] - noteXs[realIndices[pos]];
+      const take = Math.min(residual, Math.max(0, gap - ORDINARY_ATTACK_ROD));
+      if (take > 0) {
+        for (let k = pos + 1;k < realIndices.length; k++) {
+          noteXs[realIndices[k]] -= take;
+        }
+        residual -= take;
+      }
+    }
+  }
   return noteXs;
 }
 function distributeAmountWithCaps(amount, capacities, priorities) {
@@ -13709,12 +14392,26 @@ function fitBarlineBoundaryGaps(noteXs, measure2, noteAreaStartX, contentRightX,
 }
 
 // src/music-rendering/layout/graceSpacing.ts
+var GRACE_HEAD_SCALE = 0.65;
+function graceDurationSpace(dur2, shortest) {
+  if (!(dur2 > 0) || !(shortest > 0))
+    return GRACE_NOTE_MIN_W;
+  const ratio = dur2 / shortest;
+  return ratio >= 1 ? GRACE_NOTE_MIN_W + GRACE_SPACING_INCREMENT * Math.log2(ratio) : GRACE_NOTE_MIN_W + GRACE_SPACING_INCREMENT * (ratio - 1);
+}
+function graceColumnWidth(dur2, shortest) {
+  const headInk = drawnHeadWidthSs(dur2) * LINE_SPACING * GRACE_HEAD_SCALE;
+  return graceDurationSpace(dur2, shortest) * SPRING_INTO_GRACE_FACTOR + headInk;
+}
 function planGraceSpacingForMeasure(measure2) {
   const graceSpaceBeforeNote = new Map;
   const spaceBeforeByIndex = new Array(measure2.length).fill(0);
   const graceXOffsetByIndex = new Array(measure2.length).fill(0);
   let totalGraceSpace = 0;
   let graceRun = 0;
+  let graceRunDurations = [];
+  const graceDurations = measure2.filter((n) => n.isGrace).map((n) => n.graceDuration ?? 0.5).filter((d) => d > 0);
+  const shortestGrace = graceDurations.length ? Math.min(...graceDurations) : 0.5;
   for (let noteIndex = 0;noteIndex < measure2.length; noteIndex++) {
     const note = measure2[noteIndex];
     if (!note.isGrace && note.layoutGraceSpaceBefore != null) {
@@ -13729,24 +14426,30 @@ function planGraceSpacingForMeasure(measure2) {
     }
     if (note.isGrace) {
       graceRun++;
+      graceRunDurations.push(note.graceDuration ?? 0.5);
       continue;
     }
     if (graceRun > 0) {
-      const space = graceRun * GRACE_SPACING;
+      const space = graceRunDurations.reduce((sum, d) => sum + graceColumnWidth(d, shortestGrace), 0);
       graceSpaceBeforeNote.set(noteIndex, space);
       spaceBeforeByIndex[noteIndex] = space;
       totalGraceSpace += space;
       graceRun = 0;
+      graceRunDurations = [];
     }
   }
   let trailingGrace = 0;
+  let trailingGraceWidth = 0;
   for (let noteIndex = measure2.length - 1;noteIndex >= 0; noteIndex--) {
     const note = measure2[noteIndex];
     if (note.isGrace) {
-      graceXOffsetByIndex[noteIndex] = -(trailingGrace + 1) * GRACE_SPACING;
+      const own = graceColumnWidth(note.graceDuration ?? 0.5, shortestGrace);
+      trailingGraceWidth += own;
+      graceXOffsetByIndex[noteIndex] = -trailingGraceWidth;
       trailingGrace++;
     } else {
       trailingGrace = 0;
+      trailingGraceWidth = 0;
     }
   }
   return {
@@ -13844,8 +14547,10 @@ function accidentalClearanceKindForItems(items) {
   for (const item of items) {
     if (item.symbol === SYM_SHARP)
       return "sharp";
-    if (item.symbol === SYM_NATURAL)
-      fallback = "natural";
+    if (item.symbol === SYM_FLAT)
+      fallback = "flat";
+    else if (item.symbol === SYM_NATURAL)
+      fallback ??= "natural";
     else
       fallback ??= "other";
   }
@@ -13934,6 +14639,620 @@ function buildMeasureSpacingPlan(input) {
     }) + tailW + accidentalReserveW + graceReserveW + inlineClefReserveW + dynamicReserveW
   };
 }
+// src/music-rendering/layout/lineBreakDemerits.ts
+function combineDemerits(input) {
+  const { force, previousForce, isRagged } = input;
+  const own = force * force;
+  if (isRagged || previousForce == null)
+    return own;
+  const evenness = previousForce - force;
+  return own + evenness * evenness;
+}
+function buildStretchPrefixes(referenceDurations, measureSpacingFacts, measureCount) {
+  const byReference = new Map;
+  for (const refDur of referenceDurations) {
+    const prefix = new Float64Array(measureCount + 1);
+    for (let mi = 0;mi < measureCount; mi++) {
+      let stretch = 0;
+      for (const event of measureSpacingFacts[mi].events) {
+        const scale = event.musicScale ?? 1;
+        stretch += Math.max(LINE_SPACING * 0.1, noteSpaceW(event.duration, refDur) - SPACING_INCREMENT) * scale;
+      }
+      prefix[mi + 1] = prefix[mi] + stretch;
+    }
+    byReference.set(refDur, prefix);
+  }
+  return byReference;
+}
+
+// src/music-rendering/layout/staffSpacingSpring.ts
+function staffSpacingSpecKey(breakDir) {
+  return breakDir === "center" ? "next-note" : "first-note";
+}
+function staffSpacingSpring(input) {
+  const [extLeft, extRight] = input.prefatoryExtent;
+  const extLength = extRight - extLeft;
+  const { type, distance } = input.spec;
+  let fixed = extRight;
+  let ideal = fixed + 1;
+  let isStretchable = true;
+  switch (type) {
+    case "fixed-space":
+      fixed += distance;
+      ideal = fixed;
+      break;
+    case "extra-space":
+      ideal = fixed + distance;
+      break;
+    case "semi-fixed-space":
+      fixed += distance / 2;
+      ideal = fixed + distance / 2;
+      break;
+    case "minimum-space":
+      ideal = extLeft + Math.max(extLength, distance);
+      break;
+    case "minimum-fixed-space":
+      fixed = extLeft + Math.max(extLength, distance);
+      ideal = fixed;
+      break;
+    case "shrink-space":
+      ideal = fixed + distance;
+      isStretchable = false;
+      break;
+    case "semi-shrink-space":
+      fixed += distance / 2;
+      ideal = fixed + distance / 2;
+      isStretchable = false;
+      break;
+  }
+  const stretchability = isStretchable ? ideal - fixed : 0;
+  ideal += input.situationalSpace ?? 0;
+  const optical = input.opticalCorrection ?? 0;
+  fixed += optical;
+  ideal += optical;
+  const minDist = input.minimumDistance;
+  const minDistCorrection = Math.max(0, 0.3 + minDist - fixed);
+  fixed += minDistCorrection;
+  ideal = Math.max(ideal, fixed);
+  return {
+    ideal,
+    minimum: minDist,
+    inverseStretch: Math.max(0, stretchability),
+    inverseCompress: Math.max(0, ideal - fixed),
+    fixed
+  };
+}
+var STAFF_SPACING_ALIST = {
+  barline: {
+    "first-note": { type: "semi-shrink-space", distance: 1.3 },
+    "next-note": { type: "semi-fixed-space", distance: 0.9 }
+  },
+  clef: {
+    "first-note": { type: "minimum-fixed-space", distance: 5 },
+    "next-note": { type: "extra-space", distance: 1 }
+  },
+  "key-signature": {
+    "first-note": { type: "shrink-space", distance: 2.5 },
+    "next-note": { type: "shrink-space", distance: 2.5 }
+  },
+  "key-cancellation": {
+    "first-note": { type: "shrink-space", distance: 2.5 },
+    "next-note": { type: "shrink-space", distance: 2.5 }
+  },
+  "time-signature": {
+    "first-note": { type: "semi-shrink-space", distance: 2 },
+    "next-note": { type: "semi-shrink-space", distance: 2 }
+  }
+};
+
+// src/music-rendering/layout/systemColumnChain.ts
+var BARLINE_PREFATORY_EXTENT = [0, 0.19];
+function barlineSeamSpring(input) {
+  const position = input.position ?? "midline";
+  const s = staffSpacingSpring({
+    prefatoryExtent: BARLINE_PREFATORY_EXTENT,
+    spec: STAFF_SPACING_ALIST.barline[staffSpacingSpecKey(position === "midline" ? "center" : "right")],
+    minimumDistance: input.minimumDistanceSs,
+    opticalCorrection: input.opticalCorrectionSs,
+    situationalSpace: input.situationalSpaceSs
+  });
+  return {
+    idealDistanceSs: s.ideal,
+    minDistanceSs: Math.max(0, s.minimum),
+    inverseStretchStrength: Math.max(0, s.inverseStretch),
+    inverseCompressStrength: Math.max(s.inverseCompress, 0.000000001)
+  };
+}
+function measureChainSpring(m) {
+  const idealSs = Math.max(m.baseW, 0) / LINE_SPACING;
+  const minSs = Math.min(Math.max(m.minW, 0), Math.max(m.baseW, 0)) / LINE_SPACING;
+  return {
+    idealDistanceSs: idealSs,
+    minDistanceSs: minSs,
+    inverseStretchStrength: Math.max(m.inverseStretch, 0.000000001),
+    inverseCompressStrength: Math.max(idealSs - minSs, 0.000000001)
+  };
+}
+function solveSystemColumnChain(input) {
+  const { measures, seams, targetW, uniformScale, isRagged } = input;
+  const fallback = () => ({
+    measureWs: measures.map((m) => m.baseW * uniformScale),
+    measureScales: measures.map(() => uniformScale),
+    seamWs: seams.map((s) => s.minW + (s.extraInkW ?? 0)),
+    force: null,
+    fellBack: true
+  });
+  if (measures.length === 0 || seams.length !== measures.length)
+    return fallback();
+  const chain = [];
+  const seamExtras = [];
+  for (let mi = 0;mi < measures.length; mi++) {
+    chain.push(measureChainSpring(measures[mi]));
+    const seam = seams[mi];
+    const extraSs = (seam.extraInkW ?? 0) / LINE_SPACING;
+    const bar = barlineSeamSpring({
+      minimumDistanceSs: Math.max(seam.minW, 0) / LINE_SPACING,
+      position: seam.position,
+      opticalCorrectionSs: (seam.opticalCorrectionSs ?? 0) + (seam.centreShiftSs ?? 0),
+      situationalSpaceSs: seam.situationalSpaceSs
+    });
+    seamExtras.push(extraSs);
+    const spentSs = Math.max(0, seam.alreadySpentW ?? 0) / LINE_SPACING;
+    chain.push({
+      idealDistanceSs: Math.max(0, bar.idealDistanceSs - spentSs) + extraSs,
+      minDistanceSs: Math.max(0, bar.minDistanceSs - spentSs) + extraSs,
+      inverseStretchStrength: bar.inverseStretchStrength,
+      inverseCompressStrength: bar.inverseCompressStrength
+    });
+  }
+  if (debugFlag("LILYJS_CHAIN_DUMP")) {
+    const f = (v) => (v / LINE_SPACING).toFixed(2);
+    console.error(`
+=== chain: ${measures.length} measures, target ${f(targetW)}ss, ragged=${isRagged}`);
+    measures.forEach((m, mi) => {
+      const seam = seams[mi];
+      console.error(`  m${mi + 1}: baseW ${f(m.baseW)}ss  minW ${f(m.minW)}ss  invStretch ${m.inverseStretch.toFixed(2)}` + `   | seam${mi + 1}: minW ${f(seam.minW)}ss spent ${f(Math.min(seam.alreadySpentW ?? 0, 1e5))}ss pos ${seam.position}`);
+    });
+  }
+  if (isRagged) {
+    const measureWs2 = [];
+    const measureScales2 = [];
+    const seamWs2 = [];
+    for (let mi = 0;mi < measures.length; mi++) {
+      const w = chain[mi * 2].idealDistanceSs * LINE_SPACING;
+      measureWs2.push(w);
+      measureScales2.push(w / Math.max(measures[mi].baseW, 1));
+      seamWs2.push(chain[mi * 2 + 1].idealDistanceSs * LINE_SPACING);
+    }
+    return { measureWs: measureWs2, measureScales: measureScales2, seamWs: seamWs2, force: 0, fellBack: false };
+  }
+  const solution = solveSpringChain(chain, targetW / LINE_SPACING);
+  if (solution.overConstrained)
+    return fallback();
+  const measureWs = [];
+  const measureScales = [];
+  const seamWs = [];
+  for (let mi = 0;mi < measures.length; mi++) {
+    const measureW = solution.lengthsSs[mi * 2] * LINE_SPACING;
+    measureWs.push(measureW);
+    measureScales.push(measureW / Math.max(measures[mi].baseW, 1));
+    seamWs.push(solution.lengthsSs[mi * 2 + 1] * LINE_SPACING);
+  }
+  if (debugFlag("LILYJS_CHAIN_DUMP")) {
+    const f = (v) => (v / LINE_SPACING).toFixed(2);
+    console.error(`  solved force ${solution.force?.toFixed(4)}`);
+    measureWs.forEach((w, mi) => {
+      const base = measures[mi].baseW;
+      console.error(`   m${mi + 1}: baseW ${f(base)} -> solved ${f(w)}ss  (+${f(w - base)}ss, x${(w / Math.max(base, 1)).toFixed(3)})` + `   seam ${f(seamWs[mi])}ss`);
+    });
+  }
+  return { measureWs, measureScales, seamWs, force: solution.force, fellBack: false };
+}
+function measureChainSeamFacts(input) {
+  const { measure: measure2, stepForPitch, noteAccCols, expectedDuration } = input;
+  const firstVisibleIdx = measure2.findIndex((note) => isSpacingVisibleNote(note));
+  const firstNote = firstVisibleIdx >= 0 ? measure2[firstVisibleIdx] : undefined;
+  const visibleCount = measure2.reduce((count, note) => count + (isSpacingVisibleNote(note) ? 1 : 0), 0);
+  return {
+    firstIsRest: Boolean(firstNote?.isRest),
+    postBarRodW: firstNote && !firstNote.isRest ? postBarlineSkylineRodPx({
+      note: firstNote,
+      chordSteps: [
+        stepForPitch(firstNote.noteName, firstNote.octave),
+        ...(firstNote.chordNotes ?? []).map((cn) => stepForPitch(cn.noteName, cn.octave))
+      ],
+      stemUp: firstNote.stemDirection != null ? firstNote.stemDirection === "up" : stepForPitch(firstNote.noteName, firstNote.octave) < 4,
+      accidentalWidthPx: (noteAccCols[firstVisibleIdx] ?? 0) * ACC_EXTRA_W * noteMusicScale(firstNote)
+    }) ?? 0 : 0,
+    fillsMeasure: visibleCount === 1 && firstNote != null && firstNote.duration > expectedDuration / 2
+  };
+}
+function planSystemChainSpacing(input) {
+  const {
+    active,
+    measureBaseWs,
+    measureAggregates,
+    measureTailWs,
+    measurePostBarRodWs,
+    measureFillsMeasure,
+    measureFirstIsRest,
+    firstOrdinaryOffsets,
+    availNotes,
+    uniformScale
+  } = input;
+  if (!active)
+    return { measureWs: null, solvedTailWs: null, chainLeadingGapWs: null, measureScales: null, force: null };
+  const tailWRow = measureTailWs.reduce((sum, tailW) => sum + tailW, 0);
+  const solution = solveSystemColumnChain({
+    measures: measureBaseWs.map((baseW, mi) => ({
+      baseW,
+      minW: measureAggregates[mi]?.minPx ?? 0,
+      inverseStretch: measureAggregates[mi]?.inverseStretch ?? 0
+    })),
+    seams: measureTailWs.map((tailW, mi) => {
+      if (mi === measureTailWs.length - 1) {
+        return { minW: 0, alreadySpentW: 1e6, position: "line-start" };
+      }
+      return {
+        minW: Math.max(tailW, measurePostBarRodWs?.[mi + 1] ?? 0),
+        alreadySpentW: firstOrdinaryOffsets[mi + 1] ?? 0,
+        situationalSpaceSs: measureFillsMeasure?.[mi + 1] ? 1 : 0,
+        centreShiftSs: measureFirstIsRest?.[mi + 1] ? 0.5 : 0
+      };
+    }),
+    targetW: Math.max(1, availNotes + tailWRow),
+    uniformScale,
+    isRagged: false
+  });
+  if (solution.fellBack)
+    return { measureWs: null, solvedTailWs: null, chainLeadingGapWs: null, measureScales: null, force: null };
+  return {
+    measureWs: solution.measureWs,
+    solvedTailWs: solution.seamWs,
+    chainLeadingGapWs: solution.seamWs.map((seamW, mi) => seamW + (firstOrdinaryOffsets[mi + 1] ?? 0)),
+    measureScales: solution.measureScales,
+    force: solution.force ?? null
+  };
+}
+
+// src/music-rendering/layout/systemLineChain.ts
+var DEFAULT_GRACE_DURATION_QN = 0.5;
+function applyColumnRods(model, rods) {
+  for (const rod of rods) {
+    const left = Math.min(rod.fromColumn, rod.toColumn);
+    const right = Math.max(rod.fromColumn, rod.toColumn);
+    if (right <= left)
+      continue;
+    addRod(model.springs, left, right, rod.minDist / LINE_SPACING);
+  }
+}
+function buildSystemLineChain(input) {
+  const { measures, shortestDur } = input;
+  const columns = [];
+  const springs = [];
+  for (let mi = 0;mi < measures.length; mi++) {
+    const measure2 = measures[mi];
+    const events2 = measure2.events;
+    if (!events2.length)
+      continue;
+    const extraInk = measure2.extraInkBeforeEvent;
+    if (columns.length > 0) {
+      const previous = measures[mi - 1];
+      const extraSs = ((previous?.closingBarExtraW ?? 0) + (extraInk?.get(0) ?? 0)) / LINE_SPACING;
+      const seam = barlineSeamSpring({
+        minimumDistanceSs: Math.max(0, measure2.postBarlineRodW ?? 0) / LINE_SPACING,
+        position: "midline",
+        opticalCorrectionSs: measure2.firstIsRest ? 0.5 : 0,
+        situationalSpaceSs: measure2.fillsMeasure ? 1 : 0
+      });
+      springs.push({
+        idealDistanceSs: seam.idealDistanceSs + extraSs,
+        minDistanceSs: seam.minDistanceSs + extraSs,
+        inverseStretchStrength: seam.inverseStretchStrength,
+        inverseCompressStrength: Math.max(seam.inverseCompressStrength, 0.000000001)
+      });
+    }
+    const eventSprings = measureEventSprings(events2, shortestDur, true);
+    const rodByPair = new Map;
+    for (const rod of measure2.rods ?? []) {
+      if (rod.toEvent !== rod.fromEvent + 1)
+        continue;
+      const previous = rodByPair.get(rod.fromEvent) ?? 0;
+      if (rod.minDist > previous)
+        rodByPair.set(rod.fromEvent, rod.minDist);
+    }
+    for (let ei = 0;ei < events2.length; ei++) {
+      const graceRun = measure2.graceRunBeforeEvent?.get(ei);
+      if (graceRun?.length) {
+        if (springs.length) {
+          springs[springs.length - 1] = scaleSpring(springs[springs.length - 1], GRACE_ENTRY_SPRING_SCALE);
+        }
+        const graceDurationOf = (grace) => grace.durationQN > 0 ? grace.durationQN : DEFAULT_GRACE_DURATION_QN;
+        let graceShortest = Infinity;
+        for (const grace of graceRun) {
+          graceShortest = Math.min(graceShortest, graceDurationOf(grace));
+        }
+        if (!Number.isFinite(graceShortest))
+          graceShortest = DEFAULT_GRACE_DURATION_QN;
+        for (let gi = 0;gi < graceRun.length; gi++) {
+          const grace = graceRun[gi];
+          columns.push({ kind: "grace", measureIndex: mi, eventIndex: ei, graceIndex: gi });
+          const spring2 = graceNotePairSpring({
+            deltaGraceQN: graceDurationOf(grace),
+            graceShortestQN: graceShortest
+          });
+          const scale = grace.musicScale ?? 1;
+          const headExcessSs = spacingLeftHeadEndSs(graceDurationOf(grace), false) * scale - GRACE_SPACING_INCREMENT_SS;
+          springs.push({
+            idealDistanceSs: Math.max(spring2.minDistanceSs + headExcessSs, spring2.idealDistanceSs + headExcessSs),
+            minDistanceSs: Math.max(0, spring2.minDistanceSs + headExcessSs),
+            inverseStretchStrength: spring2.inverseStretchStrength,
+            inverseCompressStrength: spring2.inverseCompressStrength
+          });
+        }
+      }
+      columns.push({ kind: "note", measureIndex: mi, eventIndex: ei });
+      const spring = eventSprings[ei];
+      const rodSs = (rodByPair.get(ei) ?? 0) / LINE_SPACING;
+      const inkSs = (extraInk?.get(ei + 1) ?? 0) / LINE_SPACING;
+      springs.push({
+        idealDistanceSs: spring.idealDistanceSs + inkSs,
+        minDistanceSs: Math.max(spring.minDistanceSs, rodSs) + inkSs,
+        inverseStretchStrength: spring.inverseStretchStrength,
+        inverseCompressStrength: spring.inverseCompressStrength
+      });
+    }
+    columns.push({ kind: "barline", measureIndex: mi });
+  }
+  if (springs.length === columns.length)
+    springs.pop();
+  return { columns, springs };
+}
+function lineForcePenalty(input) {
+  if (input.isRagged) {
+    return Math.max(0, (input.targetW - input.naturalLengthW) / LINE_SPACING);
+  }
+  const f = input.force;
+  return f - (f < 0 ? f * f * f * f * 2 : 0);
+}
+var UNFITTABLE_SINGLE_INTERVAL_FORCE = -200000;
+function solveSystemLineChain(input) {
+  const { measures, targetW, isRagged } = input;
+  const model = buildSystemLineChain(input);
+  const { columns, springs } = model;
+  if (!columns.length || !springs.length)
+    return null;
+  const derivedRods = input.columnRodsFor?.(model.columns);
+  if (input.columnRods?.length)
+    applyColumnRods(model, input.columnRods);
+  if (derivedRods?.length)
+    applyColumnRods(model, derivedRods);
+  const solution = solveSpringChain(springs, targetW / LINE_SPACING);
+  const force = isRagged && solution.force > 0 ? 0 : solution.force;
+  const columnXs = [0];
+  for (const spring of springs) {
+    columnXs.push(columnXs[columnXs.length - 1] + springLength(spring, force) * LINE_SPACING);
+  }
+  const attackXs = measures.map(() => []);
+  const graceXs = measures.map(() => new Map);
+  const barlineXs = measures.map(() => 0);
+  for (let ci = 0;ci < columns.length; ci++) {
+    const column = columns[ci];
+    if (column.kind === "note") {
+      attackXs[column.measureIndex][column.eventIndex] = columnXs[ci];
+    } else if (column.kind === "grace") {
+      const runs = graceXs[column.measureIndex];
+      const run = runs.get(column.eventIndex) ?? [];
+      run[column.graceIndex] = columnXs[ci];
+      runs.set(column.eventIndex, run);
+    } else {
+      barlineXs[column.measureIndex] = columnXs[ci];
+    }
+  }
+  if (debugFlag("LILYJS_LINE_CHAIN_DUMP")) {
+    const f = (v) => (v / LINE_SPACING).toFixed(3);
+    console.error(`
+=== line chain: ${columns.length} columns, target ${f(targetW)}ss, ragged=${isRagged}, force ${force.toFixed(4)}`);
+    for (let ci = 0;ci < columns.length; ci++) {
+      const column = columns[ci];
+      const spring = springs[ci];
+      console.error(`  ${String(ci).padStart(3)} ${column.kind === "barline" ? `bar(m${column.measureIndex + 1})` : `m${column.measureIndex + 1}e${column.eventIndex}`}` + `  x ${f(columnXs[ci]).padStart(8)}` + (spring ? `   -> ideal ${spring.idealDistanceSs.toFixed(3)} min ${spring.minDistanceSs.toFixed(3)} k ${spring.inverseStretchStrength.toFixed(3)} = ${f(springLength(spring, force) * LINE_SPACING)}` : ""));
+    }
+  }
+  return {
+    force,
+    columns,
+    columnXs,
+    attackXs,
+    graceXs,
+    barlineXs,
+    fits: !solution.overConstrained,
+    naturalLengthW: springs.reduce((sum, spring) => sum + springLength(spring, 0), 0) * LINE_SPACING
+  };
+}
+
+// src/music-rendering/layout/constrainedBreaking.ts
+var BADNESS_SCALE = 100;
+var OVERFULL_LAST_SYSTEM_ALLOW = 1.45;
+var OVERFULL_SYSTEM_ALLOW = 1.45;
+var DENSE_RHYTHM_OVERFULL_ALLOW = 1.5;
+var OVERFULL_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 4;
+var OVERFULL_LAST_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 2;
+var UNDERFULL_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 2.8;
+var RAGGED_LAST_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 2.2;
+var PIXEL_EPSILON2 = 0.5;
+var FORCE_NORM = 0.45;
+function buildCandidateLines(geometry) {
+  const n = geometry.measureCount;
+  const candidatesEndingAt = Array.from({ length: n + 1 }, () => []);
+  if (geometry.solveLine) {
+    for (let from = 0;from < n; from++) {
+      const avail = geometry.availWidth(from);
+      for (let to = from + 1;to <= n; to++) {
+        const isLastSystem = to === n;
+        const isRagged = geometry.isRaggedLine?.(isLastSystem) ?? false;
+        const solution = geometry.solveLine(from, to, avail, isRagged);
+        if (!solution)
+          break;
+        if (!solution.fits) {
+          if (to === from + 1) {
+            candidatesEndingAt[to].push({
+              from,
+              force: UNFITTABLE_SINGLE_INTERVAL_FORCE,
+              fixedCost: 0,
+              scale: 1,
+              ragged: isLastSystem
+            });
+          }
+          break;
+        }
+        if (isRagged && isLastSystem) {
+          if (solution.force < 0 && to > from + 1)
+            break;
+          candidatesEndingAt[to].push({
+            from,
+            force: 0,
+            fixedCost: 0,
+            scale: 1,
+            ragged: true
+          });
+          continue;
+        }
+        candidatesEndingAt[to].push({
+          from,
+          force: lineForcePenalty({
+            force: solution.force,
+            naturalLengthW: solution.naturalLengthW,
+            targetW: avail,
+            isRagged
+          }),
+          fixedCost: 0,
+          scale: 1,
+          ragged: isRagged
+        });
+      }
+    }
+    return candidatesEndingAt;
+  }
+  for (let j = 1;j <= n; j++) {
+    for (let i = 0;i < j; i++) {
+      const avail = geometry.availWidth(i);
+      const total = geometry.naturalWidth(i, j);
+      const systemShortest = geometry.shortestDuration(i, j);
+      const dense = systemShortest <= 0.125;
+      const isLastSystem = j === n;
+      let fixedCost = 0;
+      let force = null;
+      let scale = 1;
+      if (total > avail + PIXEL_EPSILON2) {
+        const ratio = total / Math.max(1, avail);
+        const allowedRatio = dense ? DENSE_RHYTHM_OVERFULL_ALLOW : isLastSystem ? OVERFULL_LAST_SYSTEM_ALLOW : OVERFULL_SYSTEM_ALLOW;
+        if (ratio <= allowedRatio) {
+          const overflow = ratio - 1;
+          fixedCost = overflow * overflow * (isLastSystem ? OVERFULL_LAST_SYSTEM_PENALTY_SCALE : OVERFULL_SYSTEM_PENALTY_SCALE);
+        } else {
+          if (j !== i + 1)
+            continue;
+          fixedCost = BADNESS_SCALE * 10;
+        }
+      } else {
+        force = (avail - total) / geometry.stretch(i, j) * FORCE_NORM;
+        scale = isLastSystem ? RAGGED_LAST_SYSTEM_PENALTY_SCALE : UNDERFULL_SYSTEM_PENALTY_SCALE;
+      }
+      candidatesEndingAt[j].push({ from: i, force, fixedCost, scale, ragged: isLastSystem });
+    }
+  }
+  return candidatesEndingAt;
+}
+var NO_PREDECESSOR = -1;
+function solveConstrainedBreaking(options) {
+  const { candidatesEndingAt, measureCount: n } = options;
+  const perSystemPenalty = options.perSystemPenalty ?? 0;
+  const evenness = options.evenness ?? false;
+  const demeritsByCount = [];
+  const forceByCount = [];
+  const fromByCount = [];
+  const zeroSystems = new Float64Array(n + 1).fill(Infinity);
+  zeroSystems[0] = 0;
+  demeritsByCount.push(zeroSystems);
+  forceByCount.push(new Array(n + 1).fill(null));
+  fromByCount.push(new Int32Array(n + 1).fill(NO_PREDECESSOR));
+  for (let sys = 1;sys <= n; sys++) {
+    const prevDemerits = demeritsByCount[sys - 1];
+    const prevForces = forceByCount[sys - 1];
+    const demerits = new Float64Array(n + 1).fill(Infinity);
+    const forces = new Array(n + 1).fill(null);
+    const from = new Int32Array(n + 1).fill(NO_PREDECESSOR);
+    let reachedAny = false;
+    for (let j = sys;j <= n; j++) {
+      for (const line of candidatesEndingAt[j]) {
+        const previousDemerits = prevDemerits[line.from];
+        if (previousDemerits === Infinity)
+          continue;
+        const cost = line.force === null ? line.fixedCost : combineDemerits({
+          force: line.force,
+          previousForce: evenness ? prevForces[line.from] : null,
+          isRagged: line.ragged
+        }) * line.scale;
+        const candidate = previousDemerits + cost + perSystemPenalty;
+        if (candidate < demerits[j]) {
+          demerits[j] = candidate;
+          from[j] = line.from;
+          forces[j] = line.force;
+          reachedAny = true;
+        }
+      }
+    }
+    demeritsByCount.push(demerits);
+    forceByCount.push(forces);
+    fromByCount.push(from);
+    if (!reachedAny)
+      break;
+  }
+  function backtrack(systems) {
+    const ends = [];
+    let hasCompressedLine = false;
+    let j = n;
+    for (let sys = systems;sys > 0 && j > 0; sys--) {
+      ends.push(j);
+      const force = forceByCount[sys][j];
+      if (force === null || force < 0)
+        hasCompressedLine = true;
+      j = fromByCount[sys][j];
+      if (j < 0)
+        break;
+    }
+    ends.reverse();
+    return { ends, hasCompressedLine };
+  }
+  const maxSystemCount = demeritsByCount.length - 1;
+  let minSystemCount = -1;
+  for (let sys = 1;sys <= maxSystemCount; sys++) {
+    if (demeritsByCount[sys][n] < Infinity) {
+      minSystemCount = sys;
+      break;
+    }
+  }
+  let bestSystems = -1;
+  let bestDemerits = Infinity;
+  if (minSystemCount > 0) {
+    for (let sys = minSystemCount;sys <= maxSystemCount; sys++) {
+      const total = demeritsByCount[sys][n];
+      if (total === Infinity)
+        continue;
+      if (total < bestDemerits) {
+        bestDemerits = total;
+        bestSystems = sys;
+      } else if (!backtrack(sys).hasCompressedLine) {
+        break;
+      }
+    }
+  }
+  if (bestSystems < 0)
+    return { ends: [], totalDemerits: Infinity, systems: -1 };
+  return { ends: backtrack(bestSystems).ends, totalDemerits: bestDemerits, systems: bestSystems };
+}
+
 // src/music-rendering/layout/lineBreakRepeatPlan.ts
 function buildRepeatSets(measures, repeatRegions, voltaRegions, measureBarlines, options = {}) {
   const repeatStartAtMeasure = new Set;
@@ -14055,16 +15374,206 @@ function buildBreakAfterMeasureSet(measures, systemBreaks) {
   return breakAfterMeasure;
 }
 
+// src/music-rendering/layout/breakDebugLens.ts
+function debugBreakLens(breaking, startMi, n, options, measureSpacingFacts, chainMeasures, legacyNaturalWidth, solveLine, availWidth) {
+  console.error(`[break] section@${startMi} n=${n} psp=${options.perSystemPenalty ?? 0} ` + `total=${breaking.totalDemerits.toFixed(3)} -> ${breaking.ends.length} systems ` + `[${breaking.ends.map((e, i) => e - (i === 0 ? 0 : breaking.ends[i - 1])).join(",")}]`);
+  for (let mi = 0;mi < Math.min(Number(globalThis.process?.env?.["LILYJS_DEBUG_BREAK_MEASURES"] ?? 3), n); mi++) {
+    const facts = measureSpacingFacts[mi];
+    console.error(`[break]   m${startMi + mi} events=[${facts.events.map((e) => `${e.duration}${e.isRest ? "r" : ""}`).join(",")}] ` + `chainEvents=[${chainMeasures[mi].events.map((e) => e.duration).join(",")}]`);
+  }
+  let from = 0;
+  for (const end of breaking.ends) {
+    const legacyNatural = legacyNaturalWidth(from, end);
+    const chain = solveLine?.(from, end, availWidth(from), end === n);
+    console.error(`[break]   [${from},${end}) legacyNatural=${legacyNatural.toFixed(0)}px` + (chain ? ` chainNatural=${chain.naturalLengthW.toFixed(0)}px force=${chain.force.toFixed(2)}` : ""));
+    from = end;
+  }
+}
+
+// src/music-rendering/layout/lineColumnRods.ts
+var SPACING_SPANNER_PADDING_PX = LINE_SPACING * 0.1;
+function buildLineColumnRods(columns, options = {}) {
+  const padding = options.padding ?? SPACING_SPANNER_PADDING_PX;
+  const maxLookback = options.maxLookback ?? 4;
+  const rods = [];
+  const distances = new Array(columns.length).fill(0);
+  const overhangs = columns.map((column) => column.overhang);
+  for (let i = 0;i < columns.length; i++) {
+    const right = columns[i];
+    if (!right.bands.length)
+      continue;
+    if (i === 0)
+      continue;
+    let previousDistances = 0;
+    const lowest = Math.max(0, i - maxLookback);
+    for (let j = i - 1;j >= lowest; j--) {
+      if (overhangs[j] + padding <= previousDistances + distances[i])
+        break;
+      const left = columns[j];
+      if (left.bands.length) {
+        const dist = minColumnGapSkyline(left.bands, right.bands, { padding });
+        if (dist > 0) {
+          rods.push({ fromColumn: j, toColumn: i, minDist: dist });
+          distances[i] = Math.max(distances[i], dist - previousDistances);
+        }
+      }
+      previousDistances += distances[j];
+    }
+    overhangs[i] = Math.max(overhangs[i], (overhangs[i - 1] ?? 0) - distances[i]);
+  }
+  return rods;
+}
+
+// src/music-rendering/layout/lineChainInk.ts
+var BARLINE_INK_EXTENT_SS = 0.19;
+var CHAIN_INK_OPTS = { headEnd: "spacing" };
+function barlineColumnInk() {
+  const right = LINE_SPACING * BARLINE_INK_EXTENT_SS;
+  return {
+    bands: [
+      {
+        kind: "notehead",
+        top: STAFF_TOP,
+        bottom: BOTTOM_LINE_Y,
+        left: 0,
+        right
+      }
+    ],
+    overhang: right
+  };
+}
+function lineColumnInk(column, chainMeasures) {
+  if (column.kind === "barline")
+    return barlineColumnInk();
+  if (column.kind === "grace") {
+    const run = chainMeasures[column.measureIndex]?.graceRunBeforeEvent?.get(column.eventIndex ?? 0);
+    const grace = run?.[column.graceIndex ?? 0];
+    const bands2 = eventColumnBands({
+      duration: grace?.durationQN && grace.durationQN > 0 ? grace.durationQN : 0.5,
+      musicScale: grace?.musicScale,
+      step: 4
+    }, CHAIN_INK_OPTS);
+    return { bands: bands2, overhang: maxRight(bands2) };
+  }
+  const event = chainMeasures[column.measureIndex]?.events[column.eventIndex ?? 0];
+  if (!event)
+    return { bands: [], overhang: 0 };
+  const bands = eventColumnBands({
+    duration: event.duration,
+    musicScale: event.musicScale,
+    isRest: event.isRest,
+    isBeamed: event.isBeamed,
+    step: event.step,
+    stemUp: event.stemUp,
+    chordSteps: event.chordSteps
+  }, CHAIN_INK_OPTS);
+  return { bands, overhang: maxRight(bands) };
+}
+function maxRight(bands) {
+  let max = 0;
+  for (const band of bands)
+    if (band.right > max)
+      max = band.right;
+  return max;
+}
+
+// src/music-rendering/layout/breakerChainMeasures.ts
+function buildBreakerChainMeasures(input) {
+  const {
+    measures,
+    eventsPerMeasure,
+    startMi,
+    initialKey,
+    measureKeySigs,
+    repeatStartAtMeasure,
+    repeatEndAtMeasure
+  } = input;
+  return measures.map((measure2, mi) => {
+    const columnEvents = polyphonicColumnEvents(measure2);
+    if (columnEvents) {
+      const extraInkBeforeEvent2 = new Map;
+      const globalMi2 = startMi + mi;
+      if (mi > 0) {
+        let lead = repeatStartAtMeasure.has(globalMi2) ? REPEAT_BAR_W : 0;
+        const key = measureKeySigs?.[globalMi2] ?? initialKey;
+        const previousKey = measureKeySigs?.[globalMi2 - 1] ?? initialKey;
+        if (key !== previousKey)
+          lead += keySigInfo(key).count * ACC_W + HEADER_CHANGE_NOTE_GAP;
+        if (lead > 0)
+          extraInkBeforeEvent2.set(0, lead);
+      }
+      const rods2 = [];
+      for (let ei = 0;ei + 1 < columnEvents.length; ei++) {
+        const rod = lyricPairRod(columnEvents[ei], columnEvents[ei + 1]);
+        if (rod > 0)
+          rods2.push({ fromEvent: ei, toEvent: ei + 1, minDist: rod });
+      }
+      return {
+        events: columnEvents,
+        ...rods2.length ? { rods: rods2 } : {},
+        extraInkBeforeEvent: extraInkBeforeEvent2,
+        graceRunBeforeEvent: new Map,
+        closingBarExtraW: repeatEndAtMeasure.has(globalMi2) ? REPEAT_BAR_W : 0,
+        postBarlineRodW: BARLINE_INK_EXTENT_SS * LINE_SPACING + POST_BARLINE_NOTEHEAD_CLEARANCE
+      };
+    }
+    const inlineClefPlan = planInlineClefSpacingForMeasure(measure2);
+    const extraInkBeforeEvent = new Map;
+    const graceRunBeforeEvent = new Map;
+    let eventIndex = 0;
+    for (let ni = 0;ni < measure2.length; ni++) {
+      const note = measure2[ni];
+      if (note.isGrace) {
+        const run = graceRunBeforeEvent.get(eventIndex) ?? [];
+        run.push({ durationQN: note.graceDuration ?? 0, musicScale: noteMusicScale(note) });
+        graceRunBeforeEvent.set(eventIndex, run);
+        continue;
+      }
+      const ink = inlineClefPlan.inlineClefSpaceBeforeNote.get(ni) ?? 0;
+      if (ink > 0)
+        extraInkBeforeEvent.set(eventIndex, (extraInkBeforeEvent.get(eventIndex) ?? 0) + ink);
+      if (note.duration > 0 && !isStructuralMarkerNote(note))
+        eventIndex++;
+    }
+    const globalMi = startMi + mi;
+    if (mi > 0) {
+      let lead = repeatStartAtMeasure.has(globalMi) ? REPEAT_BAR_W : 0;
+      const key = measureKeySigs?.[globalMi] ?? initialKey;
+      const previousKey = measureKeySigs?.[globalMi - 1] ?? initialKey;
+      if (key !== previousKey) {
+        lead += keySigInfo(key).count * ACC_W + HEADER_CHANGE_NOTE_GAP;
+      }
+      if (lead > 0)
+        extraInkBeforeEvent.set(0, (extraInkBeforeEvent.get(0) ?? 0) + lead);
+    }
+    const rods = [];
+    let fromEventIndex = -1;
+    let previousNote;
+    let walkIndex = 0;
+    for (const note of measure2) {
+      if (note.isGrace || note.duration <= 0 || isStructuralMarkerNote(note))
+        continue;
+      if (previousNote) {
+        const rod = lyricPairRod(previousNote, note);
+        if (rod > 0)
+          rods.push({ fromEvent: fromEventIndex, toEvent: walkIndex, minDist: rod });
+      }
+      previousNote = note;
+      fromEventIndex = walkIndex;
+      walkIndex++;
+    }
+    return {
+      events: eventsPerMeasure[mi],
+      ...rods.length ? { rods } : {},
+      extraInkBeforeEvent,
+      graceRunBeforeEvent,
+      closingBarExtraW: repeatEndAtMeasure.has(globalMi) ? REPEAT_BAR_W : 0,
+      postBarlineRodW: BARLINE_INK_EXTENT_SS * LINE_SPACING + POST_BARLINE_NOTEHEAD_CLEARANCE
+    };
+  });
+}
+
 // src/music-rendering/layout/rowPacking.ts
-var PIXEL_EPSILON2 = 0.5;
-var BADNESS_SCALE = 100;
-var OVERFULL_LAST_SYSTEM_ALLOW = 1.45;
-var OVERFULL_SYSTEM_ALLOW = 1.45;
-var DENSE_RHYTHM_OVERFULL_ALLOW = 1.5;
-var OVERFULL_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 4;
-var OVERFULL_LAST_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 2;
-var UNDERFULL_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 2.8;
-var RAGGED_LAST_SYSTEM_PENALTY_SCALE = BADNESS_SCALE * 2.2;
 function makeSystemDef(systemMeasures, isFirst, systemMeasureOffset, barNumberBase, systemNoteOffset, repeatStartAtMeasure, repeatEndAtMeasure, voltaAtMeasure, measureBarlines, layoutMeasureDurations) {
   const localStart = new Set;
   const localEnd = new Set;
@@ -14135,7 +15644,7 @@ function dpPackSection(measures, startMi, isFirstOfPiece, initialKey, measureKey
   const stride = n + 1;
   const intervalShortestDur = new Float64Array(stride * stride);
   const referenceDurations = new Set;
-  const baseCapQN = options.baseShortestDurationQN;
+  const baseCapQN = options.baseShortestDurationQN ?? BASE_SHORTEST_DURATION_QN2;
   for (let from = 0;from < n; from++) {
     let shortestDur = Infinity;
     for (let to = from + 1;to <= n; to++) {
@@ -14181,19 +15690,7 @@ function dpPackSection(measures, startMi, isFirstOfPiece, initialKey, measureKey
     }
     naturalWidthByReferenceDur.set(refDur, { firstWidths, postPrefix });
   }
-  const stretchPrefixByReferenceDur = new Map;
-  for (const refDur of referenceDurations) {
-    const prefix = new Float64Array(n + 1);
-    for (let mi = 0;mi < n; mi++) {
-      let stretch = 0;
-      for (const event of measureSpacingFacts[mi].events) {
-        const scale = event.musicScale ?? 1;
-        stretch += Math.max(LINE_SPACING * 0.1, noteSpaceW(event.duration, refDur) - SPACING_INCREMENT) * scale;
-      }
-      prefix[mi + 1] = prefix[mi] + stretch;
-    }
-    stretchPrefixByReferenceDur.set(refDur, prefix);
-  }
+  const stretchPrefixByReferenceDur = buildStretchPrefixes(referenceDurations, measureSpacingFacts, n);
   function candidateSystemStretch(from, to) {
     const refDur = candidateSystemShortest(from, to);
     const prefix = stretchPrefixByReferenceDur.get(refDur);
@@ -14219,54 +15716,52 @@ function dpPackSection(measures, startMi, isFirstOfPiece, initialKey, measureKey
   function candidateSystemShortest(from, to) {
     return intervalShortestDur[intervalCacheIndex(from, to, stride)] || 1;
   }
-  const dp = new Float64Array(n + 1).fill(Infinity);
-  const frm = new Int32Array(n + 1).fill(-1);
-  dp[0] = 0;
-  for (let j = 1;j <= n; j++) {
-    for (let i = 0;i < j; i++) {
-      if (dp[i] === Infinity)
-        continue;
-      const systemIsFirst2 = isFirstOfPiece && i === 0;
-      const avail = systemAvail(startMi + i, initialKey, measureKeySigs, systemIsFirst2, firstIndent, firstSystemContentInset, repeatStartAtMeasure, contentWidth);
-      const total = candidateSystemNaturalWidth(i, j);
-      const systemShortest = candidateSystemShortest(i, j);
-      const overfullAllow = systemShortest <= 0.125 ? DENSE_RHYTHM_OVERFULL_ALLOW : OVERFULL_SYSTEM_ALLOW;
-      const overfullLastAllow = systemShortest <= 0.125 ? DENSE_RHYTHM_OVERFULL_ALLOW : OVERFULL_LAST_SYSTEM_ALLOW;
-      const isLastSystem = j === n;
-      let cost;
-      if (total > avail + PIXEL_EPSILON2) {
-        const ratio = total / Math.max(1, avail);
-        const allowedRatio = isLastSystem ? overfullLastAllow : overfullAllow;
-        if (ratio <= allowedRatio) {
-          const overflow = ratio - 1;
-          const penaltyScale = isLastSystem ? OVERFULL_LAST_SYSTEM_PENALTY_SCALE : OVERFULL_SYSTEM_PENALTY_SCALE;
-          cost = overflow * overflow * penaltyScale;
-        } else {
-          if (j !== i + 1)
-            continue;
-          cost = BADNESS_SCALE * 10;
-        }
-      } else {
-        const slack = avail - total;
-        const stretch = candidateSystemStretch(i, j);
-        const force = slack / stretch;
-        const scale = isLastSystem ? RAGGED_LAST_SYSTEM_PENALTY_SCALE : UNDERFULL_SYSTEM_PENALTY_SCALE;
-        const FORCE_NORM = 0.45;
-        cost = (force * FORCE_NORM) ** 2 * scale;
-      }
-      const candidate = dp[i] + cost + (options.perSystemPenalty ?? 0);
-      if (candidate < dp[j]) {
-        dp[j] = candidate;
-        frm[j] = i;
-      }
-    }
-  }
+  const chainMeasures = buildBreakerChainMeasures({
+    measures,
+    eventsPerMeasure: measureSpacingFacts.map((facts) => facts.events),
+    startMi,
+    initialKey,
+    ...measureKeySigs ? { measureKeySigs } : {},
+    repeatStartAtMeasure,
+    repeatEndAtMeasure
+  });
+  const chainRefDur = systemSpacingReferenceDur(measures, baseCapQN);
+  const solveLine = debugFlag("LILYJS_BREAKER_CHAIN") ? (from, to, targetW, isRagged) => {
+    const slice = chainMeasures.slice(from, to);
+    const solution = solveSystemLineChain({
+      measures: slice,
+      shortestDur: chainRefDur,
+      targetW,
+      isRagged,
+      columnRodsFor: (columns) => buildLineColumnRods(columns.map((column) => lineColumnInk(column, slice)))
+    });
+    return solution ? {
+      force: solution.force,
+      fits: solution.fits,
+      naturalLengthW: solution.naturalLengthW
+    } : null;
+  } : undefined;
+  const candidatesEndingAt = buildCandidateLines({
+    measureCount: n,
+    ...solveLine ? { solveLine } : {},
+    isRaggedLine: (isLastSystem) => options.raggedRight === true || isLastSystem && options.raggedLast === true,
+    availWidth: (from) => systemAvail(startMi + from, initialKey, measureKeySigs, isFirstOfPiece && from === 0, firstIndent, firstSystemContentInset, repeatStartAtMeasure, contentWidth),
+    naturalWidth: candidateSystemNaturalWidth,
+    shortestDuration: candidateSystemShortest,
+    stretch: candidateSystemStretch
+  });
+  const breaking = solveConstrainedBreaking({
+    candidatesEndingAt,
+    measureCount: n,
+    perSystemPenalty: options.perSystemPenalty ?? 0,
+    evenness: solveLine != null
+  });
   if (traceOut)
-    traceOut.totalDemerits = dp[n];
-  const ends = [];
-  for (let j = n;j > 0; j = frm[j])
-    ends.push(j);
-  ends.reverse();
+    traceOut.totalDemerits = (traceOut.totalDemerits ?? 0) + breaking.totalDemerits;
+  if (debugFlag("LILYJS_DEBUG_BREAK")) {
+    debugBreakLens(breaking, startMi, n, options, measureSpacingFacts, chainMeasures, candidateSystemNaturalWidth, solveLine, (from) => systemAvail(startMi + from, initialKey, measureKeySigs, isFirstOfPiece && from === 0, firstIndent, firstSystemContentInset, repeatStartAtMeasure, contentWidth));
+  }
+  const ends = breaking.ends;
   const result = [];
   let prev = 0;
   let systemIsFirst = isFirstOfPiece;
@@ -14812,11 +16307,13 @@ function assembleScoreFromParsedTune(input) {
     ...tune.midiInstrument ? { midiInstrument: tune.midiInstrument } : {},
     ...tune.instrumentName ? { instrumentName: tune.instrumentName } : {},
     ...tune.printInitialRepeatBar ? { printInitialRepeatBar: true } : {},
+    ...tune.chordChanges != null ? { chordChanges: tune.chordChanges } : {},
     ...tune.barNumberSelfAlignmentX ? { barNumberSelfAlignmentX: tune.barNumberSelfAlignmentX } : {},
     ...tune.barNumberDirection ? { barNumberDirection: tune.barNumberDirection } : {},
     ...tune.barNumberVisibility ? { barNumberVisibility: tune.barNumberVisibility } : {},
     ...tune.annotateSpacing != null ? { annotateSpacing: tune.annotateSpacing } : {},
     ...tune.pageBreaking ? { pageBreaking: tune.pageBreaking } : {},
+    ...tune.firstIndent != null ? { firstIndent: tune.firstIndent } : {},
     ...tune.lyricFontSizeDelta != null ? { lyricFontSizeDelta: tune.lyricFontSizeDelta } : {},
     ...tune.baseShortestDurationQN != null ? { baseShortestDurationQN: tune.baseShortestDurationQN } : {}
   };
@@ -15102,6 +16599,7 @@ function buildScoreFromTune(tune) {
   let globalIndex = 0;
   let noteTokenIndex = 0;
   let pendingSlurStart = null;
+  let pendingPhrasingSlurStart = null;
   const pendingByVoice = { slur: [], tie: [] };
   const spannerCtors = { slur: (f, t) => new Slur(f, t), tie: (f, t) => new Tie(f, t) };
   let pendingTieStart = null;
@@ -15149,6 +16647,12 @@ function buildScoreFromTune(tune) {
       }
       if (note.slurStart)
         pendingSlurStart = eventId2;
+      if (note.phrasingSlurEnd && pendingPhrasingSlurStart) {
+        slurs.push(new Slur(pendingPhrasingSlurStart, eventId2, true));
+        pendingPhrasingSlurStart = null;
+      }
+      if (note.phrasingSlurStart)
+        pendingPhrasingSlurStart = eventId2;
       if (note.tieEnd && pendingTieStart) {
         ties.push(new Tie(pendingTieStart, eventId2));
         pendingTieStart = null;
@@ -15226,7 +16730,7 @@ function buildScoreFromTune(tune) {
     const ts = timeSignatureFromString(measureTimeSigs[mi] ?? tune.timeSig);
     const measureStart = measureNoteOffsets[mi] ?? 0;
     const measureEnd = measureStart + measureNotes.length;
-    const systemBreak = tune.systemBreaks?.some((b) => b > measureStart && b <= measureEnd) ?? false;
+    const breaksHere = tune.systemBreaks?.filter((b) => b > measureStart && b <= measureEnd) ?? [];
     const repeatStart = tune.repeatRegions?.some((r) => r.start === measureStart) ?? false;
     const repeatEnd = tune.repeatRegions?.some((r) => r.end === measureEnd) ?? false;
     if (tune.voltaRegions?.length) {
@@ -15280,7 +16784,8 @@ function buildScoreFromTune(tune) {
       ottavas,
       repeatStart,
       repeatEnd,
-      systemBreak,
+      systemBreak: breaksHere.length > 0,
+      ...breaksHere.length ? { systemBreakOffsets: breaksHere.map((b) => b - measureStart) } : {},
       ...staffMeasures ? { staffMeasures } : {}
     });
     return measure2;
@@ -15436,6 +16941,7 @@ function musicDocumentInfoFromParsed(info) {
       ...info.info ?? {}
     },
     ...info.raggedLast !== undefined ? { raggedLast: info.raggedLast } : {},
+    ...info.raggedLastBottom !== undefined ? { raggedLastBottom: info.raggedLastBottom } : {},
     ...info.raggedRight !== undefined ? { raggedRight: info.raggedRight } : {},
     ...info.firstIndent !== undefined ? { firstIndent: info.firstIndent } : {},
     ...info.paperFont !== undefined ? { paperFont: info.paperFont } : {},
@@ -15555,14 +17061,68 @@ function scoreFromParsedPianoScore(score2) {
   if (score2.nestedGroups?.length) {
     combinedScore.__lilyNestedStaffGroups = score2.nestedGroups;
   }
+  const staffInstrumentNames = staffInstrumentNamesFromParsedPianoScore(score2);
+  if (staffInstrumentNames) {
+    combinedScore.__lilyStaffInstrumentNames = staffInstrumentNames;
+  }
   return combinedScore;
 }
-function musicBlocksFromParsedBlock(block) {
+function setStringOperation(operations, property) {
+  const op = operations?.find((operation) => operation.type === "set" && (!operation.context || operation.context === "Staff") && operation.property === property);
+  return op && op.type === "set" && typeof op.value === "string" ? op.value : undefined;
+}
+function staffInstrumentNamesFromParsedPianoScore(score2) {
+  const groupContext = score2.context?.children?.find((child) => child.type === "StaffGroup");
+  const contextStaves = groupContext?.type === "StaffGroup" ? groupContext.staves : undefined;
+  const names = score2.staves.map((staff2, index) => {
+    const contextOps = contextStaves?.[index]?.operations;
+    const instrumentName = setStringOperation(staff2.operations, "instrumentName") ?? setStringOperation(contextOps, "instrumentName");
+    const shortInstrumentName = setStringOperation(staff2.operations, "shortInstrumentName") ?? setStringOperation(contextOps, "shortInstrumentName");
+    return {
+      ...instrumentName ? { instrumentName } : {},
+      ...shortInstrumentName ? { shortInstrumentName } : {}
+    };
+  });
+  return names.some((entry) => entry.instrumentName || entry.shortInstrumentName) ? names : undefined;
+}
+function tuneWithDocumentPaper(tune, documentInfo) {
+  if (!documentInfo || documentInfo.firstIndent === undefined)
+    return tune;
+  if (tune?.firstIndent !== undefined)
+    return tune;
+  return { ...tune, firstIndent: documentInfo.firstIndent };
+}
+function musicBlocksFromParsedBlock(block, documentInfo) {
   switch (block.type) {
-    case "score":
-      return [{ type: "score", score: buildScoreFromTune(block.score.tune).score }];
+    case "score": {
+      const score2 = buildScoreFromTune(tuneWithDocumentPaper(block.score.tune, documentInfo)).score;
+      return [{
+        type: "score",
+        score: score2,
+        parsed: {
+          type: "score",
+          tune: block.score.tune,
+          context: block.score.context,
+          engravingEvents: block.score.engravingEvents,
+          range: block.range
+        }
+      }];
+    }
     case "pianoScore":
-      return [{ type: "score", score: scoreFromParsedPianoScore(block.score) }];
+      return [{
+        type: "score",
+        score: scoreFromParsedPianoScore(block.score),
+        parsed: {
+          type: "pianoScore",
+          groupType: block.score.groupType,
+          staves: block.score.staves,
+          meta: block.score.meta,
+          context: block.score.context,
+          engravingEvents: block.score.engravingEvents,
+          nestedGroups: block.score.nestedGroups,
+          range: block.range
+        }
+      }];
     case "markup":
       return [markupFromParsed(block)];
     case "fillLine":
@@ -15571,7 +17131,7 @@ function musicBlocksFromParsedBlock(block) {
     case "bookpart": {
       const bookBlock = {
         type: block.type,
-        blocks: block.blocks.flatMap(musicBlocksFromParsedBlock)
+        blocks: block.blocks.flatMap((b) => musicBlocksFromParsedBlock(b, documentInfo))
       };
       return [bookBlock];
     }
@@ -15585,7 +17145,7 @@ function scoreHasEvents(score2) {
 function musicDocumentFromParsedDocument(document3) {
   if (!document3)
     return null;
-  const blocks = document3.blocks.flatMap(musicBlocksFromParsedBlock);
+  const blocks = document3.blocks.flatMap((b) => musicBlocksFromParsedBlock(b, document3.info));
   const hasNonEmptyScore = blocks.some((block) => block.type === "score" && scoreHasEvents(block.score));
   return {
     info: musicDocumentInfoFromParsed(document3.info),
@@ -67666,6 +69226,96 @@ var SmuflFontRegistry = {
 var DEFAULT_SVG_LAYOUT_MODE = "fixed";
 var DEFAULT_SCORE_WIDTH_PX = Math.round(SVG_W * 3 / 4);
 
+// src/music-rendering/engraving/chordNameVisibility.ts
+function systemIndexForOffset(offsetQN, systemStartOffsetsQN) {
+  let idx = 0;
+  for (let i = 0;i < systemStartOffsetsQN.length; i++) {
+    if (offsetQN >= systemStartOffsetsQN[i] - 0.000001)
+      idx = i;
+    else
+      break;
+  }
+  return idx;
+}
+function visibleChordNames(chordSymbols, systemStartOffsetsQN, chordChanges) {
+  if (!chordChanges || chordSymbols.length === 0)
+    return chordSymbols;
+  const ordered = [...chordSymbols].sort((a, b) => a.offset - b.offset);
+  const systemsWithAName = new Set;
+  let lastChord = null;
+  const kept = [];
+  for (const symbol of ordered) {
+    if (!symbol.text) {
+      kept.push(symbol);
+      continue;
+    }
+    const systemIdx = systemIndexForOffset(symbol.offset, systemStartOffsetsQN);
+    const beginsSystem = !systemsWithAName.has(systemIdx);
+    systemsWithAName.add(systemIdx);
+    const suppressed = !beginsSystem && lastChord !== null && symbol.text === lastChord;
+    lastChord = symbol.text;
+    if (!suppressed)
+      kept.push(symbol);
+  }
+  return kept;
+}
+
+// src/music-rendering/engraving/ledgerLineSpanner.ts
+var LEDGER_GAP_SS = 0.1;
+function ledgerLinesOf(nodes) {
+  const out = [];
+  const walk = (list) => {
+    for (const node of list) {
+      if ("props" in node && node.props && node.props["data-lily-element"] === "ledger-line") {
+        const y = Number(node.props.y1);
+        const x1 = Number(node.props.x1);
+        const x2 = Number(node.props.x2);
+        if (Number.isFinite(y) && Number.isFinite(x1) && Number.isFinite(x2)) {
+          out.push({ node, y, x1: Math.min(x1, x2), x2: Math.max(x1, x2) });
+        }
+      }
+      if ("children" in node && Array.isArray(node.children)) {
+        walk(node.children.filter((c) => typeof c === "object" && c !== null));
+      }
+    }
+  };
+  walk(nodes);
+  return out;
+}
+function shortenAdjacentLedgerLines(rowElements) {
+  const ledgers = ledgerLinesOf(rowElements);
+  if (ledgers.length < 2)
+    return;
+  const gap = LINE_SPACING * LEDGER_GAP_SS;
+  const byRow = new Map;
+  for (const l of ledgers) {
+    const key = Math.round(l.y * 100) / 100;
+    (byRow.get(key) ?? byRow.set(key, []).get(key)).push(l);
+  }
+  for (const row of byRow.values()) {
+    if (row.length < 2)
+      continue;
+    row.sort((a, b) => a.x1 - b.x1);
+    for (let i = 1;i < row.length; i++) {
+      const left = row[i - 1];
+      const right = row[i];
+      if (left.x2 <= right.x1)
+        continue;
+      const center = (left.x2 + right.x1) / 2;
+      const leftLimit = center - gap / 2;
+      const rightLimit = center + gap / 2;
+      if (leftLimit > left.x1) {
+        left.x2 = leftLimit;
+        left.node.props.x2 = leftLimit;
+      }
+      if (rightLimit < right.x2) {
+        right.x1 = rightLimit;
+        right.node.props.x1 = rightLimit;
+      }
+    }
+  }
+}
+
 // src/music-rendering/engraving/skyline.ts
 class Skyline2 {
   dir;
@@ -67868,8 +69518,8 @@ function el(type, props, children, key) {
   };
 }
 
-// src/music-rendering/renderer/staffRow/measureNotes/rehearsalMarks.ts
-var REHEARSAL_MARK_CHAR_WIDTHS = {
+// src/music-rendering/engraving/textFontMetrics.ts
+var TEXT_ADVANCE_EM = {
   "'": 0.1848,
   A: 0.7267,
   B: 0.6651,
@@ -67944,15 +69594,33 @@ var REHEARSAL_MARK_CHAR_WIDTHS = {
   "(": 0.333,
   ")": 0.333,
   "/": 0.278,
-  "&": 0.778
+  "&": 0.778,
+  "#": 0.5
 };
+var TEXT_ADVANCE_FALLBACK_EM = 0.722;
+var MONO_ADVANCE_EM = 0.6;
 var LATIN_CAP_HEIGHT_EM = 0.6772;
-function latinTextWidthEm(text) {
+var SMALL_CAPS_SCALE = Math.pow(2, -2 / 6);
+function textAdvanceEm(text, opts = {}) {
+  if (opts.code)
+    return text.length * MONO_ADVANCE_EM;
   let em = 0;
-  for (const char of text)
-    em += REHEARSAL_MARK_CHAR_WIDTHS[char] ?? 0.722;
+  for (const char of text) {
+    if (opts.smallCaps) {
+      const upper = char.toUpperCase();
+      const advance2 = TEXT_ADVANCE_EM[upper] ?? TEXT_ADVANCE_FALLBACK_EM;
+      em += upper === char ? advance2 : advance2 * SMALL_CAPS_SCALE;
+      continue;
+    }
+    em += TEXT_ADVANCE_EM[char] ?? TEXT_ADVANCE_FALLBACK_EM;
+  }
   return em;
 }
+function latinTextWidthEm(text) {
+  return textAdvanceEm(text);
+}
+
+// src/music-rendering/renderer/staffRow/measureNotes/rehearsalMarks.ts
 function rehearsalMarkTextWidth(text) {
   return latinTextWidthEm(text) * REHEARSAL_MARK_FONT_SIZE;
 }
@@ -67964,7 +69632,7 @@ function rehearsalMarkBoxMetrics(text) {
 }
 function rehearsalMarkVerticalMetrics(text, topY, boxBottomY) {
   const box = rehearsalMarkBoxMetrics(text);
-  const boxBottom = boxBottomY ?? topY - LINE_SPACING;
+  const boxBottom = boxBottomY ?? topY - LINE_SPACING * REHEARSAL_MARK_STAFF_PADDING_SS;
   const boxTop = boxBottom - box.height;
   return {
     boxTop,
@@ -68110,6 +69778,9 @@ var CORE_SMUFL_GLYPH_NAME_BY_CHAR = new Map([
   [NOTEHEAD_WHOLE, "noteheadWhole"],
   [NOTEHEAD_HALF, "noteheadHalf"],
   [NOTEHEAD_BLACK, "noteheadBlack"],
+  [NOTEHEAD_WHOLE_OVERSIZED, "noteheadWholeOversized"],
+  [NOTEHEAD_HALF_OVERSIZED, "noteheadHalfOversized"],
+  [NOTEHEAD_BLACK_OVERSIZED, "noteheadBlackOversized"],
   [NOTEHEAD_DIAMOND_WHITE, "noteheadDiamondWhite"],
   [REST_WHOLE, "restWhole"],
   [REST_HALF, "restHalf"],
@@ -68126,6 +69797,8 @@ var CORE_SMUFL_GLYPH_NAME_BY_CHAR = new Map([
   [FLAG_32UP, "flag32ndUp"],
   [FLAG_32DOWN, "flag32ndDown"],
   [FLAG_64UP, "flag64thUp"],
+  [FLAG_128UP, "flag128thUp"],
+  [FLAG_128DOWN, "flag128thDown"],
   [FLAG_64DOWN, "flag64thDown"],
   [SYM_SHARP, "accidentalSharp"],
   [SYM_FLAT, "accidentalFlat"],
@@ -68268,12 +69941,7 @@ var FALLBACK_MAJOR_SEVENTH_BBOX = {
   bBoxNE: [2.232, 1.908]
 };
 function majorSeventhSuffixOffsetX(root) {
-  const first = root[0]?.toUpperCase();
-  if (first === "F")
-    return CHORD_NAME_FONT_SIZE * 0.9864;
-  if (first === "A" || first === "B" || first === "D" || first === "E")
-    return CHORD_NAME_FONT_SIZE * 1.1136;
-  return CHORD_NAME_FONT_SIZE * 1.2027;
+  return latinTextWidthEm(root) * CHORD_NAME_FONT_SIZE;
 }
 function majorSeventhGlyphNode(item, rowChordY, musicGlyphMode) {
   const path = getSmuflGlyphPath(MAJOR_SEVENTH_GLYPH_NAME, item.smuflFontFamily);
@@ -68303,13 +69971,22 @@ function majorSeventhGlyphNode(item, rowChordY, musicGlyphMode) {
     key: `${item.key}-maj7-glyph`
   });
 }
+function splitChordSuffix(suffix) {
+  if (!suffix || suffix === "maj7")
+    return { baseline: "", raised: "" };
+  const m = suffix.match(/^(m(?!aj))(.*)$/);
+  if (m)
+    return { baseline: m[1], raised: m[2] };
+  return { baseline: "", raised: suffix };
+}
 function chordSuffixNode(item) {
-  if (!item.suffix || item.suffix === "maj7")
+  const { raised } = splitChordSuffix(item.suffix);
+  if (!raised)
     return null;
   return el("tspan", {
     dy: -LINE_SPACING * 1.2,
     fontSize: CHORD_NAME_FONT_SIZE * Math.SQRT1_2
-  }, item.suffix);
+  }, raised);
 }
 function chordLabelText(item) {
   if (item.suffix === "maj7") {
@@ -68333,7 +70010,7 @@ function renderChordNames(items, opts = {}) {
       textAnchor: "start",
       "data-lily-element": "chord-symbol",
       "data-lily-chord-label": chordLabelText(item)
-    }, [item.root, suffixNode], item.key));
+    }, [item.root + splitChordSuffix(item.suffix).baseline, suffixNode], item.key));
     if (item.suffix === "maj7") {
       els.push(majorSeventhGlyphNode(item, rowChordY, musicGlyphMode));
     }
@@ -68412,6 +70089,116 @@ function chordNameSkylineBoxes(items) {
     const top = item.suffix ? Math.min(rowChordY - rootCapH, rowChordY - LINE_SPACING * 1.2 - suffixCapH) : rowChordY - rootCapH;
     return { left: item.x, right: item.x + rootW + suffixW, top };
   });
+}
+
+// src/music-rendering/renderer/staffRow/timeSignature.ts
+function renderTimeSignatureAt(opts) {
+  const { x, topY, timeSig: timeSig2, style = "default", bravura, fontFamily, fontInfo, musicGlyphMode = "font", keyTop, keyBot } = opts;
+  const [num, den] = timeSig2.split("/").map(Number);
+  const timeSigYOffset = fontInfo?.timeSigYOffset ?? 0;
+  const timeSigScale = fontInfo?.timeSigFontScale ?? 1;
+  const baseMusicSize = musicGlyphFontSizes(fontFamily).music;
+  const timeSigFontSize = Math.round(baseMusicSize * timeSigScale);
+  const useCommon = style !== "numeric" && (timeSig2 === "4/4" || timeSig2 === "2/2");
+  const commonGlyph = timeSig2 === "2/2" ? TIMESIG_CUT_COMMON : TIMESIG_COMMON;
+  if (bravura) {
+    const tsProps = {
+      x: x + TIMESIG_W / 2,
+      className: "ts",
+      "data-lily-element": "time-signature",
+      textAnchor: "middle",
+      fontSize: timeSigFontSize,
+      dominantBaseline: "central"
+    };
+    if (useCommon) {
+      return renderMusicGlyphRun({
+        glyph: commonGlyph,
+        mode: musicGlyphMode,
+        fontFamily,
+        props: { ...tsProps, y: topY + 2 * LINE_SPACING + timeSigYOffset },
+        key: keyTop
+      });
+    }
+    const topStr = (num ?? 4).toString().split("").map((c) => timeSigGlyph(+c)).join("");
+    const botStr = (den ?? 4).toString().split("").map((c) => timeSigGlyph(+c)).join("");
+    return [
+      ...renderMusicGlyphRun({
+        glyph: topStr,
+        mode: musicGlyphMode,
+        fontFamily,
+        props: { ...tsProps, y: topY + LINE_SPACING + timeSigYOffset },
+        key: keyTop
+      }),
+      ...renderMusicGlyphRun({
+        glyph: botStr,
+        mode: musicGlyphMode,
+        fontFamily,
+        props: { ...tsProps, y: topY + 3 * LINE_SPACING + timeSigYOffset },
+        key: keyBot
+      })
+    ];
+  }
+  if (useCommon) {
+    return [
+      el("text", {
+        x: x + 10,
+        y: topY + LINE_SPACING * 2.5 + timeSigYOffset,
+        fontSize: "24",
+        fontFamily: "serif",
+        textAnchor: "middle",
+        dominantBaseline: "middle",
+        "data-lily-element": "time-signature"
+      }, den === 2 ? "C|" : "C", keyTop)
+    ];
+  }
+  return [
+    el("text", {
+      x: x + 10,
+      y: topY + LINE_SPACING * 1.5 + timeSigYOffset,
+      fontSize: "19",
+      fontFamily: "serif",
+      textAnchor: "middle",
+      dominantBaseline: "middle",
+      "data-lily-element": "time-signature"
+    }, num, keyTop),
+    el("text", {
+      x: x + 10,
+      y: topY + LINE_SPACING * 3.5 + timeSigYOffset,
+      fontSize: "19",
+      fontFamily: "serif",
+      textAnchor: "middle",
+      dominantBaseline: "middle",
+      "data-lily-element": "time-signature"
+    }, den, keyBot)
+  ];
+}
+function timeSignatureInkLeftX(opts) {
+  const { x, timeSig: timeSig2, style = "default", fontFamily, fontInfo } = opts;
+  if (!fontInfo)
+    return;
+  const [num, den] = timeSig2.split("/").map(Number);
+  const timeSigFontSize = Math.round(musicGlyphFontSizes(fontFamily).music * (fontInfo.timeSigFontScale ?? 1));
+  const staffSpacePx = timeSigFontSize / 4;
+  const centerX = x + TIMESIG_W / 2;
+  const useCommon = style !== "numeric" && (timeSig2 === "4/4" || timeSig2 === "2/2");
+  const runs = useCommon ? [timeSig2 === "2/2" ? TIMESIG_CUT_COMMON : TIMESIG_COMMON] : [
+    (num ?? 4).toString().split("").map((c) => timeSigGlyph(+c)).join(""),
+    (den ?? 4).toString().split("").map((c) => timeSigGlyph(+c)).join("")
+  ];
+  let inkLeft;
+  for (const run of runs) {
+    const glyphs = Array.from(run).map((ch) => {
+      const name = glyphNameForMusicGlyph(ch);
+      return name ? fontInfo.metadata.glyphs[name] : undefined;
+    });
+    if (glyphs.some((g) => !g?.bbox || g.advanceWidth == null))
+      return;
+    const totalAdvance = glyphs.reduce((sum, g) => sum + (g.advanceWidth ?? 0), 0) * staffSpacePx;
+    const originX = centerX - totalAdvance / 2;
+    const runLeft = originX + (glyphs[0].bbox.bBoxSW[0] ?? 0) * staffSpacePx;
+    inkLeft = inkLeft === undefined ? runLeft : Math.min(inkLeft, runLeft);
+  }
+  return inkLeft;
 }
 
 // src/music-rendering/renderer/staffRow/dynamics.ts
@@ -68607,9 +70394,9 @@ function stemUpForRenderedNote(note, noteY, middleY) {
 function fingeringAnchor(input) {
   const { note, x, y, topY, btmY, middleY, direction } = input;
   const musicScale = noteMusicScale(note);
-  const fontSize = FINGERING_FONT_SIZE * musicScale;
+  const fontSize = musicGlyphFontSizes(undefined).music * FINGERING_MUSIC_SCALE * musicScale;
   const baselineY = fingeringY(y, stemUpForRenderedNote(note, y, middleY), note.fingeringBelow, topY, btmY, fontSize);
-  const placeBelow = note.fingeringBelow || stemUpForRenderedNote(note, y, middleY);
+  const placeBelow = note.fingeringBelow === true;
   const edgeNudge = Math.round(LINE_SPACING * 0.55);
   return {
     x: x + (direction === "start" ? edgeNudge : -edgeNudge),
@@ -70957,9 +72744,144 @@ function renderPercentRepeats(input) {
   return els;
 }
 
+// src/music-rendering/engraving/barLine.ts
+var BAR_LINE_KERN = 3;
+var BAR_GLYPH = {
+  normal: "|",
+  double: "||",
+  final: "|.",
+  repeatEnd: ":|.",
+  repeatStart: ".|:"
+};
+var DEFAULT_LINE_POSITIONS = [-4, -2, 0, 2, 4];
+function colonBarLineDotOffsetsHalfSpaces(input) {
+  const linePositions = input.linePositions ?? DEFAULT_LINE_POSITIONS;
+  const staffSpace = 1;
+  const center = linePositions.length > 0 ? (Math.min(...linePositions) + Math.max(...linePositions)) / 2 : 0;
+  const folded = linePositions.map((lp) => Math.abs(lp - center)).sort((a, b) => a - b);
+  const gapToFind = (input.dotHeightSs + input.staffLineThicknessSs) / (staffSpace / 2);
+  let dist;
+  for (let i = 0;i + 1 < folded.length; i++) {
+    if (folded[i + 1] - folded[i] > gapToFind) {
+      dist = folded[i] + folded[i + 1];
+      break;
+    }
+  }
+  if (dist === undefined) {
+    const first = folded[0] ?? 0;
+    dist = gapToFind < first ? first : 2 * (folded[folded.length - 1] ?? 0) + 4 * input.dotHeightSs / staffSpace;
+  }
+  return [center + dist / 2, center - dist / 2];
+}
+function barGlyphList(barGlyph) {
+  return [...barGlyph];
+}
+function barLineDotDiameterSs(staffSizePt = DEFAULT_STAFF_SIZE_PT) {
+  return (1 - layoutLineThicknessSs(staffSizePt)) / 2;
+}
+var BAR_LINE_DOT_DIAMETER_SS = barLineDotDiameterSs();
+function barGlyphWidthSs(glyph, staffSizePt = DEFAULT_STAFF_SIZE_PT) {
+  switch (glyph) {
+    case "|":
+      return grobThicknessSs("barLineHair", staffSizePt);
+    case ".":
+      return grobThicknessSs("barLineThick", staffSizePt);
+    case ":":
+      return barLineDotDiameterSs(staffSizePt);
+    default:
+      return 0;
+  }
+}
+function barGlyphKind(glyph) {
+  if (glyph === "|" || glyph === ".")
+    return "rule";
+  if (glyph === ":")
+    return "dots";
+  return;
+}
+function compoundBarLine(barGlyph, staffSizePt = DEFAULT_STAFF_SIZE_PT) {
+  const kern = BAR_LINE_KERN * layoutLineThicknessSs(staffSizePt);
+  const spans2 = [];
+  let x = 0;
+  let first = true;
+  for (const glyph of barGlyphList(barGlyph)) {
+    const widthSs = barGlyphWidthSs(glyph, staffSizePt);
+    if (!first)
+      x += kern;
+    spans2.push({
+      xSs: x,
+      widthSs,
+      kind: barGlyphKind(glyph) ?? "dots",
+      glyph
+    });
+    x += widthSs;
+    first = false;
+  }
+  return { spans: spans2, widthSs: x };
+}
+function isFullyComputedBarType(barGlyph) {
+  const list = barGlyphList(barGlyph);
+  return list.length > 0 && list.every((g) => barGlyphKind(g) !== undefined);
+}
+
 // src/music-rendering/renderer/staffRow/barlines.ts
-function drawBarline(els, type, x, _topY, btmY, key, anchor, musicGlyphMode = "font", fontFamily) {
-  const common = { x, y: btmY, className: "mn", "data-lily-element": "barline" };
+function computedBarlineNode(type, barGlyph, x, topY, btmY, key, anchor, staffSizePt) {
+  const { spans: spans2, widthSs } = compoundBarLine(barGlyph, staffSizePt);
+  const totalW = widthSs * LINE_SPACING;
+  const left = anchor === "middle" ? x - totalW / 2 : anchor === "end" ? x - totalW : x;
+  const d = spans2.filter((span) => span.kind === "rule").map((span) => {
+    const x0 = left + span.xSs * LINE_SPACING;
+    const x1 = x0 + span.widthSs * LINE_SPACING;
+    return `M${x0} ${topY}H${x1}V${btmY}H${x0}Z`;
+  }).join("");
+  const nodes = [
+    el("path", {
+      d,
+      x,
+      y: btmY,
+      className: "mn",
+      "data-lily-element": "barline",
+      "data-lily-bar-type": type
+    }, undefined, key)
+  ];
+  const dotSpans = spans2.filter((span) => span.kind === "dots");
+  if (dotSpans.length > 0) {
+    const midY = (topY + btmY) / 2;
+    const halfSpacePx = (btmY - topY) / 8;
+    const offsets = colonBarLineDotOffsetsHalfSpaces({
+      dotHeightSs: BAR_LINE_DOT_DIAMETER_SS,
+      staffLineThicknessSs: grobThicknessSs("staffLine", staffSizePt)
+    });
+    const r = BAR_LINE_DOT_DIAMETER_SS / 2 * LINE_SPACING;
+    for (const span of dotSpans) {
+      const cx = left + (span.xSs + span.widthSs / 2) * LINE_SPACING;
+      offsets.forEach((offset, oi) => {
+        nodes.push(el("circle", {
+          cx,
+          cy: midY - offset * halfSpacePx,
+          r,
+          className: "mn",
+          "data-lily-element": "repeat-dot"
+        }, undefined, `${key}-dot${oi}`));
+      });
+    }
+  }
+  return nodes;
+}
+function drawBarline(els, type, x, topY, btmY, key, anchor, musicGlyphMode = "font", fontFamily, globalStaffSize) {
+  const barGlyph = BAR_GLYPH[type];
+  if (barGlyph && isFullyComputedBarType(barGlyph) && Number.isFinite(topY) && btmY > topY) {
+    const defaultAnchor = type === "repeatEnd" ? "end" : type === "repeatStart" ? "start" : "middle";
+    els.push(...computedBarlineNode(type, barGlyph, x, topY, btmY, key, anchor ?? defaultAnchor, globalStaffSize));
+    return;
+  }
+  const common = {
+    x,
+    y: btmY,
+    className: "mn",
+    "data-lily-element": "barline",
+    "data-lily-bar-type": type
+  };
   if (type === "normal") {
     els.push(renderMusicGlyph({ glyph: BARLINE_SINGLE, mode: musicGlyphMode, fontFamily, props: { ...common, textAnchor: anchor ?? "middle" }, key }));
   } else if (type === "double") {
@@ -72313,6 +74235,27 @@ function mmRestBlocksPx(mmRestBars) {
     heights.push(shortH);
   return heights;
 }
+function mmRestCountNodes(input) {
+  const { count, nx, y, fontFamily, fontInfo, musicGlyphMode, attrs, key } = input;
+  const fontSize = Math.round(musicGlyphFontSizes(fontFamily).music * (fontInfo?.timeSigFontScale ?? 1));
+  const glyphs = String(count).split("").map((c) => timeSigGlyph(Number(c))).join("");
+  return renderMusicGlyphRun({
+    glyph: glyphs,
+    mode: musicGlyphMode,
+    fontFamily,
+    props: {
+      ...attrs,
+      "data-lily-mm-rest-count": String(count),
+      x: nx,
+      y,
+      className: "ts",
+      textAnchor: "middle",
+      dominantBaseline: "central",
+      fontSize
+    },
+    key
+  });
+}
 function restYForDuration(dur2, middleY, stemDirection) {
   const base = isDotted(dur2) ? dur2 * 2 / 3 : dur2;
   if (stemDirection === "up")
@@ -72384,20 +74327,23 @@ function renderMeasureRest(opts) {
           ...note.eventId ? { "data-lily-event-id": note.eventId } : {}
         }, undefined, `mmblk${yOffset}-${mi}-${ni}-${bi}`), measureObjects);
       }
-      appendMeasureNoteObject(els, el("text", {
-        x: nx,
+      for (const numNode of mmRestCountNodes({
+        count: Number(note.mmRestBars),
+        nx,
         y: topY - Math.round(LINE_SPACING * 0.45),
-        fontSize: MM_REST_NUM_SIZE,
-        fontFamily: fontInfo?.textFontFor("general") ?? textFontForMusicFont(fontFamily, "general"),
-        fontWeight: "bold",
-        textAnchor: "middle",
-        dominantBaseline: "central",
-        "data-lily-element": "mm-rest-count",
-        "data-lily-location": `${mi}:${ni}`,
-        "data-music-note": note.noteName,
-        "data-music-octave": String(note.octave),
-        ...note.eventId ? { "data-lily-event-id": note.eventId } : {}
-      }, note.mmRestBars, `mmnum${yOffset}-${mi}-${ni}`), measureObjects);
+        fontFamily,
+        fontInfo,
+        musicGlyphMode,
+        attrs: {
+          "data-lily-element": "mm-rest-count",
+          "data-lily-location": `${mi}:${ni}`,
+          "data-music-note": note.noteName,
+          "data-music-octave": String(note.octave),
+          ...note.eventId ? { "data-lily-event-id": note.eventId } : {}
+        },
+        key: `mmnum${yOffset}-${mi}-${ni}`
+      }))
+        appendMeasureNoteObject(els, numNode, measureObjects);
       return true;
     }
     const midY = btmY - 4 * STEP_HEIGHT;
@@ -72450,20 +74396,23 @@ function renderMeasureRest(opts) {
       "data-music-octave": String(note.octave),
       ...note.eventId ? { "data-lily-event-id": note.eventId } : {}
     }, undefined, `mmcapr${yOffset}-${mi}-${ni}`), measureObjects);
-    appendMeasureNoteObject(els, el("text", {
-      x: nx,
+    for (const numNode of mmRestCountNodes({
+      count: Number(note.mmRestBars),
+      nx,
       y: topY - Math.round(LINE_SPACING * 0.45),
-      fontSize: MM_REST_NUM_SIZE,
-      fontFamily: fontInfo?.textFontFor("general") ?? textFontForMusicFont(fontFamily, "general"),
-      fontWeight: "bold",
-      textAnchor: "middle",
-      dominantBaseline: "central",
-      "data-lily-element": "mm-rest-count",
-      "data-lily-location": `${mi}:${ni}`,
-      "data-music-note": note.noteName,
-      "data-music-octave": String(note.octave),
-      ...note.eventId ? { "data-lily-event-id": note.eventId } : {}
-    }, note.mmRestBars, `mmnum${yOffset}-${mi}-${ni}`), measureObjects);
+      fontFamily,
+      fontInfo,
+      musicGlyphMode,
+      attrs: {
+        "data-lily-element": "mm-rest-count",
+        "data-lily-location": `${mi}:${ni}`,
+        "data-music-note": note.noteName,
+        "data-music-octave": String(note.octave),
+        ...note.eventId ? { "data-lily-event-id": note.eventId } : {}
+      },
+      key: `mmnum${yOffset}-${mi}-${ni}`
+    }))
+      appendMeasureNoteObject(els, numNode, measureObjects);
     return true;
   }
   const restDuration = note.voiceDuration ?? note.duration;
@@ -72547,6 +74496,33 @@ function renderMeasureAccidentals(opts) {
   }
 }
 
+// src/music-rendering/smufl/noteheadGlyphs.ts
+var OVERSIZED_BY_TYPE = {
+  whole: { glyph: NOTEHEAD_WHOLE_OVERSIZED, glyphName: "noteheadWholeOversized" },
+  half: { glyph: NOTEHEAD_HALF_OVERSIZED, glyphName: "noteheadHalfOversized" },
+  black: { glyph: NOTEHEAD_BLACK_OVERSIZED, glyphName: "noteheadBlackOversized" }
+};
+var REGULAR_BY_TYPE = {
+  whole: { glyph: NOTEHEAD_WHOLE, glyphName: "noteheadWhole" },
+  half: { glyph: NOTEHEAD_HALF, glyphName: "noteheadHalf" },
+  black: { glyph: NOTEHEAD_BLACK, glyphName: "noteheadBlack" }
+};
+function typeKey(type) {
+  return type === "whole" ? "whole" : type === "half" ? "half" : "black";
+}
+function noteheadGlyphSelection(type, fontFamily) {
+  const key = typeKey(type);
+  const fontName = fontFamily && SmuflFontRegistry.has(fontFamily) ? fontFamily : "Bravura";
+  const font = SmuflFontRegistry.has(fontName) ? SmuflFontRegistry.get(fontName) : undefined;
+  const oversized = OVERSIZED_BY_TYPE[key];
+  if (font?.metadata.glyphs[oversized.glyphName])
+    return oversized;
+  return REGULAR_BY_TYPE[key];
+}
+function noteheadGlyphNameFor(type, fontFamily) {
+  return noteheadGlyphSelection(type, fontFamily).glyphName;
+}
+
 // src/music-rendering/renderer/staffRow/measureNotes/stems.ts
 function renderMeasureStem(opts) {
   const {
@@ -72572,7 +74548,7 @@ function renderMeasureStem(opts) {
     return;
   const musicScale = noteMusicScale(note);
   const isSelected = isSelectedNote(note, selectedEventIds);
-  const nhGlyphName = nhType === "half" ? "noteheadHalf" : "noteheadBlack";
+  const nhGlyphName = noteheadGlyphNameFor(nhType, fontFamily);
   const anchorName = stemUp ? "stemUpSE" : "stemDownNW";
   const anchor = fontInfo?.glyphAnchor(nhGlyphName, anchorName);
   const nhAdvW = fontInfo?.metadata.glyphs[nhGlyphName]?.advanceWidth ?? fontInfo?.glyphAnchor(nhGlyphName, "stemUpSE")?.x;
@@ -72591,7 +74567,7 @@ function renderMeasureStem(opts) {
     }
   }
   const chordSpanSteps = Math.max(...chordSteps) - Math.min(...chordSteps);
-  const baseStemLen = !hasFlag && stemUp && renderDur >= 1 && chordSpanSteps >= 7 ? LINE_SPACING * 2.85 : hasFlag ? STEM_H_FLAG : STEM_H;
+  const baseStemLen = !hasFlag && stemUp && renderDur >= 1 && chordSpanSteps >= 7 ? LINE_SPACING * 2.85 : hasFlag ? Math.max(STEM_H_FLAG, stemLengthForDuration(renderDur)) : STEM_H;
   const highStemDownQuarterReserve = !hasFlag && !stemUp && renderDur >= 1 && step >= 13 ? LINE_SPACING * 4.45 : 0;
   const stemLen = Math.max(baseStemLen, highStemDownQuarterReserve) * musicScale;
   const minY = Math.min(...chordYs);
@@ -72640,81 +74616,15 @@ function renderMeasureStem(opts) {
 
 // src/music-rendering/engraving/markupMetrics.ts
 function estimateMarkupAdvanceWidthPx(text, fontSize, opts = {}) {
-  if (opts.code)
-    return text.length * fontSize * 0.5897;
-  if (opts.smallCaps && text.length > 0) {
-    return fontSize * 0.72 + Math.max(0, text.length - 1) * fontSize * 0.55;
-  }
-  const lowerRatio = (ch) => {
-    if (/[il]/.test(ch))
-      return 0.24;
-    if (ch === "m")
-      return 0.608;
-    if (ch === "w")
-      return 0.62;
-    if (/[frt]/.test(ch))
-      return 0.36;
-    if (/[ngd]/.test(ch))
-      return 0.54;
-    if (/[bx]/.test(ch))
-      return 0.39;
-    return 0.48;
-  };
-  let width = 0;
-  for (const ch of text) {
-    if (/\s/.test(ch))
-      width += fontSize * 0.28;
-    else if (ch === "\\")
-      width += fontSize * 0.827;
-    else if (/[\.,:;!\?\)\]\}]/.test(ch))
-      width += fontSize * 0.28;
-    else if (/[\(\[\{]/.test(ch))
-      width += fontSize * 0.32;
-    else if (opts.smallCaps || /[A-Z]/.test(ch))
-      width += fontSize * 0.62;
-    else
-      width += fontSize * lowerRatio(ch);
-  }
-  return width;
+  return textAdvanceEm(text, opts) * fontSize;
 }
 function estimateMarkupFrameWidthPx(text, fontSize, opts = {}) {
-  if (opts.code)
-    return text.length * fontSize * 0.5897;
-  if (opts.smallCaps && text.length > 0) {
-    return fontSize * 0.72 + Math.max(0, text.length - 1) * fontSize * 0.55;
-  }
-  const lowerRatio = (ch) => {
-    if (/[il]/.test(ch))
-      return 0.24;
-    if (/[mw]/.test(ch))
-      return 0.62;
-    if (/[frt]/.test(ch))
-      return 0.34;
-    return 0.385;
-  };
-  let width = 0;
-  for (const ch of text) {
-    if (/\s/.test(ch))
-      width += fontSize * 0.28;
-    else if (/[\.,:;!\?\)\]\}]/.test(ch))
-      width += fontSize * 0.32;
-    else if (/[\(\[\{]/.test(ch))
-      width += fontSize * 0.36;
-    else if (opts.smallCaps || /[A-Z]/.test(ch))
-      width += fontSize * 0.64;
-    else
-      width += fontSize * lowerRatio(ch);
-  }
-  return width;
+  return textAdvanceEm(text, opts) * fontSize;
 }
 
 // src/music-rendering/renderer/staffRow/measureNotes/noteTextAnchor.ts
 function noteheadGlyphName(type) {
-  if (type === "whole")
-    return "noteheadWhole";
-  if (type === "half")
-    return "noteheadHalf";
-  return "noteheadBlack";
+  return noteheadGlyphNameFor(type);
 }
 function smuflGlyphWidthStaffSpaces(fontInfo, glyphName) {
   const glyph = fontInfo.metadata.glyphs[glyphName];
@@ -72746,6 +74656,7 @@ var NOTE_TEXT_ABOVE_STAFF_PAD = Math.round(LINE_SPACING * 0.55);
 var NOTE_MARKUP_ABOVE_STAFF_PAD = LINE_SPACING * 1.03;
 var NOTE_TEXT_BELOW_STAFF_FLOOR_PAD = Math.round(LINE_SPACING * 0.5);
 var NOTE_TEXT_BELOW_BASELINE_GAP = Math.round(LINE_SPACING * 0.3);
+var TEXT_SCRIPT_PADDING = LINE_SPACING * 0.3;
 function noteTextAboveStaffPad(startAnchored) {
   return startAnchored ? NOTE_MARKUP_ABOVE_STAFF_PAD : NOTE_TEXT_ABOVE_STAFF_PAD;
 }
@@ -72754,13 +74665,18 @@ function noteTextBaselineY(input) {
   if (input.placement === "below") {
     const obstacle2 = input.stemUp ? input.ny + NOTE_TEXT_BELOW_STAFF_FLOOR_PAD : input.ny + stemH;
     const belowFloor = input.btmY + NOTE_TEXT_BELOW_STAFF_FLOOR_PAD;
-    const ref = Math.max(belowFloor, obstacle2);
+    const innerFloor = input.innerScriptExtent ? input.innerScriptExtent.bottom + TEXT_SCRIPT_PADDING : -Infinity;
+    const ref = Math.max(belowFloor, obstacle2, innerFloor);
     return ref + Math.round(input.scaledSize * 0.7) + NOTE_TEXT_BELOW_BASELINE_GAP;
   }
   const abovePad = noteTextAboveStaffPad(input.startAnchored);
   const obstacle = input.stemUp ? input.ny - stemH : input.ny - NOTE_TEXT_BELOW_STAFF_FLOOR_PAD;
   const aboveFloor = input.topY - abovePad;
-  return obstacle >= input.topY ? aboveFloor : obstacle - abovePad;
+  const baseline = obstacle >= input.topY ? aboveFloor : obstacle - abovePad;
+  if (!input.innerScriptExtent)
+    return baseline;
+  const clearInner = input.innerScriptExtent.top - TEXT_SCRIPT_PADDING;
+  return Math.min(baseline, clearInner);
 }
 
 // src/music-rendering/renderer/staffRow/measureNotes/noteText.ts
@@ -72838,6 +74754,11 @@ function renderMeasureNoteText(opts) {
   const textW = estimateNoteTextWidth(note.noteText, scaledSize);
   const shapedText = note.noteText.circled || note.noteText.boxed;
   const startAnchored = shapedText || note.noteText.textAnchor === "start";
+  const fingeringSide = note.fingering == null ? undefined : note.fingeringBelow === true ? "below" : "above";
+  const textSide = note.noteText.placement === "below" ? "below" : "above";
+  const fingeringSize = musicGlyphFontSizes(undefined).music * FINGERING_MUSIC_SCALE;
+  const fingeringBaseline = fingeringSide === textSide ? fingeringY(ny, stemUp, note.fingeringBelow, topY, btmY, fingeringSize) : undefined;
+  const innerScriptExtent = fingeringBaseline == null ? undefined : { top: fingeringBaseline - LINE_SPACING * 1.147, bottom: fingeringBaseline };
   const textY = noteTextBaselineY({
     placement: note.noteText.placement,
     startAnchored,
@@ -72846,7 +74767,8 @@ function renderMeasureNoteText(opts) {
     btmY,
     stemUp,
     duration: note.duration,
-    scaledSize
+    scaledSize,
+    ...innerScriptExtent ? { innerScriptExtent } : {}
   });
   const circledAboveXOffset = note.noteText.circled && note.noteText.placement !== "below" ? LINE_SPACING * CIRCLED_NOTE_TEXT_ABOVE_X_OFFSET_SS : 0;
   const boxedAboveXOffset = note.noteText.boxed && note.noteText.placement !== "below" ? LINE_SPACING * BOXED_NOTE_TEXT_ABOVE_X_OFFSET_SS : 0;
@@ -72931,9 +74853,9 @@ var TEMPO_NOTE_GLYPHS = {
   8: "",
   16: ""
 };
-var TEMPO_MARK_STAFF_GAP = LINE_SPACING * 1.325;
+var TEMPO_MARK_STAFF_GAP = LINE_SPACING * 0.88;
 var TEMPO_MARK_TOP_RESERVE_STAFF_GAP = LINE_SPACING * 1.325;
-var TEMPO_MARK_CHORD_NAME_EXTRA_GAP = LINE_SPACING * 1.8;
+var TEMPO_MARK_CHORD_NAME_EXTRA_GAP = CHORD_NAME_FONT_SIZE * 0.7 + LINE_SPACING * 0.8;
 var TEMPO_MARK_BODY_RESERVE = TEMPO_TEXT_FONT_SIZE + LINE_SPACING * 0.25;
 var TEMPO_MARK_NOTEHEAD_LEAD = LINE_SPACING * 3.2;
 var TEMPO_MARK_OBSTACLE_ASCENT = TEMPO_TEXT_FONT_SIZE * 0.54;
@@ -72948,8 +74870,11 @@ function tempoMarkBaselineY(input) {
 function tempoMarkTopContentY(input) {
   return input.topY - TEMPO_MARK_TOP_RESERVE_STAFF_GAP - (input.hasChordNamesAbove ? TEMPO_MARK_CHORD_NAME_EXTRA_GAP : 0) - TEMPO_MARK_BODY_RESERVE;
 }
+function tempoMarkAnchorX(input) {
+  return input.breakAlignX ?? input.noteX - NH_RX - TEMPO_MARK_NOTEHEAD_LEAD;
+}
 function renderTempoMark(input) {
-  const { mark, noteX, y, key, fontFamily } = input;
+  const { mark, noteX, y, key, fontFamily, breakAlignX } = input;
   const tempoChildren = [mark.text ?? ""];
   if (mark.bpm) {
     if (mark.text) {
@@ -72957,13 +74882,14 @@ function renderTempoMark(input) {
     }
     tempoChildren.push(el("tspan", {
       fontFamily: fontFamily ?? "Bravura",
+      fontSize: TEMPO_NOTE_GLYPH_FONT_SIZE,
       fontStyle: "normal",
       fontWeight: "normal"
     }, (TEMPO_NOTE_GLYPHS[mark.beatUnitDenominator ?? 4] ?? "") + TEMPO_AUGMENTATION_DOT.repeat(mark.beatUnitDots ?? 0)));
     tempoChildren.push(el("tspan", { fontStyle: "normal", fontWeight: "normal" }, mark.text ? ` = ${mark.bpm})` : ` = ${mark.bpm}`));
   }
   return el("text", {
-    x: noteX - NH_RX - TEMPO_MARK_NOTEHEAD_LEAD,
+    x: tempoMarkAnchorX({ noteX, ...breakAlignX != null ? { breakAlignX } : {} }),
     y,
     fontSize: TEMPO_TEXT_FONT_SIZE,
     fontFamily: "'LilyPond Serif', 'TeX Gyre Schola', serif",
@@ -73021,7 +74947,7 @@ function renderGraceNote(opts) {
     }
   }
   els.push(renderMusicGlyph({
-    glyph: NOTEHEAD_BLACK,
+    glyph: noteheadGlyphSelection("black", fontFamily).glyph,
     mode: musicGlyphMode,
     fontFamily,
     props: {
@@ -73123,7 +75049,14 @@ function articulationGlyph(kind, above) {
 function articulationClassName(kind) {
   return kind === "fermata" ? "mn" : "ar";
 }
+var ALWAYS_ABOVE_SCRIPTS = new Set([
+  "downbow",
+  "upbow",
+  "fermata"
+]);
 function articulationAbove(kind, stemUp) {
+  if (ALWAYS_ABOVE_SCRIPTS.has(kind))
+    return true;
   if (kind === "staccato" || kind === "tenuto" || kind === "accent") {
     return !stemUp;
   }
@@ -73277,6 +75210,7 @@ function renderNoteAttachments(input) {
     beamedSet,
     noteBeamOuterY,
     fontFamily,
+    musicGlyphMode = "font",
     stepForPitch
   } = input;
   const els = [];
@@ -73453,18 +75387,30 @@ function renderNoteAttachments(input) {
   }
   els.push(...renderOrnaments({ note, nx, artY: ornArtY, yOffset, mi, ni, fontFamily, musicScale }));
   if (note.fingering != null) {
-    els.push(el("text", {
-      x: nx,
-      y: fingeringY(ny, stemUp, note.fingeringBelow, topY, btmY, FINGERING_FONT_SIZE * musicScale),
-      fontSize: FINGERING_FONT_SIZE * musicScale,
-      fontFamily: "sans-serif",
+    const fingeringSize = musicGlyphFontSizes(fontFamily).music * FINGERING_MUSIC_SCALE * musicScale;
+    const fingeringBaselineY = fingeringY(ny, stemUp, note.fingeringBelow, topY, btmY, fingeringSize);
+    const fingeringAttrs = {
+      "data-lily-fingering": String(note.fingering),
       textAnchor: "middle",
       ...scaledMusicOptionalAttrs(note),
       "data-lily-element": "fingering",
       ...noteOwnerAttrs(note, mi, ni),
       "data-music-note": note.noteName,
       "data-music-octave": String(note.octave)
-    }, note.fingering, `fing${yOffset}-${mi}-${ni}`));
+    };
+    els.push(...renderMusicGlyphRun({
+      glyph: String(note.fingering).split("").map((c) => timeSigGlyph(Number(c))).join(""),
+      mode: musicGlyphMode,
+      fontFamily,
+      props: {
+        ...fingeringAttrs,
+        x: nx,
+        y: fingeringBaselineY,
+        className: "ts",
+        fontSize: fingeringSize
+      },
+      key: `fing${yOffset}-${mi}-${ni}`
+    }));
   }
   return els;
 }
@@ -73512,7 +75458,7 @@ function renderNoteChordSymbol(input) {
 
 // src/music-rendering/renderer/staffRow/notehead.ts
 function Notehead({ nx, ny, type, harmonic, fill, key, debug, musicGlyphMode, fontFamily, scale }) {
-  const glyph = harmonic ? NOTEHEAD_DIAMOND_WHITE : type === "whole" ? NOTEHEAD_WHOLE : type === "half" ? NOTEHEAD_HALF : NOTEHEAD_BLACK;
+  const glyph = harmonic ? NOTEHEAD_DIAMOND_WHITE : noteheadGlyphSelection(type, fontFamily).glyph;
   const props = { className: "mn", x: nx, y: ny, textAnchor: "middle" };
   if (scale != null && Number.isFinite(scale) && scale > 0 && Math.abs(scale - 1) > 0.000001) {
     props.fontSize = musicGlyphFontSizes(fontFamily).music * scale;
@@ -73602,7 +75548,7 @@ function renderMeasureNoteheadGlyphs(ctx) {
       ...note.tooltipText ? { tooltip: note.tooltipText } : {}
     }
   }));
-  if (isDotted(note.duration)) {
+  if (isDotted(note.voiceDuration ?? note.duration)) {
     const dotStep = step % 2 === 0 ? step + 1 : step;
     const dotY = stepY(dotStep) + yOffset;
     const dotProps = {
@@ -73663,7 +75609,7 @@ function renderMeasureNoteheadGlyphs(ctx) {
           octave: cn.octave
         }
       }));
-      if (isDotted(note.duration)) {
+      if (isDotted(note.voiceDuration ?? note.duration)) {
         const dotStep = cStep % 2 === 0 ? cStep + 1 : cStep;
         const dotY = stepY(dotStep) + yOffset;
         const dotProps = {
@@ -73713,7 +75659,8 @@ function renderMeasureNotes(opts) {
     selectedEventIds,
     rehearsalMarks,
     rehearsalMarkTextStartX,
-    rehearsalMarkBoxBottomY,
+    rehearsalMarkBoxBottomYAt,
+    tempoMarkBreakAlignX,
     tempoMarks,
     fontFamily,
     musicGlyphMode,
@@ -73766,12 +75713,14 @@ function renderMeasureNotes(opts) {
         hasChordNamesAbove,
         obstacleTopY: measureTopPrintedNoteYFrom(ni)
       });
+      const breakAlignX = mi === 0 && ni === firstSpacingEventIndex ? tempoMarkBreakAlignX : undefined;
       els.push(renderTempoMark({
         mark: tempoMark,
         noteX: nx,
         y: tempoY,
         key: `tempo${yOffset}-${mi}-${ni}`,
-        fontFamily
+        fontFamily,
+        ...breakAlignX != null ? { breakAlignX } : {}
       }));
     }
     const markText = rehearsalMarks?.get(noteIdx);
@@ -73789,7 +75738,7 @@ function renderMeasureNotes(opts) {
         noteX: nx,
         textStartX,
         topY,
-        boxBottomY: rehearsalMarkBoxBottomY,
+        boxBottomY: rehearsalMarkBoxBottomYAt?.(textStartX),
         keySuffix: `${yOffset}-${mi}-${ni}`
       }));
     }
@@ -73950,6 +75899,7 @@ function renderMeasureNotes(opts) {
       beamedSet,
       noteBeamOuterY,
       fontFamily,
+      musicGlyphMode,
       stepForPitch
     }));
     updateSlursAndTiesForNote({
@@ -73977,88 +75927,6 @@ function renderMeasureNotes(opts) {
   }
   return noteIdx;
 }
-// src/music-rendering/renderer/staffRow/timeSignature.ts
-function renderTimeSignatureAt(opts) {
-  const { x, topY, timeSig: timeSig2, style = "default", bravura, fontFamily, fontInfo, musicGlyphMode = "font", keyTop, keyBot } = opts;
-  const [num, den] = timeSig2.split("/").map(Number);
-  const timeSigYOffset = fontInfo?.timeSigYOffset ?? 0;
-  const timeSigScale = fontInfo?.timeSigFontScale ?? 1;
-  const baseMusicSize = musicGlyphFontSizes(fontFamily).music;
-  const timeSigFontSize = Math.round(baseMusicSize * timeSigScale);
-  const useCommon = style !== "numeric" && (timeSig2 === "4/4" || timeSig2 === "2/2");
-  const commonGlyph = timeSig2 === "2/2" ? TIMESIG_CUT_COMMON : TIMESIG_COMMON;
-  if (bravura) {
-    const tsProps = {
-      x: x + TIMESIG_W / 2,
-      className: "ts",
-      "data-lily-element": "time-signature",
-      textAnchor: "middle",
-      fontSize: timeSigFontSize,
-      dominantBaseline: "central"
-    };
-    if (useCommon) {
-      return renderMusicGlyphRun({
-        glyph: commonGlyph,
-        mode: musicGlyphMode,
-        fontFamily,
-        props: { ...tsProps, y: topY + 2 * LINE_SPACING + timeSigYOffset },
-        key: keyTop
-      });
-    }
-    const topStr = (num ?? 4).toString().split("").map((c) => timeSigGlyph(+c)).join("");
-    const botStr = (den ?? 4).toString().split("").map((c) => timeSigGlyph(+c)).join("");
-    return [
-      ...renderMusicGlyphRun({
-        glyph: topStr,
-        mode: musicGlyphMode,
-        fontFamily,
-        props: { ...tsProps, y: topY + LINE_SPACING + timeSigYOffset },
-        key: keyTop
-      }),
-      ...renderMusicGlyphRun({
-        glyph: botStr,
-        mode: musicGlyphMode,
-        fontFamily,
-        props: { ...tsProps, y: topY + 3 * LINE_SPACING + timeSigYOffset },
-        key: keyBot
-      })
-    ];
-  }
-  if (useCommon) {
-    return [
-      el("text", {
-        x: x + 10,
-        y: topY + LINE_SPACING * 2.5 + timeSigYOffset,
-        fontSize: "24",
-        fontFamily: "serif",
-        textAnchor: "middle",
-        dominantBaseline: "middle",
-        "data-lily-element": "time-signature"
-      }, den === 2 ? "C|" : "C", keyTop)
-    ];
-  }
-  return [
-    el("text", {
-      x: x + 10,
-      y: topY + LINE_SPACING * 1.5 + timeSigYOffset,
-      fontSize: "19",
-      fontFamily: "serif",
-      textAnchor: "middle",
-      dominantBaseline: "middle",
-      "data-lily-element": "time-signature"
-    }, num, keyTop),
-    el("text", {
-      x: x + 10,
-      y: topY + LINE_SPACING * 3.5 + timeSigYOffset,
-      fontSize: "19",
-      fontFamily: "serif",
-      textAnchor: "middle",
-      dominantBaseline: "middle",
-      "data-lily-element": "time-signature"
-    }, den, keyBot)
-  ];
-}
-
 // src/music-rendering/engraving/bracketGeometry.ts
 function computeTupletBracket(noteSteps, noteXs, graceXOffsets, yOffset = 0, beamOuterY, startIdx = 0, forceStemUp) {
   const total = noteSteps.length;
@@ -74192,6 +76060,7 @@ function placeSingleStaffNotes(input) {
     firstOrdinaryOffset,
     chainLeadingGapW,
     chainFullTail,
+    chainForce,
     chainTerminalShortTail
   } = input;
   if (isPercentRepeatOnlyMeasure(measure2)) {
@@ -74220,7 +76089,7 @@ function placeSingleStaffNotes(input) {
     firstOrdinaryOffset
   }) : undefined;
   const solveTarget = fixedLead != null ? Math.max(1, noteArea - fixedLead) : noteArea;
-  const solvedWidths = solveSpringWidths(realDurations, systemShortestDur, solveTarget, musicScales, spacingEvents.map((event, ei) => ({ ...event, accidentalColumns: eventAccCols[ei] ?? 0 })), chainFullTail === true);
+  const solvedWidths = solveSpringWidths(realDurations, systemShortestDur, solveTarget, musicScales, spacingEvents.map((event, ei) => ({ ...event, accidentalColumns: eventAccCols[ei] ?? 0 })), chainFullTail === true, chainForce);
   const attackOffsets = attackOffsetsForEvents(solvedWidths, spacingEvents, {
     useFirstOrdinaryRod: headerChangeW === 0 && !showClefChange,
     firstOrdinaryOffset,
@@ -74330,6 +76199,37 @@ function applySharedLayoutTerminalRestBackset(measure2, noteXs) {
   const backset = Math.min(SHARED_LAYOUT_TERMINAL_REST_BACKSET, Math.max(0, x - prevX - minRestGap));
   noteXs[lastVisible] = x - backset;
 }
+function applyNoteColumnClashLadder(measure2, noteXs, clashIndices) {
+  if (clashIndices.length < 2)
+    return;
+  const shiftLevel = (n) => Math.floor((n.voiceIndex ?? 0) / 2);
+  const dirSign = (n) => n.stemDirection === "down" ? -1 : 1;
+  const headWidthPx = (n) => drawnHeadWidthSs(n.voiceDuration ?? n.duration, n.isRest) * LINE_SPACING;
+  const offsetByIndex = new Map;
+  for (const dir of [1, -1]) {
+    const group = clashIndices.filter((ni) => dirSign(measure2[ni]) === dir).sort((a, b) => shiftLevel(measure2[a]) - shiftLevel(measure2[b]));
+    let offset = 0;
+    for (let i = 0;i < group.length; i++) {
+      const ni = group[i];
+      const note = measure2[ni];
+      if (i > 0) {
+        const prev = measure2[group[i - 1]];
+        if (shiftLevel(note) !== shiftLevel(prev)) {
+          const step = noteStep(note.noteName, note.octave);
+          const prevStep = noteStep(prev.noteName, prev.octave);
+          const headsOverlap = Math.abs(step - prevStep) < 2;
+          offset += headsOverlap ? 1 : 0.5;
+        }
+      }
+      offsetByIndex.set(ni, dir * offset * headWidthPx(note));
+    }
+  }
+  if (offsetByIndex.size === 0)
+    return;
+  const leftMost = Math.min(0, ...offsetByIndex.values());
+  for (const [ni, amount] of offsetByIndex)
+    noteXs[ni] += amount - leftMost;
+}
 function placeSecondaryVoiceNotes(measure2, noteXs) {
   const hasSecondaryVoice = measure2.some((n) => n.voiceDuration != null && !n.isGrace);
   if (!hasSecondaryVoice)
@@ -74347,6 +76247,7 @@ function placeSecondaryVoiceNotes(measure2, noteXs) {
     cumQN += n.duration;
   }
   const measureLenQN = cumQN;
+  const clashByX = new Map;
   for (let ni = 0;ni < measure2.length; ni++) {
     const n = measure2[ni];
     if (!n.voiceDuration || n.isGrace)
@@ -74358,9 +76259,19 @@ function placeSecondaryVoiceNotes(measure2, noteXs) {
     const targetX = beatXMap.get(key) ?? beatXMap.get(localKey);
     if (targetX == null)
       continue;
-    const v0Dir = beatDirMap.get(key) ?? beatDirMap.get(localKey);
-    const needsShift = v0Dir != null && n.stemDirection === v0Dir;
-    noteXs[ni] = needsShift ? targetX + NH_RX * 2 : targetX;
+    noteXs[ni] = targetX;
+    (clashByX.get(targetX) ?? clashByX.set(targetX, []).get(targetX)).push(ni);
+  }
+  for (const [x, secondaryIndices] of clashByX) {
+    const anchors = [];
+    for (let ni = 0;ni < measure2.length; ni++) {
+      const n = measure2[ni];
+      if (n.voiceDuration != null || n.isGrace || isStructuralMarkerNote(n))
+        continue;
+      if (noteXs[ni] === x)
+        anchors.push(ni);
+    }
+    applyNoteColumnClashLadder(measure2, noteXs, [...anchors, ...secondaryIndices]);
   }
 }
 function collectGraceBeamGroups(measure2) {
@@ -74401,7 +76312,7 @@ function interpolateBeatX(beatToX, cumBeat, fallbackX) {
   return prevX + t * (nextX - prevX);
 }
 
-// src/music-rendering/renderer/systemLayout/layoutBeatMap.ts
+// src/music-rendering/renderer/systemLayout/accidentalColumnFacts.ts
 function firstVisibleAccidentalColumns(measure2, noteAccCols) {
   for (let i = 0;i < measure2.length; i++) {
     if (isSpacingVisibleNote(measure2[i]))
@@ -74410,7 +76321,11 @@ function firstVisibleAccidentalColumns(measure2, noteAccCols) {
   return 0;
 }
 function accidentalClearanceKindForNote2(note) {
-  return /[#x]/i.test(note.noteName) ? "sharp" : "other";
+  if (/[#x]/i.test(note.noteName))
+    return "sharp";
+  if (/(?:es|b|♭)$/i.test(note.noteName) && note.noteName.length > 1)
+    return "flat";
+  return "other";
 }
 function firstVisibleAccidentalKind(measure2, noteAccCols, noteAccidentalKinds) {
   for (let i = 0;i < measure2.length; i++) {
@@ -74421,6 +76336,8 @@ function firstVisibleAccidentalKind(measure2, noteAccCols, noteAccidentalKinds) 
   }
   return;
 }
+
+// src/music-rendering/renderer/systemLayout/layoutBeatMap.ts
 function computeLayoutBeatMap(input) {
   const {
     layoutMeasure,
@@ -74438,6 +76355,7 @@ function computeLayoutBeatMap(input) {
     firstOrdinaryOffset,
     chainLeadingGapW,
     chainFullTail,
+    chainForce,
     chainTerminalShortTail,
     enforceMeasureBounds,
     noteAreaStartX,
@@ -74460,7 +76378,7 @@ function computeLayoutBeatMap(input) {
     firstOrdinaryOffset
   }) : undefined;
   const layoutSolveTarget = layoutFixedLead != null ? Math.max(1, noteArea - layoutFixedLead) : noteArea;
-  const layoutSolvedWidths = solveSpringWidths(layoutDurations, systemShortestDur, layoutSolveTarget, layoutMusicScales, layoutSpacingEvents);
+  const layoutSolvedWidths = solveSpringWidths(layoutDurations, systemShortestDur, layoutSolveTarget, layoutMusicScales, layoutSpacingEvents, chainFullTail === true, chainForce);
   const layoutFirstSpringW = layoutSolvedWidths[0];
   const layoutAttackOffsets = attackOffsetsForEvents(layoutSolvedWidths, layoutSpacingEvents, {
     useFirstOrdinaryRod: headerChangeW === 0 && !showClefChange,
@@ -74666,25 +76584,6 @@ function finalizeMeasureNoteXs(input) {
 }
 
 // src/music-rendering/renderer/systemLayout/measureRenderPlan.ts
-function firstVisibleAccidentalColumns2(measure2, noteAccCols) {
-  for (let i = 0;i < measure2.length; i++) {
-    if (isSpacingVisibleNote(measure2[i]))
-      return noteAccCols[i] ?? 0;
-  }
-  return 0;
-}
-function accidentalClearanceKindForNote3(note) {
-  return /[#x]/i.test(note.noteName) ? "sharp" : "other";
-}
-function firstVisibleAccidentalKind2(measure2, noteAccCols, noteAccidentalKinds) {
-  for (let i = 0;i < measure2.length; i++) {
-    const note = measure2[i];
-    if (!isSpacingVisibleNote(note))
-      continue;
-    return (noteAccCols[i] ?? 0) > 0 ? noteAccidentalKinds?.[i] ?? accidentalClearanceKindForNote3(note) : undefined;
-  }
-  return;
-}
 function buildMeasureRenderPlan(input) {
   const {
     system,
@@ -74783,6 +76682,7 @@ function buildMeasureRenderPlan(input) {
     shortestDur: systemShortestDur,
     scale,
     chainFullTail: input.chainFullTail,
+    chainForce: input.chainForce,
     chainTerminalShortTail: input.chainTerminalShortTail,
     noteAreaOverrideW: input.chainNoteAreaW,
     lyricSeamFloor: mi > 0 && headerChangeW === 0 && !showClefChange,
@@ -74836,8 +76736,8 @@ function buildMeasureRenderPlan(input) {
     lyricSeamFloor: mi > 0 && headerChangeW === 0 && !showClefChange,
     preserveSustainedNaturalGap: mi === renderMeasureCount - 1 && systemShortestDur >= 0.5,
     compactShortNoteBoundary: shouldUseCompactShortBoundaryGap(layoutMeasure, systemShortestDur, beamedSet),
-    firstAccidentalColumns: firstVisibleAccidentalColumns2(layoutMeasure, layoutNoteAccCols),
-    firstAccidentalKind: firstVisibleAccidentalKind2(layoutMeasure, layoutNoteAccCols, layoutSpacingPlan.noteAccidentalKinds)
+    firstAccidentalColumns: firstVisibleAccidentalColumns(layoutMeasure, layoutNoteAccCols),
+    firstAccidentalKind: firstVisibleAccidentalKind(layoutMeasure, layoutNoteAccCols, layoutSpacingPlan.noteAccidentalKinds)
   };
   const chainLeadingGapW = input.chainLeadingGapW;
   const chainFullTail = input.chainFullTail;
@@ -74858,6 +76758,7 @@ function buildMeasureRenderPlan(input) {
     firstOrdinaryOffset,
     chainLeadingGapW,
     chainFullTail,
+    chainForce: input.chainForce,
     chainTerminalShortTail,
     enforceMeasureBounds: false,
     noteAreaStartX,
@@ -75037,7 +76938,8 @@ function renderMeasureContent(input) {
     selectedEventIds,
     rehearsalMarks,
     rehearsalMarkTextStartX,
-    rehearsalMarkBoxBottomY,
+    rehearsalMarkBoxBottomYAt,
+    tempoMarkBreakAlignX,
     fontFamily,
     musicGlyphMode = "font",
     chordSymbols,
@@ -75207,7 +77109,8 @@ function renderMeasureContent(input) {
     selectedEventIds,
     rehearsalMarks,
     rehearsalMarkTextStartX,
-    rehearsalMarkBoxBottomY,
+    rehearsalMarkBoxBottomYAt,
+    tempoMarkBreakAlignX,
     tempoMarks,
     fontFamily,
     musicGlyphMode,
@@ -75243,7 +77146,7 @@ function renderMeasureContent(input) {
   const effectiveBarX = terminalWide ? staffEndX : barX;
   const suppressBarline = input.suppressStaffLocalRepeatBarlines && (barType === "repeatStart" || barType === "repeatEnd");
   if (!suppressBarline) {
-    drawBarline(els, barType, effectiveBarX, topY, btmY, `bl${yOffset}-${mi}`, barlineAnchor, musicGlyphMode, fontFamily);
+    drawBarline(els, barType, effectiveBarX, topY, btmY, `bl${yOffset}-${mi}`, barlineAnchor, musicGlyphMode, fontFamily, input.globalStaffSize);
   }
   let postBarlineGapW = 0;
   if (!isLastMeasureInRow && (barType === "double" || barType === "final")) {
@@ -75351,256 +77254,109 @@ function renderSystemHeader(topY, btmY, yOffset, systemEndX, hdrW, indentX, syst
   }
   return els;
 }
-// src/music-rendering/layout/staffSpacingSpring.ts
-function staffSpacingSpecKey(breakDir) {
-  return breakDir === "center" ? "next-note" : "first-note";
+// src/music-rendering/renderer/systemLayout/systemLineChainPlan.ts
+function beatToXFromAttacks(measure2, attackXs) {
+  const beatToX = new Map;
+  let cumBeat = 0;
+  let eventIndex = 0;
+  for (const note of measure2) {
+    if (note.isGrace || note.duration <= 0 || isStructuralMarkerNote(note))
+      continue;
+    const x = attackXs[eventIndex];
+    if (x != null)
+      beatToX.set(cumBeat, x);
+    cumBeat += note.duration;
+    eventIndex++;
+  }
+  return beatToX;
 }
-function staffSpacingSpring(input) {
-  const [extLeft, extRight] = input.prefatoryExtent;
-  const extLength = extRight - extLeft;
-  const { type, distance } = input.spec;
-  let fixed = extRight;
-  let ideal = fixed + 1;
-  let isStretchable = true;
-  switch (type) {
-    case "fixed-space":
-      fixed += distance;
-      ideal = fixed;
-      break;
-    case "extra-space":
-      ideal = fixed + distance;
-      break;
-    case "semi-fixed-space":
-      fixed += distance / 2;
-      ideal = fixed + distance / 2;
-      break;
-    case "minimum-space":
-      ideal = extLeft + Math.max(extLength, distance);
-      break;
-    case "minimum-fixed-space":
-      fixed = extLeft + Math.max(extLength, distance);
-      ideal = fixed;
-      break;
-    case "shrink-space":
-      ideal = fixed + distance;
-      isStretchable = false;
-      break;
-    case "semi-shrink-space":
-      fixed += distance / 2;
-      ideal = fixed + distance / 2;
-      isStretchable = false;
-      break;
-  }
-  const stretchability = isStretchable ? ideal - fixed : 0;
-  ideal += input.situationalSpace ?? 0;
-  const optical = input.opticalCorrection ?? 0;
-  fixed += optical;
-  ideal += optical;
-  const minDist = input.minimumDistance;
-  const minDistCorrection = Math.max(0, 0.3 + minDist - fixed);
-  fixed += minDistCorrection;
-  ideal = Math.max(ideal, fixed);
-  return {
-    ideal,
-    minimum: minDist,
-    inverseStretch: Math.max(0, stretchability),
-    inverseCompress: Math.max(0, ideal - fixed),
-    fixed
-  };
-}
-var STAFF_SPACING_ALIST = {
-  barline: {
-    "first-note": { type: "semi-shrink-space", distance: 1.3 },
-    "next-note": { type: "semi-fixed-space", distance: 0.9 }
-  },
-  clef: {
-    "first-note": { type: "minimum-fixed-space", distance: 5 },
-    "next-note": { type: "extra-space", distance: 1 }
-  },
-  "key-signature": {
-    "first-note": { type: "shrink-space", distance: 2.5 },
-    "next-note": { type: "shrink-space", distance: 2.5 }
-  },
-  "key-cancellation": {
-    "first-note": { type: "shrink-space", distance: 2.5 },
-    "next-note": { type: "shrink-space", distance: 2.5 }
-  },
-  "time-signature": {
-    "first-note": { type: "semi-shrink-space", distance: 2 },
-    "next-note": { type: "semi-shrink-space", distance: 2 }
-  }
-};
-
-// src/music-rendering/layout/systemColumnChain.ts
-var BARLINE_PREFATORY_EXTENT = [0, 0.19];
-function barlineSeamSpring(input) {
-  const position = input.position ?? "midline";
-  const s = staffSpacingSpring({
-    prefatoryExtent: BARLINE_PREFATORY_EXTENT,
-    spec: STAFF_SPACING_ALIST.barline[staffSpacingSpecKey(position === "midline" ? "center" : "right")],
-    minimumDistance: input.minimumDistanceSs,
-    opticalCorrection: input.opticalCorrectionSs,
-    situationalSpace: input.situationalSpaceSs
-  });
-  return {
-    idealDistanceSs: s.ideal,
-    minDistanceSs: Math.max(0, s.minimum),
-    inverseStretchStrength: Math.max(0, s.inverseStretch),
-    inverseCompressStrength: Math.max(s.inverseCompress, 0.000000001)
-  };
-}
-function measureChainSpring(m) {
-  const idealSs = Math.max(m.baseW, 0) / LINE_SPACING;
-  const minSs = Math.min(Math.max(m.minW, 0), Math.max(m.baseW, 0)) / LINE_SPACING;
-  return {
-    idealDistanceSs: idealSs,
-    minDistanceSs: minSs,
-    inverseStretchStrength: Math.max(m.inverseStretch, 0.000000001),
-    inverseCompressStrength: Math.max(idealSs - minSs, 0.000000001)
-  };
-}
-function solveSystemColumnChain(input) {
-  const { measures, seams, targetW, uniformScale, isRagged } = input;
-  const fallback = () => ({
-    measureWs: measures.map((m) => m.baseW * uniformScale),
-    measureScales: measures.map(() => uniformScale),
-    seamWs: seams.map((s) => s.minW + (s.extraInkW ?? 0)),
-    force: null,
-    fellBack: true
-  });
-  if (measures.length === 0 || seams.length !== measures.length)
-    return fallback();
-  const chain = [];
-  const seamExtras = [];
-  for (let mi = 0;mi < measures.length; mi++) {
-    chain.push(measureChainSpring(measures[mi]));
-    const seam = seams[mi];
-    const extraSs = (seam.extraInkW ?? 0) / LINE_SPACING;
-    const bar = barlineSeamSpring({
-      minimumDistanceSs: Math.max(seam.minW, 0) / LINE_SPACING,
-      position: seam.position,
-      opticalCorrectionSs: (seam.opticalCorrectionSs ?? 0) + (seam.centreShiftSs ?? 0),
-      situationalSpaceSs: seam.situationalSpaceSs
-    });
-    seamExtras.push(extraSs);
-    const spentSs = Math.max(0, seam.alreadySpentW ?? 0) / LINE_SPACING;
-    chain.push({
-      idealDistanceSs: Math.max(0, bar.idealDistanceSs - spentSs) + extraSs,
-      minDistanceSs: Math.max(0, bar.minDistanceSs - spentSs) + extraSs,
-      inverseStretchStrength: bar.inverseStretchStrength,
-      inverseCompressStrength: bar.inverseCompressStrength
-    });
-  }
-  if (debugFlag("LILYJS_CHAIN_DUMP")) {
-    const f = (v) => (v / LINE_SPACING).toFixed(2);
-    console.error(`
-=== chain: ${measures.length} measures, target ${f(targetW)}ss, ragged=${isRagged}`);
-    measures.forEach((m, mi) => {
-      const seam = seams[mi];
-      console.error(`  m${mi + 1}: baseW ${f(m.baseW)}ss  minW ${f(m.minW)}ss  invStretch ${m.inverseStretch.toFixed(2)}` + `   | seam${mi + 1}: minW ${f(seam.minW)}ss spent ${f(Math.min(seam.alreadySpentW ?? 0, 1e5))}ss pos ${seam.position}`);
-    });
-  }
-  if (isRagged) {
-    const measureWs2 = [];
-    const measureScales2 = [];
-    const seamWs2 = [];
-    for (let mi = 0;mi < measures.length; mi++) {
-      const w = chain[mi * 2].idealDistanceSs * LINE_SPACING;
-      measureWs2.push(w);
-      measureScales2.push(w / Math.max(measures[mi].baseW, 1));
-      seamWs2.push(chain[mi * 2 + 1].idealDistanceSs * LINE_SPACING);
-    }
-    return { measureWs: measureWs2, measureScales: measureScales2, seamWs: seamWs2, force: 0, fellBack: false };
-  }
-  const solution = solveSpringChain(chain, targetW / LINE_SPACING);
-  if (solution.overConstrained)
-    return fallback();
-  const measureWs = [];
-  const measureScales = [];
-  const seamWs = [];
-  for (let mi = 0;mi < measures.length; mi++) {
-    const measureW = solution.lengthsSs[mi * 2] * LINE_SPACING;
-    measureWs.push(measureW);
-    measureScales.push(measureW / Math.max(measures[mi].baseW, 1));
-    seamWs.push(solution.lengthsSs[mi * 2 + 1] * LINE_SPACING);
-  }
-  if (debugFlag("LILYJS_CHAIN_DUMP")) {
-    const f = (v) => (v / LINE_SPACING).toFixed(2);
-    console.error(`  solved force ${solution.force?.toFixed(4)}`);
-    measureWs.forEach((w, mi) => {
-      const base = measures[mi].baseW;
-      console.error(`   m${mi + 1}: baseW ${f(base)} -> solved ${f(w)}ss  (+${f(w - base)}ss, x${(w / Math.max(base, 1)).toFixed(3)})` + `   seam ${f(seamWs[mi])}ss`);
-    });
-  }
-  return { measureWs, measureScales, seamWs, force: solution.force, fellBack: false };
-}
-function measureChainSeamFacts(input) {
-  const { measure: measure2, stepForPitch, noteAccCols, expectedDuration } = input;
-  const firstVisibleIdx = measure2.findIndex((note) => isSpacingVisibleNote(note));
-  const firstNote = firstVisibleIdx >= 0 ? measure2[firstVisibleIdx] : undefined;
-  const visibleCount = measure2.reduce((count, note) => count + (isSpacingVisibleNote(note) ? 1 : 0), 0);
-  return {
-    firstIsRest: Boolean(firstNote?.isRest),
-    postBarRodW: firstNote && !firstNote.isRest ? postBarlineSkylineRodPx({
-      note: firstNote,
-      chordSteps: [
-        stepForPitch(firstNote.noteName, firstNote.octave),
-        ...(firstNote.chordNotes ?? []).map((cn) => stepForPitch(cn.noteName, cn.octave))
-      ],
-      stemUp: firstNote.stemDirection != null ? firstNote.stemDirection === "up" : stepForPitch(firstNote.noteName, firstNote.octave) < 4,
-      accidentalWidthPx: (noteAccCols[firstVisibleIdx] ?? 0) * ACC_EXTRA_W * noteMusicScale(firstNote)
-    }) ?? 0 : 0,
-    fillsMeasure: visibleCount === 1 && firstNote != null && firstNote.duration > expectedDuration / 2
-  };
-}
-function planSystemChainSpacing(input) {
+function planSystemLineChain(input) {
   const {
-    active,
-    measureBaseWs,
-    measureAggregates,
-    measureTailWs,
-    measurePostBarRodWs,
-    measureFillsMeasure,
-    measureFirstIsRest,
-    firstOrdinaryOffsets,
-    availNotes,
-    uniformScale
+    system,
+    measureFacts,
+    systemShortestDur,
+    cx,
+    terminalBarX,
+    isRagged,
+    wideBreakGapAfter,
+    measureRods,
+    seamFactsPerMeasure
   } = input;
-  if (!active)
-    return { measureWs: null, solvedTailWs: null, chainLeadingGapWs: null, measureScales: null };
-  const tailWRow = measureTailWs.reduce((sum, tailW) => sum + tailW, 0);
-  const solution = solveSystemColumnChain({
-    measures: measureBaseWs.map((baseW, mi) => ({
-      baseW,
-      minW: measureAggregates[mi]?.minPx ?? 0,
-      inverseStretch: measureAggregates[mi]?.inverseStretch ?? 0
-    })),
-    seams: measureTailWs.map((tailW, mi) => {
-      if (mi === measureTailWs.length - 1) {
-        return { minW: 0, alreadySpentW: 1e6, position: "line-start" };
+  const chainMeasures = [];
+  for (let mi = 0;mi < system.measures.length; mi++) {
+    const measure2 = system.measures[mi];
+    const facts = measureFacts[mi];
+    const events2 = spacingEventsForMeasure(measure2);
+    if (!events2.length)
+      return null;
+    const inlineClefPlan = planInlineClefSpacingForMeasure(measure2);
+    const extraInkBeforeEvent = new Map;
+    const graceRunBeforeEvent = new Map;
+    const eventIndexByNote = new Map;
+    let eventIndex = 0;
+    for (let ni = 0;ni < measure2.length; ni++) {
+      const note = measure2[ni];
+      if (note.isGrace) {
+        const run = graceRunBeforeEvent.get(eventIndex) ?? [];
+        run.push({ durationQN: note.graceDuration ?? 0, musicScale: noteMusicScale(note) });
+        graceRunBeforeEvent.set(eventIndex, run);
+        continue;
       }
-      return {
-        minW: Math.max(tailW, measurePostBarRodWs?.[mi + 1] ?? 0),
-        alreadySpentW: firstOrdinaryOffsets[mi + 1] ?? 0,
-        situationalSpaceSs: measureFillsMeasure?.[mi + 1] ? 1 : 0,
-        centreShiftSs: measureFirstIsRest?.[mi + 1] ? 0.5 : 0
-      };
-    }),
-    targetW: Math.max(1, availNotes + tailWRow),
-    uniformScale,
-    isRagged: false
+      const ink = inlineClefPlan.inlineClefSpaceBeforeNote.get(ni) ?? 0;
+      if (ink > 0) {
+        extraInkBeforeEvent.set(eventIndex, (extraInkBeforeEvent.get(eventIndex) ?? 0) + ink);
+      }
+      if (note.duration > 0 && !isStructuralMarkerNote(note)) {
+        eventIndexByNote.set(ni, eventIndex);
+        eventIndex++;
+      }
+    }
+    const rods = (measureRods?.[mi] ?? []).flatMap((rod) => {
+      const fromEvent = eventIndexByNote.get(rod.fromIdx);
+      const toEvent = eventIndexByNote.get(rod.toIdx);
+      return fromEvent != null && toEvent != null ? [{ fromEvent, toEvent, minDist: rod.minDist }] : [];
+    });
+    if (mi > 0) {
+      const lead = facts.repStartOffset + facts.headerChangeW;
+      if (lead > 0)
+        extraInkBeforeEvent.set(0, (extraInkBeforeEvent.get(0) ?? 0) + lead);
+    }
+    const seamFacts = seamFactsPerMeasure?.[mi];
+    chainMeasures.push({
+      events: events2,
+      rods,
+      postBarlineRodW: Math.max(seamFacts?.postBarRodW ?? 0, BARLINE_INK_EXTENT_SS * LINE_SPACING + POST_BARLINE_NOTEHEAD_CLEARANCE),
+      fillsMeasure: seamFacts?.fillsMeasure,
+      firstIsRest: seamFacts?.firstIsRest,
+      graceRunBeforeEvent,
+      closingBarExtraW: wideBreakGapAfter(mi) + (facts.isRepeatEnd ? REPEAT_BAR_W : 0),
+      extraInkBeforeEvent
+    });
+  }
+  if (!chainMeasures.length)
+    return null;
+  const leadW = measureFacts[0]?.firstOrdinaryOffset ?? 0;
+  const originX = cx + measureFacts[0].repStartOffset + measureFacts[0].headerChangeW + leadW;
+  const solution = solveSystemLineChain({
+    measures: chainMeasures,
+    shortestDur: systemShortestDur,
+    targetW: Math.max(1, terminalBarX - originX),
+    isRagged,
+    columnRodsFor: (columns) => buildLineColumnRods(columns.map((column) => lineColumnInk(column, chainMeasures)))
   });
-  if (solution.fellBack)
-    return { measureWs: null, solvedTailWs: null, chainLeadingGapWs: null, measureScales: null };
+  if (!solution)
+    return null;
   return {
-    measureWs: solution.measureWs,
-    solvedTailWs: solution.seamWs,
-    chainLeadingGapWs: solution.seamWs.map((seamW, mi) => seamW + (firstOrdinaryOffsets[mi + 1] ?? 0)),
-    measureScales: solution.measureScales
+    force: solution.force,
+    geometry: solution.attackXs.map((attacks, mi) => ({
+      attackXs: attacks.map((x) => originX + x),
+      graceXs: new Map([...solution.graceXs[mi]].map(([ei, run]) => [ei, run.map((x) => originX + x)])),
+      barlineX: originX + solution.barlineXs[mi]
+    }))
   };
 }
 
-// src/music-rendering/renderer/systemLayout/systemWidth.ts
+// src/music-rendering/renderer/systemLayout/measureStretchWeights.ts
 var HIGH_EXPANSION_STRETCH_THRESHOLD = 1.5;
 function measureDurationQN2(measure2) {
   return measure2.reduce((sum, note) => note.isGrace || note.duration <= 0 ? sum : sum + note.duration, 0);
@@ -75683,6 +77439,8 @@ function expandedMeasureScales(input) {
     return target / baseW;
   });
 }
+
+// src/music-rendering/renderer/systemLayout/systemWidth.ts
 function computeSystemWidthPlan(props, cx, systemShortestDur) {
   const {
     system,
@@ -75714,6 +77472,7 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
   const compactShortMeasureExponents = [];
   const voltaStretchBonuses = [];
   const measureFacts = [];
+  const measureRodsPerMeasure = [];
   const clefChangeNoteIndices = new Set((inlineClefChanges ?? []).map((change) => change.noteIndex));
   let measureNoteIndex = staffSystemNoteOffset ?? system.noteOffset;
   for (let mi = 0;mi < system.measures.length; mi++) {
@@ -75785,6 +77544,7 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       firstOrdinaryOffset,
       dynamicReserveW: measureDynamicReserveW(m)
     });
+    measureRodsPerMeasure.push(buildMeasureRods(m, spacingPlan.noteAccCols, spacingPlan.noteAccidentalKinds, m.map((note) => note.isRest ? 4 : staffStepForClef(noteStep(note.noteName, note.octave), measureClef))));
     measureBaseWs.push(spacingPlan.reserves.baseW);
     const events2 = spacingEventsForMeasure(m);
     measureAggregates.push(measureSpringAggregate(events2.map((event) => event.duration), systemShortestDur, events2.map((event) => event.musicScale ?? 1), events2.map((event, ei) => ({ ...event, accidentalColumns: spacingPlan.noteAccCols[ei] ?? 0 }))));
@@ -75836,6 +77596,18 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
     uniformScale: scale
   });
   const chainLeadingGapWs = chainPlan.chainLeadingGapWs;
+  const chainForce = chainActive ? chainPlan.force ?? undefined : undefined;
+  const lineChainPlan = debugFlag("LILYJS_LINE_CHAIN") ? planSystemLineChain({
+    system,
+    measureFacts,
+    systemShortestDur,
+    cx,
+    terminalBarX: terminalMaxX,
+    isRagged,
+    wideBreakGapAfter,
+    measureRods: measureRodsPerMeasure,
+    seamFactsPerMeasure
+  }) : null;
   const measureScales = chainPlan.measureScales ? chainPlan.measureScales : !isRagged && needsWeightedExpansion ? expandedMeasureScales({
     bases: measureBaseWs,
     measures: system.measures,
@@ -75914,6 +77686,7 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       firstOrdinaryOffset: facts.firstOrdinaryOffset,
       chainLeadingGapW: measureChainLeadingGapW,
       chainFullTail: chainActive,
+      chainForce,
       chainTerminalShortTail: chainActive && mi === system.measures.length - 1,
       enforceMeasureBounds: true,
       noteAreaStartX,
@@ -75925,22 +77698,30 @@ function computeSystemWidthPlan(props, cx, systemShortestDur) {
       },
       beamedIndices: beamedSet
     });
+    const lineGeometry = lineChainPlan?.geometry[mi];
+    const solvedBarlineX = lineGeometry?.barlineX;
+    const solvedBeatToX = lineGeometry ? beatToXFromAttacks(measure2, lineGeometry.attackXs) : beatToX;
+    const solvedContentRightX = solvedBarlineX ?? contentRightX;
+    const solvedMeasureWidth = solvedBarlineX != null ? solvedBarlineX - mx : mw;
     measurePlans.push({
       leftX: mx,
-      rightX: mi === system.measures.length - 1 ? staffEndX : mx + mw,
-      measureWidth: mw,
-      noteArea,
+      rightX: mi === system.measures.length - 1 ? staffEndX : solvedBarlineX ?? mx + mw,
+      measureWidth: solvedMeasureWidth,
+      noteArea: solvedBarlineX != null ? solvedContentRightX - noteAreaStartX : noteArea,
       noteAreaStartX,
-      contentRightX,
-      beatToX,
+      contentRightX: solvedContentRightX,
+      beatToX: solvedBeatToX,
       layoutFirstSpringW,
       repeatEndBoundaryCenterGap,
       chainLeadingGapW: measureChainLeadingGapW,
       chainFullTail: chainActive || undefined,
-      chainTerminalShortTail: chainActive && mi === system.measures.length - 1 || undefined
+      chainForce: lineChainPlan ? lineChainPlan.force : chainForce,
+      chainTerminalShortTail: chainActive && mi === system.measures.length - 1 || undefined,
+      chainAttackXs: lineGeometry?.attackXs,
+      chainGraceXs: lineGeometry?.graceXs
     });
     if (mi < system.measures.length - 1) {
-      mx += mw + wideBreakGapAfter(mi);
+      mx += solvedMeasureWidth + (solvedBarlineX != null ? 0 : wideBreakGapAfter(mi));
     }
     renderMeasureNoteIndex += measure2.length;
   }
@@ -76390,7 +78171,7 @@ function buildSystemVerticalSkylinePlan(input) {
           systemStartTextX: rehearsalMarkTextStartX
         });
         const left = textX - REHEARSAL_MARK_PAD_X;
-        markCandidates.push({ left, right: left + box.width, height: box.height });
+        markCandidates.push({ left, right: left + box.width, height: box.height, anchorX: textX });
       }
       if (note.isRest || note.isGrace || note.isPercentRepeatPlaceholder || note.duration <= 0) {
         continue;
@@ -76493,18 +78274,19 @@ function buildSystemVerticalSkylinePlan(input) {
   for (const box of chordNameSkylineBoxes(chordNameItems)) {
     aboveSkyline.raise(box.left, box.right, box.top);
   }
-  let rehearsalMarkBoxBottomY;
+  let rehearsalMarkBoxBottomYAt;
   if (markCandidates.length) {
-    rehearsalMarkBoxBottomY = topY - LINE_SPACING;
-    for (const mark of markCandidates) {
-      rehearsalMarkBoxBottomY = Math.min(rehearsalMarkBoxBottomY, aboveSkyline.query(mark.left, mark.right) - REHEARSAL_MARK_CONTENT_CLEARANCE);
-    }
-    for (const mark of markCandidates) {
-      aboveSkyline.raise(mark.left, mark.right, rehearsalMarkBoxBottomY - mark.height);
-    }
+    const staffPadBottomY = topY - LINE_SPACING * REHEARSAL_MARK_STAFF_PADDING_SS;
+    const bottoms = markCandidates.map((mark) => Math.min(staffPadBottomY, aboveSkyline.query(mark.left, mark.right) - REHEARSAL_MARK_CONTENT_CLEARANCE));
+    markCandidates.forEach((mark, i) => {
+      aboveSkyline.raise(mark.left, mark.right, bottoms[i] - mark.height);
+    });
+    const byAnchorX = new Map;
+    markCandidates.forEach((mark, i) => byAnchorX.set(Math.round(mark.anchorX * 100), bottoms[i]));
+    rehearsalMarkBoxBottomYAt = (anchorX) => byAnchorX.get(Math.round(anchorX * 100)) ?? staffPadBottomY;
   }
   return {
-    rehearsalMarkBoxBottomY,
+    rehearsalMarkBoxBottomYAt,
     debugNodes: props.debugAboveStaffSkyline ? [
       ...renderSkylineDebugNodes({
         skyline: aboveSkyline,
@@ -76594,7 +78376,7 @@ function renderSystemLayout(props) {
   const contentInset = system.isFirst && firstSystemContentInset && firstSystemContentInset > 0 ? firstSystemContentInset : 0;
   const cx = headerPlan.contentStartX + contentInset;
   const rehearsalMarkTextStartX = CLEF_X + CLEF_GLYPH_W + LINE_SPACING * 0.65 + indentX + REHEARSAL_MARK_PAD_X;
-  const systemShortestDur = systemSpacingReferenceDur(system.measures);
+  const systemShortestDur = props.spacingReferenceDur ?? systemSpacingReferenceDur(system.measures);
   const belowSky = new Skyline2("below", btmY);
   const dynEvents = [];
   const hairpinSpans = [];
@@ -76639,12 +78421,16 @@ function renderSystemLayout(props) {
     const layoutMeasure = staffMeasures ? system.measures[mi] ?? measure2 : measure2;
     const measureScale = measureScales[mi] ?? scale;
     const result = renderMeasureContent({
+      globalStaffSize: props.globalStaffSize,
       system,
       measure: measure2,
       layoutMeasure,
       systemMeasurePlan: staffMeasures ? widthPlan.measurePlans[mi] : undefined,
       chainLeadingGapW: widthPlan.measurePlans[mi]?.chainLeadingGapW,
       chainFullTail: widthPlan.measurePlans[mi]?.chainFullTail,
+      chainForce: widthPlan.measurePlans[mi]?.chainForce,
+      chainAttackXs: widthPlan.measurePlans[mi]?.chainAttackXs,
+      chainGraceXs: widthPlan.measurePlans[mi]?.chainGraceXs,
       chainTerminalShortTail: widthPlan.measurePlans[mi]?.chainTerminalShortTail,
       chainNoteAreaW: widthPlan.measurePlans[mi]?.chainFullTail ? widthPlan.measurePlans[mi]?.noteArea : undefined,
       mi,
@@ -76669,7 +78455,16 @@ function renderSystemLayout(props) {
       selectedEventIds,
       rehearsalMarks,
       rehearsalMarkTextStartX,
-      rehearsalMarkBoxBottomY: verticalSkylinePlan.rehearsalMarkBoxBottomY,
+      rehearsalMarkBoxBottomYAt: verticalSkylinePlan.rehearsalMarkBoxBottomYAt,
+      ...system.isFirst ? {
+        tempoMarkBreakAlignX: timeSignatureInkLeftX({
+          x: headerPlan.timeSigX,
+          timeSig: systemTimeSig,
+          style: systemTimeSigStyle,
+          ...fontFamily ? { fontFamily } : {},
+          ...fontInfo ? { fontInfo } : {}
+        }) ?? headerPlan.timeSigX
+      } : {},
       fontFamily,
       musicGlyphMode,
       chordSymbols,
@@ -76766,6 +78561,7 @@ function renderSystemLayout(props) {
     });
   }
   els.push(...verticalSkylinePlan.debugNodes);
+  shortenAdjacentLedgerLines(els);
   return els;
 }
 // src/music-rendering/renderer/score/sourceRefs.ts
@@ -76792,6 +78588,175 @@ function annotateSourceRefsOnSvgNodes(nodes, refs, sourceId) {
   };
   for (const node of nodes)
     visit(node);
+}
+
+// src/music-rendering/renderer/score/lineBreakOptions.ts
+function buildLineBreakOptions(input) {
+  const { tune } = input;
+  return {
+    printInitialRepeatBar: tune.printInitialRepeatBar,
+    singleRow: input.singleRow,
+    barNumberBase: input.barNumberBase,
+    measureExpectedDurations: input.measureExpectedDurations,
+    measureClefs: input.measureClefs,
+    baseShortestDurationQN: tune.baseShortestDurationQN,
+    ...input.perSystemPenalty != null ? { perSystemPenalty: input.perSystemPenalty } : {},
+    ...explicitRaggedRight(input) !== undefined ? { raggedRight: explicitRaggedRight(input) } : {},
+    ...tune.raggedLast !== undefined ? { raggedLast: tune.raggedLast } : {}
+  };
+}
+function explicitRaggedRight(input) {
+  return input.raggedRightOverride ?? input.tune.raggedRight;
+}
+function resolveEffectiveRaggedRight(input) {
+  return input.explicit ?? (input.singleRow ? false : input.systemCount === 1);
+}
+
+// src/music-rendering/renderer/score/staffLabels.ts
+var STAFF_LABEL_FONT_SIZE = LINE_SPACING * 2.2;
+var STAFF_LABEL_GAP = LINE_SPACING;
+var INSTRUMENT_NAME_PADDING = LINE_SPACING * 0.3;
+function serifTextWidthEm(text) {
+  let em = 0;
+  for (const ch of text) {
+    if (/[iljt.,' ]/.test(ch))
+      em += 0.28;
+    else if (/[frI]/.test(ch))
+      em += 0.33;
+    else if (/[MW]/.test(ch))
+      em += 0.9;
+    else if (/[mw]/.test(ch))
+      em += 0.75;
+    else if (/[FPSELTZ]/.test(ch))
+      em += 0.58;
+    else if (/[A-Z]/.test(ch))
+      em += 0.71;
+    else if (/[acesz]/.test(ch))
+      em += 0.44;
+    else
+      em += 0.5;
+  }
+  return em;
+}
+function labelRightEdgeX(delimiterLeftX, labelWidthPx, indentPx) {
+  return delimiterLeftX - INSTRUMENT_NAME_PADDING + Math.min(0, labelWidthPx - indentPx) / 2;
+}
+function labelWidthEstimatePx(text) {
+  return serifTextWidthEm(text) * STAFF_LABEL_FONT_SIZE;
+}
+function hasStaffLabel(label) {
+  return Boolean(label?.instrumentName || label?.shortInstrumentName);
+}
+function labelForSystem(label, systemIndex) {
+  if (!label)
+    return;
+  return systemIndex === 0 ? label.instrumentName : label.shortInstrumentName;
+}
+function resolveStaffLabels(staffLabels, tuneInstrumentName) {
+  return staffLabels ?? (tuneInstrumentName ? [{ instrumentName: tuneInstrumentName }] : undefined);
+}
+function foldStaffLabelGutterIntoIndentSs(firstIndentSs, gutterSs) {
+  if (!(gutterSs > 0))
+    return firstIndentSs;
+  if (firstIndentSs === 0)
+    return 0;
+  return Math.max(firstIndentSs ?? 0, gutterSs);
+}
+function resolveStaffLabelLayout(staffLabels, tuneInstrumentName, firstIndent) {
+  const labels = resolveStaffLabels(staffLabels, tuneInstrumentName);
+  const gutter = staffLabelGutterWidth(labels);
+  return {
+    labels,
+    gutter,
+    effectiveFirstIndent: foldStaffLabelGutterIntoIndentSs(firstIndent, gutter / LINE_SPACING)
+  };
+}
+function staffLabelGutterPx(effectiveFirstIndent, gutter) {
+  if (effectiveFirstIndent == null || effectiveFirstIndent === 0)
+    return gutter;
+  return effectiveFirstIndent * LINE_SPACING;
+}
+function staffLabelGutterWidth(labels, groupLabels) {
+  const names = [...labels ?? [], ...groupLabels ?? []].flatMap((label) => [label.instrumentName, label.shortInstrumentName]).filter((name) => Boolean(name));
+  if (!names.length)
+    return 0;
+  const maxWidth = Math.max(...names.map((name) => serifTextWidthEm(name) * STAFF_LABEL_FONT_SIZE));
+  return Math.ceil(Math.max(LINE_SPACING * 4, maxWidth + STAFF_LABEL_GAP));
+}
+function renderStaffSystemLabels(input) {
+  const { labels, staffSystemYOffsets, gutterWidth, staffStackYOffsets, fontFamily = ROMAN_TEXT_STACK, groupLabels, delimiterLeftXBySystem, firstIndentPx } = input;
+  const hasGroupLabels = (groupLabels ?? []).some(hasStaffLabel);
+  if (gutterWidth <= 0 || !(labels ?? []).some(hasStaffLabel) && !hasGroupLabels)
+    return [];
+  const systemCount = Math.max(0, ...staffSystemYOffsets.map((offsets) => offsets?.length ?? 0));
+  const elements = [];
+  for (let systemIndex = 0;systemIndex < systemCount; systemIndex++) {
+    const delimiterLeft = delimiterLeftXBySystem?.[systemIndex];
+    const indentPx = systemIndex === 0 ? firstIndentPx ?? gutterWidth : 0;
+    const fallbackRightEdge = indentPx > 0 ? gutterWidth - STAFF_LABEL_GAP : -STAFF_LABEL_GAP;
+    const rightEdgeFor = (text) => delimiterLeft != null ? labelRightEdgeX(delimiterLeft, labelWidthEstimatePx(text), indentPx) : undefined;
+    for (let groupIndex = 0;groupIndex < (groupLabels?.length ?? 0); groupIndex++) {
+      const group = groupLabels[groupIndex];
+      const text = labelForSystem(group, systemIndex);
+      if (!text)
+        continue;
+      const firstStaff = group.start;
+      const lastStaff = group.end - 1;
+      const topOffset = staffSystemYOffsets[firstStaff]?.[systemIndex];
+      const bottomOffset = staffSystemYOffsets[lastStaff]?.[systemIndex];
+      if (topOffset == null || bottomOffset == null)
+        continue;
+      const topY = (staffStackYOffsets?.[firstStaff] ?? 0) + topOffset + STAFF_TOP;
+      const bottomY = (staffStackYOffsets?.[lastStaff] ?? 0) + bottomOffset + BOTTOM_LINE_Y;
+      elements.push(el("text", {
+        x: rightEdgeFor(text) ?? fallbackRightEdge,
+        y: (topY + bottomY) / 2,
+        fontSize: STAFF_LABEL_FONT_SIZE,
+        fontFamily,
+        textAnchor: "end",
+        dominantBaseline: "central",
+        "data-lily-element": "staff-label",
+        "data-lily-group-index": groupIndex,
+        "data-lily-system-index": systemIndex,
+        "data-lily-label-kind": systemIndex === 0 ? "instrumentName" : "shortInstrumentName"
+      }, text, `staff-group-label-${groupIndex}-${systemIndex}`));
+    }
+    for (let staffIndex = 0;staffIndex < (labels?.length ?? 0); staffIndex++) {
+      const text = labelForSystem(labels?.[staffIndex], systemIndex);
+      if (!text)
+        continue;
+      const systemYOffset = staffSystemYOffsets[staffIndex]?.[systemIndex];
+      if (systemYOffset == null)
+        continue;
+      const stackYOffset = staffStackYOffsets?.[staffIndex] ?? 0;
+      elements.push(el("text", {
+        x: rightEdgeFor(text) ?? fallbackRightEdge,
+        y: stackYOffset + systemYOffset + STAFF_TOP + LINE_SPACING * 2,
+        fontSize: STAFF_LABEL_FONT_SIZE,
+        fontFamily,
+        textAnchor: "end",
+        dominantBaseline: "central",
+        "data-lily-element": "staff-label",
+        "data-lily-staff-index": staffIndex,
+        "data-lily-system-index": systemIndex,
+        "data-lily-label-kind": systemIndex === 0 ? "instrumentName" : "shortInstrumentName"
+      }, text, `staff-label-${staffIndex}-${systemIndex}`));
+    }
+  }
+  return elements;
+}
+function staffLabelsFromContextTree(contextTree) {
+  return contextTree?.children.filter((child) => child.kind === "Staff").map((staff2) => ({
+    ...staff2.instrumentName ? { instrumentName: staff2.instrumentName } : {},
+    ...staff2.shortInstrumentName ? { shortInstrumentName: staff2.shortInstrumentName } : {}
+  })) ?? [];
+}
+function groupLabelsFromContextTree(contextTree) {
+  return (contextTree?.nestedGroups ?? []).filter((group) => group.instrumentName).map((group) => ({
+    start: group.start,
+    end: group.end,
+    instrumentName: group.instrumentName
+  }));
 }
 
 // src/music-rendering/layout/pageBreakingModes.ts
@@ -77068,12 +79033,14 @@ function scoreToRenderModel(score2) {
   const globalStaffSize = typeof info?.globalStaffSize === "number" ? info.globalStaffSize : undefined;
   const debugSkylines = typeof info?.debugSkylines === "boolean" ? info.debugSkylines : undefined;
   const printInitialRepeatBar = info?.printInitialRepeatBar === true ? true : undefined;
+  const chordChanges = info?.chordChanges === true ? true : undefined;
   const instrumentName = typeof info?.instrumentName === "string" ? info.instrumentName : undefined;
   const barNumberSelfAlignmentX = info?.barNumberSelfAlignmentX === "left" || info?.barNumberSelfAlignmentX === "center" || info?.barNumberSelfAlignmentX === "right" ? info.barNumberSelfAlignmentX : undefined;
   const barNumberDirection = info?.barNumberDirection === "up" || info?.barNumberDirection === "down" ? info.barNumberDirection : undefined;
   const barNumberVisibility = info?.barNumberVisibility === "all" ? "all" : undefined;
   const annotateSpacing = typeof info?.annotateSpacing === "boolean" ? info.annotateSpacing : undefined;
   const pageBreaking = pageBreakingModeFromInfo(info?.pageBreaking);
+  const firstIndent = typeof info?.firstIndent === "number" ? info.firstIndent : undefined;
   const lyricFontSizeDelta = typeof info?.lyricFontSizeDelta === "number" ? info.lyricFontSizeDelta : undefined;
   const baseShortestDurationQN = typeof info?.baseShortestDurationQN === "number" ? info.baseShortestDurationQN : undefined;
   const embeddedStructuralEvents = score2.__lilyStructuralEvents ?? info?.structuralEvents ?? [];
@@ -77089,8 +79056,10 @@ function scoreToRenderModel(score2) {
       notes: [],
       info: info ?? undefined,
       ...globalStaffSize != null ? { globalStaffSize } : {},
+      ...firstIndent != null ? { firstIndent } : {},
       ...debugSkylines != null ? { debugSkylines } : {},
       ...printInitialRepeatBar ? { printInitialRepeatBar } : {},
+      ...chordChanges ? { chordChanges } : {},
       ...instrumentName ? { instrumentName } : {},
       ...barNumberSelfAlignmentX ? { barNumberSelfAlignmentX } : {},
       ...barNumberDirection ? { barNumberDirection } : {},
@@ -77157,7 +79126,11 @@ function scoreToRenderModel(score2) {
       const stemDirection = lilyStemDirectionForEvent(event) ?? (voiceIndex < 0 ? undefined : voiceIndex % 2 === 0 ? "up" : "down");
       const layoutDuration = embeddedLayoutDuration ?? (isSecondaryVoice ? 0 : qn);
       let note;
-      const voiceExtra = isSecondaryVoice ? { voiceDuration: embeddedVoiceDuration ?? qn, voiceOffsetQN: embeddedVoiceOffsetQN ?? offsetQN } : {};
+      const voiceExtra = isSecondaryVoice ? {
+        voiceDuration: embeddedVoiceDuration ?? qn,
+        voiceOffsetQN: embeddedVoiceOffsetQN ?? offsetQN,
+        ...voiceIndex >= 0 ? { voiceIndex } : {}
+      } : voiceIndex > 0 ? { voiceIndex } : {};
       const musicScale = musicScaleForEvent(event);
       const musicScaleExtra = musicScale != null ? { musicScale } : {};
       const parsedRenderingExtra = lilyParsedRenderingMetadataForEvent(event);
@@ -77247,10 +79220,11 @@ function scoreToRenderModel(score2) {
       notes.push(note);
     }
     const measureEnd = notes.length;
-    if (measure2.systemBreak)
-      systemBreaks.push(measureEnd);
-    if (measure2.systemBreak)
-      structuralEvents.push({ type: "systemBreak", at: measureEnd });
+    const breakPoints = measure2.systemBreak ? measure2.systemBreakOffsets?.length ? measure2.systemBreakOffsets.map((o) => Math.min(measureStart + o, measureEnd)) : [measureEnd] : [];
+    for (const at of breakPoints) {
+      systemBreaks.push(at);
+      structuralEvents.push({ type: "systemBreak", at });
+    }
     if (measure2.repeatStart)
       pendingRepeatStart = measureStart;
     if (measure2.repeatEnd && pendingRepeatStart != null) {
@@ -77410,6 +79384,13 @@ function scoreToRenderModel(score2) {
     const startIdx = noteIndexByEventId.get(slur.startEventId);
     const endIdx = noteIndexByEventId.get(slur.endEventId);
     const id = `${slur.startEventId}~${si}`;
+    if (slur.phrasing) {
+      if (startIdx != null)
+        notes[startIdx].phrasingSlurStart = true;
+      if (endIdx != null)
+        notes[endIdx].phrasingSlurEnd = true;
+      continue;
+    }
     if (startIdx != null) {
       notes[startIdx].slurStart = true;
       (notes[startIdx].slurStartIds ??= []).push(id);
@@ -77550,8 +79531,10 @@ function scoreToRenderModel(score2) {
     composer: composerText,
     info: info ?? undefined,
     ...globalStaffSize != null ? { globalStaffSize } : {},
+    ...firstIndent != null ? { firstIndent } : {},
     ...debugSkylines != null ? { debugSkylines } : {},
     ...printInitialRepeatBar ? { printInitialRepeatBar } : {},
+    ...chordChanges ? { chordChanges } : {},
     ...instrumentName ? { instrumentName } : {},
     ...barNumberSelfAlignmentX ? { barNumberSelfAlignmentX } : {},
     ...barNumberDirection ? { barNumberDirection } : {},
@@ -77956,6 +79939,7 @@ function buildScoreSystemPlan(input) {
     pageBreaking,
     firstSystemContentInset,
     firstIndent,
+    staffLabelGutterSs,
     globalStaffSize: globalStaffSizeOpt,
     raggedRight,
     partialDuration,
@@ -77982,9 +79966,11 @@ function buildScoreSystemPlan(input) {
   let contentWidth = Number.isFinite(contentWidthOverride) && (contentWidthOverride ?? 0) > 0 ? Number(contentWidthOverride) : paperScoreEngravingWidth(rawContentWidth);
   let lineBreakContentWidth = Number.isFinite(lineBreakContentWidthOverride) && (lineBreakContentWidthOverride ?? 0) > 0 ? Number(lineBreakContentWidthOverride) : contentWidth;
   const resolvedFirstSystemContentInset = firstSystemContentInset ?? paperFirstSystemContentInset(activeTune.pageBreaking);
+  const baseFirstIndent = firstIndent ?? activeTune.firstIndent ?? paperDefaultFirstIndentSs();
+  const resolvedFirstIndent = foldStaffLabelGutterIntoIndentSs(baseFirstIndent, staffLabelGutterSs ?? 0) ?? baseFirstIndent;
   const pageContentHeight = physicalPageContentHeight / staffSizeScale;
   const effectivePartial = score2 ? activeTune.partialDuration : partialDuration ?? activeTune.partialDuration;
-  const groupedMeasures = groupMeasures(activeNotes, activeTune.timeSig, effectivePartial, engravingEvents2);
+  const groupedMeasures = groupMeasures(activeNotes, activeTune.timeSig, effectivePartial, engravingEvents2, activeTune.systemBreaks);
   const allMeasures = addInlineClefLayoutReserves(groupedMeasures, inlineClefChanges);
   const allMeasureTimeSigs = timeSigByMeasure(allMeasures, activeTune.timeSig, engravingEvents2);
   const allMeasureTimeSigStyles = timeSigStyleByMeasure(allMeasures, "default", engravingEvents2);
@@ -78028,16 +80014,16 @@ function buildScoreSystemPlan(input) {
       return effectivePartial;
     return barLengthQN(measureTimeSigs[localMi] ?? activeTune.timeSig);
   });
-  const lineBreakOptions = {
-    printInitialRepeatBar: activeTune.printInitialRepeatBar,
+  const lineBreakOptions = buildLineBreakOptions({
+    tune: activeTune,
     singleRow,
-    barNumberBase: mrStart + 1 - (effectivePartial != null ? 1 : 0),
     measureExpectedDurations,
     measureClefs,
-    baseShortestDurationQN: activeTune.baseShortestDurationQN,
-    ...perSystemPenalty != null ? { perSystemPenalty } : {}
-  };
-  const buildSystems = (traceOut) => computeLineBreaks(measures, activeTune.key, measureRange ? undefined : activeTune.systemBreaks, measureRange ? undefined : activeTune.repeatRegions, measureRange ? undefined : activeTune.voltaRegions, firstIndent ?? activeTune.firstIndent, measureBarlines, measureKeySigs, lineBreakContentWidth, resolvedFirstSystemContentInset, traceOut, lineBreakOptions);
+    perSystemPenalty,
+    barNumberBase: mrStart + 1 - (effectivePartial != null ? 1 : 0),
+    raggedRightOverride: raggedRight
+  });
+  const buildSystems = (traceOut) => computeLineBreaks(measures, activeTune.key, measureRange ? undefined : activeTune.systemBreaks, measureRange ? undefined : activeTune.repeatRegions, measureRange ? undefined : activeTune.voltaRegions, resolvedFirstIndent, measureBarlines, measureKeySigs, lineBreakContentWidth, resolvedFirstSystemContentInset, traceOut, lineBreakOptions);
   let systems;
   let lineBreakDemerits;
   if (precomputedSystems) {
@@ -78058,7 +80044,11 @@ function buildScoreSystemPlan(input) {
     systems = buildSystems(demeritTrace);
     lineBreakDemerits = demeritTrace.totalDemerits;
   }
-  const effectiveRaggedRight = raggedRight ?? activeTune.raggedRight ?? (singleRow ? false : systems.length === 1 ? true : false);
+  const effectiveRaggedRight = resolveEffectiveRaggedRight({
+    explicit: explicitRaggedRight({ tune: activeTune, raggedRightOverride: raggedRight }),
+    singleRow,
+    systemCount: systems.length
+  });
   const staffMeasuresByRow = precomputedSystems ? systems.map((system) => system.measures.map((_, mi) => measures[system.measureOffset + mi] ?? [])) : systems.map(() => {
     return;
   });
@@ -78149,6 +80139,7 @@ function buildScoreSystemPlan(input) {
     activeFont,
     contentWidth,
     firstSystemContentInset: resolvedFirstSystemContentInset,
+    firstIndent: resolvedFirstIndent,
     pageContentHeight,
     physicalContentWidth,
     physicalPageContentHeight,
@@ -78209,7 +80200,7 @@ function baselineGapPx(prevKind, nextKind, prevDescent, nextAscent, staffSizeSca
   if (staffSizeScale != null && staffSizeScale !== 1 && prevKind === "title" && nextKind === "subtitle") {
     return LINE_SPACING * 0.5;
   }
-  if ((staffSizeScale == null || staffSizeScale === 1) && (prevKind === "title" && nextKind === "subtitle" || prevKind === "title" && nextIsMeterBand || prevKind === "subtitle" && nextKind === "subsubtitle" || prevKind === "subtitle" && nextIsComposerBand || prevKind === "subsubtitle" && nextIsComposerBand)) {
+  if ((staffSizeScale == null || staffSizeScale === 1) && (prevKind === "dedication" || prevKind === "title" && nextKind === "subtitle" || prevKind === "title" && nextIsMeterBand || prevKind === "subtitle" && nextKind === "subsubtitle" || prevKind === "subtitle" && nextIsComposerBand || prevKind === "subsubtitle" && nextIsComposerBand)) {
     const staffSpace = scoreReferenceBaseline ? CANONICAL_STAFF_SPACE_PX : LINE_SPACING;
     return Math.max(0, staffSpace * 3.5 - prevDescent - nextAscent);
   }
@@ -78218,6 +80209,27 @@ function baselineGapPx(prevKind, nextKind, prevDescent, nextAscent, staffSizeSca
   if (prevIsComposerBand && nextKind === "pieceOpus")
     return LINE_SPACING * 0.25;
   return LINE_SPACING * 0.7;
+}
+function headerRunTspans(cell) {
+  const nodes = [];
+  let appliedRaisePx = 0;
+  cell.runs.forEach((run, index) => {
+    const raisePx = (run.raiseStaffSpaces ?? 0) * LINE_SPACING;
+    const dy = appliedRaisePx - raisePx;
+    appliedRaisePx = raisePx;
+    nodes.push(el("tspan", {
+      ...dy !== 0 ? { dy } : {},
+      ...run.fontSizeScale != null ? { fontSize: cell.fontSize * run.fontSizeScale } : {},
+      ...run.bold ? { fontWeight: "bold" } : {},
+      ...run.italic ? { fontStyle: "italic" } : {},
+      ...run.smallCaps ? { fontVariant: "small-caps" } : {},
+      ...run.color ? { style: { fill: run.color } } : {}
+    }, run.smallCaps ? run.text.toUpperCase() : run.text, `run-${index}`));
+  });
+  if (appliedRaisePx !== 0) {
+    nodes.push(el("tspan", { dy: appliedRaisePx }, "", "run-baseline-reset"));
+  }
+  return nodes;
 }
 function xForAlign(contentWidth, align, rightContentWidth = contentWidth) {
   if (align === "left")
@@ -78228,6 +80240,16 @@ function xForAlign(contentWidth, align, rightContentWidth = contentWidth) {
 }
 function computeHeaderRows(opts) {
   const rows = [];
+  if (opts.dedication) {
+    rows.push({
+      kind: "dedication",
+      cells: [{
+        text: opts.dedication,
+        align: "center",
+        fontSize: HEADER_COMPOSER_FONT_SIZE
+      }]
+    });
+  }
   if (opts.title) {
     rows.push({
       kind: "title",
@@ -78235,7 +80257,8 @@ function computeHeaderRows(opts) {
         text: opts.title,
         align: "center",
         fontSize: HEADER_TITLE_FONT_SIZE,
-        fontWeight: "bold"
+        fontWeight: "bold",
+        ...opts.titleRuns?.length ? { runs: opts.titleRuns } : {}
       }]
     });
   }
@@ -78246,7 +80269,8 @@ function computeHeaderRows(opts) {
         text: opts.subtitle,
         align: "center",
         fontSize: HEADER_SUBTITLE_FONT_SIZE,
-        fontWeight: "bold"
+        fontWeight: "bold",
+        ...opts.subtitleRuns?.length ? { runs: opts.subtitleRuns } : {}
       }]
     });
   }
@@ -78356,7 +80380,7 @@ function computeHeaderLayout(opts) {
         textAnchor: cell.align === "center" ? "middle" : cell.align === "right" ? "end" : "start",
         ...cell.fontWeight ? { fontWeight: cell.fontWeight } : {},
         ...cell.fontStyle ? { fontStyle: cell.fontStyle } : {}
-      }, cell.text, cell.key ?? `${row.kind}-${cellIdx}`));
+      }, cell.runs?.length ? headerRunTspans(cell) : cell.text, cell.key ?? `${row.kind}-${cellIdx}`));
     });
   });
   const baselineToScoreGap = opts.staffSizeScale != null && opts.staffSizeScale !== 1 ? LINE_SPACING * (2.07 * opts.staffSizeScale - 1.6) : LINE_SPACING * 0.35 + scoreReferenceGapCompensation;
@@ -79542,8 +81566,8 @@ function assembleScoreSvgDocument(input) {
   } = input;
   const glyphSizes = musicGlyphFontSizes(activeFont);
   const optical = opticalWeightFactor(staffSizeScale);
-  const staffLineW = (CANONICAL_STAFF_SPACE_PX * 0.1 * optical).toFixed(4);
-  const stemW = (fontInfo.engravingPx("stemThickness", 0.12) * optical).toFixed(2);
+  const staffLineW = (STAFF_LINE_THICKNESS * optical).toFixed(4);
+  const stemW = (LINE_SPACING * 0.13 * optical).toFixed(2);
   const legerLineW = (fontInfo.engravingPx("legerLineThickness", 0.16) * optical).toFixed(2);
   const bracketW = (fontInfo.engravingPx("tupletBracketThickness", BRACKET_W / LINE_SPACING) * optical).toFixed(2);
   const hoverTargets = [
@@ -79607,98 +81631,6 @@ function assembleScoreSvgDocument(input) {
     graphicalObjects,
     signature
   };
-}
-
-// src/music-rendering/renderer/score/staffLabels.ts
-var STAFF_LABEL_FONT_SIZE = LINE_SPACING * 1.65;
-var STAFF_LABEL_GAP = LINE_SPACING;
-function hasStaffLabel(label) {
-  return Boolean(label?.instrumentName || label?.shortInstrumentName);
-}
-function labelForSystem(label, systemIndex) {
-  if (!label)
-    return;
-  return systemIndex === 0 ? label.instrumentName : label.shortInstrumentName;
-}
-function resolveStaffLabels(staffLabels, tuneInstrumentName) {
-  return staffLabels ?? (tuneInstrumentName ? [{ instrumentName: tuneInstrumentName }] : undefined);
-}
-function resolveStaffLabelLayout(staffLabels, tuneInstrumentName, firstIndent) {
-  const labels = resolveStaffLabels(staffLabels, tuneInstrumentName);
-  const gutter = staffLabelGutterWidth(labels);
-  return {
-    labels,
-    gutter,
-    effectiveFirstIndent: gutter > 0 ? Math.max(firstIndent ?? 0, gutter / LINE_SPACING) : firstIndent
-  };
-}
-function staffLabelGutterPx(effectiveFirstIndent, gutter) {
-  return effectiveFirstIndent != null ? effectiveFirstIndent * LINE_SPACING : gutter;
-}
-function staffLabelGutterWidth(labels, groupLabels) {
-  const names = [...labels ?? [], ...groupLabels ?? []].flatMap((label) => [label.instrumentName, label.shortInstrumentName]).filter((name) => Boolean(name));
-  if (!names.length)
-    return 0;
-  const maxChars = Math.max(...names.map((name) => name.length));
-  return Math.ceil(Math.max(LINE_SPACING * 4, maxChars * STAFF_LABEL_FONT_SIZE * 0.58 + STAFF_LABEL_GAP));
-}
-function renderStaffSystemLabels(input) {
-  const { labels, staffSystemYOffsets, gutterWidth, staffStackYOffsets, fontFamily = ROMAN_TEXT_STACK, groupLabels } = input;
-  const hasGroupLabels = (groupLabels ?? []).some(hasStaffLabel);
-  if (gutterWidth <= 0 || !(labels ?? []).some(hasStaffLabel) && !hasGroupLabels)
-    return [];
-  const systemCount = Math.max(0, ...staffSystemYOffsets.map((offsets) => offsets?.length ?? 0));
-  const elements = [];
-  for (let systemIndex = 0;systemIndex < systemCount; systemIndex++) {
-    for (let groupIndex = 0;groupIndex < (groupLabels?.length ?? 0); groupIndex++) {
-      const group = groupLabels[groupIndex];
-      const text = labelForSystem(group, systemIndex);
-      if (!text)
-        continue;
-      const firstStaff = group.start;
-      const lastStaff = group.end - 1;
-      const topOffset = staffSystemYOffsets[firstStaff]?.[systemIndex];
-      const bottomOffset = staffSystemYOffsets[lastStaff]?.[systemIndex];
-      if (topOffset == null || bottomOffset == null)
-        continue;
-      const topY = (staffStackYOffsets?.[firstStaff] ?? 0) + topOffset + STAFF_TOP;
-      const bottomY = (staffStackYOffsets?.[lastStaff] ?? 0) + bottomOffset + BOTTOM_LINE_Y;
-      elements.push(el("text", {
-        x: gutterWidth - STAFF_LABEL_GAP,
-        y: (topY + bottomY) / 2,
-        fontSize: STAFF_LABEL_FONT_SIZE,
-        fontFamily,
-        textAnchor: "end",
-        dominantBaseline: "central",
-        "data-lily-element": "staff-label",
-        "data-lily-group-index": groupIndex,
-        "data-lily-system-index": systemIndex,
-        "data-lily-label-kind": systemIndex === 0 ? "instrumentName" : "shortInstrumentName"
-      }, text, `staff-group-label-${groupIndex}-${systemIndex}`));
-    }
-    for (let staffIndex = 0;staffIndex < (labels?.length ?? 0); staffIndex++) {
-      const text = labelForSystem(labels?.[staffIndex], systemIndex);
-      if (!text)
-        continue;
-      const systemYOffset = staffSystemYOffsets[staffIndex]?.[systemIndex];
-      if (systemYOffset == null)
-        continue;
-      const stackYOffset = staffStackYOffsets?.[staffIndex] ?? 0;
-      elements.push(el("text", {
-        x: gutterWidth - STAFF_LABEL_GAP,
-        y: stackYOffset + systemYOffset + STAFF_TOP + LINE_SPACING * 2,
-        fontSize: STAFF_LABEL_FONT_SIZE,
-        fontFamily,
-        textAnchor: "end",
-        dominantBaseline: "central",
-        "data-lily-element": "staff-label",
-        "data-lily-staff-index": staffIndex,
-        "data-lily-system-index": systemIndex,
-        "data-lily-label-kind": systemIndex === 0 ? "instrumentName" : "shortInstrumentName"
-      }, text, `staff-label-${staffIndex}-${systemIndex}`));
-    }
-  }
-  return elements;
 }
 
 // src/music-rendering/layout/paginateSystems.ts
@@ -79808,9 +81740,10 @@ function paginateSystems(input) {
     breakCursor += h;
   }
   const pageCount = page + 1;
-  if (input.fillPages && pageCount > 1) {
+  if (input.fillPages && (pageCount > 1 || input.fillLastPage)) {
     const maxStretchPerGap = input.maxStretchPerGap ?? Number.POSITIVE_INFINITY;
-    for (let p = 0;p < pageCount - 1; p++) {
+    const fillUpTo = input.fillLastPage ? pageCount : pageCount - 1;
+    for (let p = 0;p < fillUpTo; p++) {
       const idxs = [];
       for (let i = 0;i < systemHeights.length; i++)
         if (pageOfSystem[i] === p)
@@ -79890,6 +81823,7 @@ function renderScoreToSvgModel(options) {
     layout = DEFAULT_SVG_LAYOUT_MODE,
     paperFont,
     raggedLast,
+    raggedLastBottom,
     raggedRight,
     firstIndent,
     globalStaffSize,
@@ -79918,7 +81852,7 @@ function renderScoreToSvgModel(options) {
     showMeasureWarnings,
     compactVertical = false
   } = options;
-  const { labels: resolvedStaffLabels, gutter: staffLabelGutter, effectiveFirstIndent } = resolveStaffLabelLayout(staffLabels, tune?.instrumentName, firstIndent);
+  const { labels: resolvedStaffLabels, gutter: staffLabelGutter } = resolveStaffLabelLayout(staffLabels, tune?.instrumentName, firstIndent);
   const buildPlan = (perSystemPenalty) => buildScoreSystemPlan({
     tune,
     score: score2,
@@ -79931,7 +81865,8 @@ function renderScoreToSvgModel(options) {
     lineBreakContentWidthOverride,
     pageBreaking,
     firstSystemContentInset,
-    firstIndent: effectiveFirstIndent,
+    firstIndent,
+    staffLabelGutterSs: staffLabelGutter / LINE_SPACING,
     globalStaffSize,
     raggedRight,
     partialDuration,
@@ -79985,7 +81920,7 @@ function renderScoreToSvgModel(options) {
         const stretchPerGap = Math.max(0, budget - contentH) / gaps;
         pageBadness += (stretchPerGap / Math.max(1, maxStretch)) ** 2;
       }
-      const PAGE_DEMERIT_WEIGHT = 6;
+      const PAGE_DEMERIT_WEIGHT = debugFlag("LILYJS_BREAKER_CHAIN") ? 1 : 6;
       return (plan.lineBreakDemerits ?? 0) + PAGE_DEMERIT_WEIGHT * pageBadness;
     };
     const baseScore = scoreCandidate(systemPlan);
@@ -80018,6 +81953,7 @@ function renderScoreToSvgModel(options) {
     activeFont,
     contentWidth,
     firstSystemContentInset: resolvedFirstSystemContentInset,
+    firstIndent: resolvedFirstIndent,
     pageContentHeight,
     globalStaffSize: effectiveGlobalStaffSize,
     staffSizeScale,
@@ -80083,9 +82019,10 @@ function renderScoreToSvgModel(options) {
     pageHeightBudget,
     firstPageReservedHeight: pageZeroReservedHeight,
     fillPages: true,
-    maxStretchPerGap: systemGap + systemH * 0.6,
+    maxStretchPerGap: (raggedLastBottom ?? activeTune.raggedLastBottom) === false ? Number.POSITIVE_INFINITY : systemGap + systemH * 0.6,
     naturalSystemAdvances,
-    stretchLastPageToNatural: true,
+    stretchLastPageToNatural: (raggedLastBottom ?? activeTune.raggedLastBottom) !== false,
+    fillLastPage: (raggedLastBottom ?? activeTune.raggedLastBottom) === false,
     ...pageForceDp ? { forceDp: pageForceDp } : {}
   }) : undefined;
   const isPaginated = pagePlan != null && pagePlan.pageCount > 1;
@@ -80116,6 +82053,8 @@ function renderScoreToSvgModel(options) {
       beatUnitDots: tm.beatUnitDots
     });
   }
+  const scoreSpacingReferenceDur = systemSpacingReferenceDur(systems.flatMap((system) => system.measures));
+  const visibleChordSymbols = visibleChordNames(chordSymbols ?? [], systems.map((system) => measureQNOffsets[mrStart + system.measureOffset] ?? 0), activeTune.chordChanges);
   const debugBeatEls = [];
   const renderedSystemYOffsets = [];
   systems.forEach((system, ri) => {
@@ -80160,13 +82099,14 @@ function renderScoreToSvgModel(options) {
       measureTimeSigs,
       measureTimeSigStyles,
       measureKeySigs,
+      spacingReferenceDur: scoreSpacingReferenceDur,
       isLast: ri === systems.length - 1,
       raggedLast: raggedLast ?? activeTune.raggedLast,
       raggedRight: effectiveRaggedRight,
-      firstIndent: effectiveFirstIndent ?? activeTune.firstIndent,
+      firstIndent: resolvedFirstIndent,
       firstSystemContentInset: resolvedFirstSystemContentInset,
       fontFamily: activeFont,
-      chordSymbols,
+      chordSymbols: visibleChordSymbols,
       percentRepeatSpans,
       chordOffset,
       ottavaRegions: activeTune.ottavaRegions,
@@ -80189,7 +82129,8 @@ function renderScoreToSvgModel(options) {
       collectBeatX,
       collectMeasureBounds: onSystemMeasureBounds ? (bounds, yo) => onSystemMeasureBounds(ri, bounds, yo, system.measureOffset) : undefined,
       debugAboveStaffSkyline: effectiveDebugAboveStaffSkyline,
-      musicGlyphMode
+      musicGlyphMode,
+      globalStaffSize: effectiveGlobalStaffSize
     });
     const externalPageTag = systemPageTags?.[ri];
     if (isPaginated) {
@@ -80223,7 +82164,8 @@ function renderScoreToSvgModel(options) {
   const labelEls = staffLabelGutter > 0 ? renderStaffSystemLabels({
     labels: resolvedStaffLabels,
     staffSystemYOffsets: [renderedSystemYOffsets],
-    gutterWidth: staffLabelGutterPx(effectiveFirstIndent, staffLabelGutter),
+    gutterWidth: staffLabelGutterPx(resolvedFirstIndent, staffLabelGutter),
+    firstIndentPx: (resolvedFirstIndent ?? 0) * LINE_SPACING,
     fontFamily: textFont
   }) : [];
   const labeledEls = [...labelEls, ...allEls];
@@ -80343,12 +82285,23 @@ function buildStaffGroupLayoutMeasure(staffMeasuresAtIndex, keySet) {
   for (const measure2 of staffMeasuresAtIndex) {
     const accCols = accidentalColsForMeasure(measure2, keySet);
     const graceSpaceBefore = graceSpaceBeforeForMeasure(measure2);
+    let primaryLenQN = 0;
+    for (const note of measure2) {
+      if (note.isGrace || note.duration <= 0 || note.voiceDuration != null)
+        continue;
+      primaryLenQN += note.duration;
+    }
     let beat = 0;
     for (let ni = 0;ni < measure2.length; ni++) {
       const note = measure2[ni];
       if (note.isGrace || note.duration <= 0) {
         if (!note.isGrace && (note.voiceDuration ?? 0) > 0) {
-          maxAccColsAtBeat.set(beat, Math.max(maxAccColsAtBeat.get(beat) ?? 0, accCols[ni] ?? 0));
+          const raw = note.voiceOffsetQN ?? beat;
+          const onset = primaryLenQN > 0 ? (raw % primaryLenQN + primaryLenQN) % primaryLenQN : raw;
+          const bucket2 = startMap.get(onset) ?? [];
+          bucket2.push(note);
+          startMap.set(onset, bucket2);
+          maxAccColsAtBeat.set(onset, Math.max(maxAccColsAtBeat.get(onset) ?? 0, accCols[ni] ?? 0));
         }
         continue;
       }
@@ -80621,7 +82574,7 @@ function computeContextTreeSystems(input) {
 // src/music-rendering/renderer/piano/staffGroupRepeatSpanners.ts
 var STAFF_SPACES_PER_EM = 4;
 var PIANO_REPEAT_DOT_GAP = LINE_SPACING * 0.6;
-var PIANO_REPEAT_DOT_R = LINE_SPACING * 0.2;
+var PIANO_REPEAT_DOT_R = DOT_R;
 function extractFullStaffBarRects(d) {
   const rects = [];
   const patterns = [
@@ -80943,6 +82896,112 @@ function renderSpanBarGapSegments(input) {
   }
   return elements;
 }
+function braceStaffRangeFromContextTree(contextTree, staffCount) {
+  const groups = contextTree?.nestedGroups ?? [];
+  if (groups.length !== 1)
+    return;
+  const group = groups[0];
+  const braced = group.groupType === "PianoStaff" || group.groupType === "GrandStaff";
+  if (!braced)
+    return;
+  if (group.end - group.start < 2)
+    return;
+  if (group.start === 0 && group.end >= staffCount)
+    return;
+  return { start: group.start, end: group.end };
+}
+function drawsSystemStartBrace(contextTree) {
+  if (!contextTree)
+    return true;
+  if (contextTree.nestedGroups?.length)
+    return true;
+  return contextTree.groupType !== "ImplicitStaffGroup" && contextTree.groupType !== "StaffGroup";
+}
+function drawsSystemStartBracket(contextTree) {
+  return contextTree?.groupType === "StaffGroup";
+}
+var BRACKET_THICKNESS_SS = 0.45;
+var BRACKET_X_INSET_SS = 0.8;
+function renderStaffGroupBracket(input) {
+  const { topY, bottomY, leftX, fontFamily, musicGlyphMode = "font", systemIndex } = input;
+  const thickness = BRACKET_THICKNESS_SS * LINE_SPACING;
+  const overlap = 0.1 * thickness;
+  const barLeft = leftX - BRACKET_X_INSET_SS * LINE_SPACING;
+  const fontSize = musicGlyphFontSizes(fontFamily).music;
+  const tipProps = (y, key) => ({
+    x: barLeft,
+    y,
+    fontSize,
+    className: "mn",
+    "data-lily-element": "bracket-tip",
+    "data-lily-grob-type": "SystemStartBracket",
+    "data-lily-grob-parent-id": `grob:SystemStartBracket:${systemIndex}`,
+    key
+  });
+  return [
+    el("rect", {
+      x: barLeft,
+      y: topY - overlap,
+      width: thickness,
+      height: bottomY - topY + overlap * 2,
+      fill: "currentColor",
+      "data-lily-element": "bracket-bar",
+      "data-lily-grob-type": "SystemStartBracket",
+      "data-lily-grob-parent-id": `grob:SystemStartBracket:${systemIndex}`
+    }, undefined, `bracket-bar-${systemIndex}`),
+    renderMusicGlyph({
+      glyph: BRACKET_TOP,
+      glyphName: "bracketTop",
+      mode: musicGlyphMode,
+      fontFamily,
+      props: tipProps(topY - overlap, `bracket-top-${systemIndex}`),
+      key: `bracket-top-${systemIndex}`
+    }),
+    renderMusicGlyph({
+      glyph: BRACKET_BOTTOM,
+      glyphName: "bracketBottom",
+      mode: musicGlyphMode,
+      fontFamily,
+      props: tipProps(bottomY + overlap, `bracket-bottom-${systemIndex}`),
+      key: `bracket-bottom-${systemIndex}`
+    })
+  ];
+}
+function systemStartDelimiterLeftXs(input) {
+  const {
+    yOffsets,
+    systemCount,
+    systemBeatXs,
+    lastStaffSystemYOffsets,
+    fontInfo,
+    braceStaffRange,
+    staffSystemYOffsets,
+    firstIndentPx = 0,
+    drawBrace = true
+  } = input;
+  const barlineHalf = fontInfo.engravingPx("thinBarlineThickness", 0.16) / 2;
+  const out = [];
+  for (let systemIndex = 0;systemIndex < systemCount; systemIndex++) {
+    const leftX = systemIndex === 0 ? firstIndentPx : 0;
+    const bracketLeft = input.drawBracket ? leftX - BRACKET_X_INSET_SS * LINE_SPACING : Number.POSITIVE_INFINITY;
+    if (!drawBrace) {
+      out.push(Math.min(leftX - barlineHalf, bracketLeft));
+      continue;
+    }
+    const brace = computePianoBraceGeometry({
+      yOffsets,
+      systemBeatXs,
+      lastStaffSystemYOffsets,
+      fontInfo,
+      systemIndex,
+      ...braceStaffRange ? { staffRange: braceStaffRange } : {},
+      staffSystemYOffsets,
+      leftX: Number.isFinite(bracketLeft) ? bracketLeft : leftX
+    });
+    out.push(Math.min(brace.braceX, leftX - barlineHalf, bracketLeft));
+  }
+  return out;
+}
 function renderPianoGrandStaffFrame(input) {
   const {
     yOffsets,
@@ -80958,7 +83017,9 @@ function renderPianoGrandStaffFrame(input) {
     braceStaffRange,
     staffSystemYOffsets,
     firstIndentPx = 0,
-    drawBrace = true
+    drawBrace = true,
+    drawBracket = false,
+    musicGlyphMode
   } = input;
   const barlineStrokeWidth = fontInfo.engravingPx("thinBarlineThickness", 0.16);
   const frameElements = [];
@@ -80984,6 +83045,7 @@ function renderPianoGrandStaffFrame(input) {
       systemIndex,
       leftX: systemLeftX
     });
+    const braceLeftX = drawBracket ? systemLeftX - BRACKET_X_INSET_SS * LINE_SPACING : systemLeftX;
     const brace = braceStaffRange ? computePianoBraceGeometry({
       yOffsets,
       systemBeatXs,
@@ -80992,8 +83054,18 @@ function renderPianoGrandStaffFrame(input) {
       systemIndex,
       staffRange: braceStaffRange,
       staffSystemYOffsets,
-      leftX: systemLeftX
-    }) : full;
+      leftX: braceLeftX
+    }) : { ...full, braceX: full.braceX - (braceLeftX - systemLeftX === 0 ? 0 : BRACKET_X_INSET_SS * LINE_SPACING) };
+    if (drawBracket) {
+      frameElements.push(...renderStaffGroupBracket({
+        topY: full.braceTopY,
+        bottomY: full.braceBottomY,
+        leftX: systemLeftX,
+        fontFamily,
+        musicGlyphMode,
+        systemIndex
+      }));
+    }
     frameElements.push(el("line", {
       x1: full.barlineX,
       y1: full.braceTopY,
@@ -81310,7 +83382,30 @@ function belowStaffLyricOverflow(doc) {
   }
   return overflow;
 }
-function computeStaffGroupStack(staffDocs) {
+function solvedStaffGroupStack(input) {
+  const { staffDocs, staffSystemYOffsets, extraGapBelow } = input;
+  const yOffsets = [];
+  let totalHeight = 0;
+  let previousStaff;
+  for (let i = 0;i < staffDocs.length; i++) {
+    const doc = staffDocs[i];
+    const firstOffset = staffSystemYOffsets[i]?.[0];
+    const top = firstOffset != null ? firstOffset + STAFF_TOP : undefined;
+    const yOffset = previousStaff && top != null ? previousStaff.yOffset + previousStaff.bottom + previousStaff.gapBelow - top : totalHeight;
+    yOffsets.push(yOffset);
+    totalHeight = Math.max(totalHeight, yOffset + doc.height);
+    const gapBelow = Math.max(INTER_STAFF_GAP, belowStaffLyricOverflow(doc) + LYRIC_UNRELATED_STAFF_PADDING) + (extraGapBelow?.[i] ?? 0);
+    if (firstOffset != null) {
+      previousStaff = { yOffset, bottom: firstOffset + BOTTOM_LINE_Y, gapBelow };
+    } else {
+      previousStaff = { yOffset, bottom: BOTTOM_LINE_Y, gapBelow };
+      if (i < staffDocs.length - 1)
+        totalHeight = yOffset + BOTTOM_LINE_Y + gapBelow;
+    }
+  }
+  return { yOffsets, totalHeight };
+}
+function computeStaffGroupStack(staffDocs, extraGapBelow) {
   const yOffsets = [];
   let totalHeight = 0;
   let previousStaff;
@@ -81320,7 +83415,7 @@ function computeStaffGroupStack(staffDocs) {
     const yOffset = previousStaff && extents ? previousStaff.yOffset + previousStaff.bottom + previousStaff.gapBelow - extents.top : totalHeight;
     yOffsets.push(yOffset);
     totalHeight = Math.max(totalHeight, yOffset + doc.height);
-    const gapBelow = Math.max(INTER_STAFF_GAP, belowStaffLyricOverflow(doc) + LYRIC_UNRELATED_STAFF_PADDING);
+    const gapBelow = Math.max(INTER_STAFF_GAP, belowStaffLyricOverflow(doc) + LYRIC_UNRELATED_STAFF_PADDING) + (extraGapBelow?.[i] ?? 0);
     if (extents) {
       previousStaff = { yOffset, bottom: extents.bottom, height: doc.height, gapBelow };
     } else {
@@ -81700,6 +83795,9 @@ function paginateStaffGroup(input) {
     fontFamily,
     musicGlyphMode,
     firstSystemContentInset,
+    firstIndentPx,
+    braceStaffRange,
+    drawBracket = false,
     debugBeatLines,
     deferGlobalStaffSizeScale,
     staffSizeScale,
@@ -81827,7 +83925,12 @@ function paginateStaffGroup(input) {
     fontFamily,
     firstSystemContentInset,
     debugBeatLines,
-    drawBrace
+    drawBrace,
+    firstIndentPx,
+    braceStaffRange,
+    staffSystemYOffsets: pagePass.staffSystemYOffsets,
+    drawBracket,
+    musicGlyphMode
   });
   const systemIndexOfNode = (node) => {
     if (!("props" in node) || !node.props)
@@ -81899,6 +84002,463 @@ function paginateStaffGroup(input) {
   };
 }
 
+// src/music-rendering/renderer/systemLayout/staffInkSkylines.ts
+var STAFF_STAFF_PADDING_PX = LINE_SPACING;
+var INK_ELEMENTS = new Set([
+  "notehead",
+  "chord-notehead",
+  "stem",
+  "aux-stem",
+  "beam",
+  "grace-beam",
+  "flag",
+  "aux-flag",
+  "dot",
+  "ledger-line",
+  "rest",
+  "slur",
+  "phrasing-slur",
+  "tie",
+  "hairpin",
+  "dynamic",
+  "note-text",
+  "articulation",
+  "lyric-text",
+  "ottava",
+  "tuplet-bracket",
+  "fingering",
+  "grace-notehead"
+]);
+function numberProp3(value) {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(n) ? n : undefined;
+}
+function composeFrame(parent, transform2) {
+  let frame = { ...parent };
+  if (typeof transform2 !== "string")
+    return frame;
+  for (const m of transform2.matchAll(/(translate|scale)\(\s*([-+]?[\d.]+(?:e-?\d+)?)(?:[\s,]+([-+]?[\d.]+(?:e-?\d+)?))?\s*\)/g)) {
+    const a = Number(m[2]) || 0;
+    const b = m[3] != null && m[3] !== "" ? Number(m[3]) || 0 : undefined;
+    if (m[1] === "translate") {
+      frame = {
+        ...frame,
+        ox: frame.ox + frame.sx * a,
+        oy: frame.oy + frame.sy * (b ?? 0)
+      };
+    } else {
+      frame = { ...frame, sx: frame.sx * a, sy: frame.sy * (b ?? a) };
+    }
+  }
+  return frame;
+}
+function coordPairs(raw, isPathD) {
+  if (typeof raw !== "string")
+    return [];
+  const out = [];
+  if (!isPathD) {
+    for (const pair of raw.trim().split(/\s+/)) {
+      const [xs, ys] = pair.split(",");
+      const x2 = Number(xs);
+      const y2 = Number(ys);
+      if (Number.isFinite(x2) && Number.isFinite(y2))
+        out.push({ x: x2, y: y2 });
+    }
+    return out;
+  }
+  const tokens = raw.match(/[a-zA-Z]|-?[\d.]+(?:e-?\d+)?/g);
+  if (!tokens)
+    return [];
+  let x = 0;
+  let y = 0;
+  let i = 0;
+  let command = "";
+  const next = () => Number(tokens[i++]);
+  const mark = (px, py) => {
+    if (Number.isFinite(px) && Number.isFinite(py))
+      out.push({ x: px, y: py });
+  };
+  while (i < tokens.length) {
+    if (/[a-zA-Z]/.test(tokens[i]))
+      command = tokens[i++];
+    switch (command) {
+      case "M":
+      case "L": {
+        x = next();
+        y = next();
+        mark(x, y);
+        break;
+      }
+      case "m":
+      case "l": {
+        x += next();
+        y += next();
+        mark(x, y);
+        break;
+      }
+      case "H": {
+        x = next();
+        mark(x, y);
+        break;
+      }
+      case "h": {
+        x += next();
+        mark(x, y);
+        break;
+      }
+      case "V": {
+        y = next();
+        mark(x, y);
+        break;
+      }
+      case "v": {
+        y += next();
+        mark(x, y);
+        break;
+      }
+      case "C": {
+        mark(next(), next());
+        mark(next(), next());
+        x = next();
+        y = next();
+        mark(x, y);
+        break;
+      }
+      case "c": {
+        mark(x + next(), y + next());
+        mark(x + next(), y + next());
+        x += next();
+        y += next();
+        mark(x, y);
+        break;
+      }
+      case "S":
+      case "Q": {
+        mark(next(), next());
+        x = next();
+        y = next();
+        mark(x, y);
+        break;
+      }
+      case "s":
+      case "q": {
+        mark(x + next(), y + next());
+        x += next();
+        y += next();
+        mark(x, y);
+        break;
+      }
+      case "T": {
+        x = next();
+        y = next();
+        mark(x, y);
+        break;
+      }
+      case "t": {
+        x += next();
+        y += next();
+        mark(x, y);
+        break;
+      }
+      case "Z":
+      case "z":
+        break;
+      default:
+        i++;
+    }
+  }
+  return out;
+}
+function translateScaleOf(transform2) {
+  if (typeof transform2 !== "string")
+    return { tx: 0, ty: 0, s: 1 };
+  const t = /translate\(\s*([-+]?[\d.]+(?:e-?\d+)?)(?:[\s,]+([-+]?[\d.]+(?:e-?\d+)?))?/.exec(transform2);
+  const sc = /scale\(\s*([-+]?[\d.]+(?:e-?\d+)?)/.exec(transform2);
+  return {
+    tx: Number(t?.[1] ?? 0) || 0,
+    ty: Number(t?.[2] ?? 0) || 0,
+    s: Math.abs(Number(sc?.[1] ?? 1)) || 1
+  };
+}
+function glyphMetadataBox(glyphName, x, y, fontSize, anchor) {
+  if (!SmuflFontRegistry.has("Bravura"))
+    return;
+  const bbox = SmuflFontRegistry.get("Bravura").metadata.glyphs[glyphName]?.bbox;
+  if (!bbox)
+    return;
+  const ssPx = fontSize / 4;
+  const w = (bbox.bBoxNE[0] - bbox.bBoxSW[0]) * ssPx;
+  const shift = anchor === "middle" ? -w / 2 - bbox.bBoxSW[0] * ssPx : anchor === "end" ? -w : 0;
+  return {
+    xMin: x + shift + bbox.bBoxSW[0] * ssPx,
+    xMax: x + shift + bbox.bBoxNE[0] * ssPx,
+    yMin: y - bbox.bBoxNE[1] * ssPx,
+    yMax: y - bbox.bBoxSW[1] * ssPx
+  };
+}
+function textOf(node) {
+  const own = node.children ?? [];
+  let text = "";
+  for (const child of own) {
+    if (typeof child === "string")
+      text += child;
+  }
+  return text;
+}
+function collectStaffInkBoxes(elements) {
+  const boxes = [];
+  let currentElement = "";
+  const push = (top, bottom, left, right) => {
+    if (Number.isFinite(top) && Number.isFinite(bottom) && bottom >= top && Number.isFinite(left) && Number.isFinite(right) && right >= left) {
+      boxes.push({ el: currentElement, top, bottom, left, right });
+    }
+  };
+  const visit = (node, parentFrame) => {
+    const props = "props" in node ? node.props : undefined;
+    const frame = composeFrame(parentFrame, props?.transform);
+    const px = (vx) => frame.ox + frame.sx * vx;
+    const py = (vy) => frame.oy + frame.sy * vy;
+    const element = typeof props?.["data-lily-element"] === "string" ? props["data-lily-element"] : undefined;
+    if (element && INK_ELEMENTS.has(element)) {
+      currentElement = element;
+      const y = numberProp3(props?.y);
+      const y1 = numberProp3(props?.y1);
+      const y2 = numberProp3(props?.y2);
+      const x = numberProp3(props?.x);
+      const x1 = numberProp3(props?.x1);
+      const x2 = numberProp3(props?.x2);
+      if (node.type === "text" && y != null && x != null) {
+        const fs = numberProp3(props?.fontSize) ?? numberProp3(props?.["font-size"]) ?? LINE_SPACING * 1.5;
+        const anchor = props?.textAnchor ?? props?.["text-anchor"] ?? "start";
+        const glyphName = (typeof props?.["data-smufl-glyph-name"] === "string" ? props["data-smufl-glyph-name"] : undefined) ?? CORE_SMUFL_GLYPH_NAME_BY_CHAR.get(textOf(node));
+        const metadataBox = glyphName ? glyphMetadataBox(glyphName, px(x), py(y), fs, anchor) : undefined;
+        if (metadataBox) {
+          push(metadataBox.yMin, metadataBox.yMax, metadataBox.xMin, metadataBox.xMax);
+        } else if (glyphName) {
+          const box = placedGlyphInkBox({ glyphName, x: px(x), y: py(y), fontSize: fs, textAnchor: anchor });
+          if (box)
+            push(box.yMin, box.yMax, box.xMin, box.xMax);
+        } else {
+          const w = (textOf(node).length || 1) * fs * 0.5;
+          const left = anchor === "end" ? x - w : anchor === "middle" ? x - w / 2 : x;
+          const lyricExtra = element === "lyric-text" ? LINE_SPACING * 0.5 : 0;
+          push(py(y) - fs, py(y) + fs * 0.3 + lyricExtra, px(left), px(left) + w);
+        }
+      } else if (y1 != null && y2 != null && x1 != null && x2 != null) {
+        const ya = py(y1);
+        const yb = py(y2);
+        const xa = px(x1);
+        const xb = px(x2);
+        push(Math.min(ya, yb), Math.max(ya, yb), Math.min(xa, xb), Math.max(xa, xb));
+      } else if (typeof props?.["data-smufl-glyph-name"] === "string" && props?.d != null) {
+        const local = translateScaleOf(props?.transform);
+        const box = placedGlyphInkBox({
+          glyphName: props["data-smufl-glyph-name"],
+          x: parentFrame.ox + parentFrame.sx * local.tx,
+          y: parentFrame.oy + parentFrame.sy * local.ty,
+          fontSize: Math.abs(local.s) * 1000
+        });
+        if (box)
+          push(box.yMin, box.yMax, box.xMin, box.xMax);
+      } else {
+        const pts = (props?.d != null ? coordPairs(props.d, true) : coordPairs(props?.points, false)).map((p) => ({ x: px(p.x), y: py(p.y) }));
+        for (let i = 0;i + 1 < pts.length; i++) {
+          const a = pts[i];
+          const b = pts[i + 1];
+          const dx = Math.abs(b.x - a.x);
+          const steps = Math.max(1, Math.ceil(dx / LINE_SPACING));
+          for (let step = 0;step < steps; step++) {
+            const t0 = step / steps;
+            const t1 = (step + 1) / steps;
+            const xA = a.x + (b.x - a.x) * t0;
+            const xB = a.x + (b.x - a.x) * t1;
+            const yA = a.y + (b.y - a.y) * t0;
+            const yB = a.y + (b.y - a.y) * t1;
+            push(Math.min(yA, yB), Math.max(yA, yB), Math.min(xA, xB), Math.max(xA, xB));
+          }
+        }
+        if (pts.length === 1) {
+          push(pts[0].y, pts[0].y, pts[0].x, pts[0].x);
+        }
+        if (!pts.length && y != null && x != null) {
+          push(py(y) - LINE_SPACING * 0.55, py(y) + LINE_SPACING * 0.55, px(x) - LINE_SPACING * 0.6, px(x) + LINE_SPACING * 0.6);
+        }
+      }
+    }
+    for (const child of node.children ?? []) {
+      if (child && typeof child === "object" && "type" in child) {
+        visit(child, frame);
+      }
+    }
+  };
+  for (const element of elements)
+    visit(element, { ox: 0, oy: 0, sx: 1, sy: 1 });
+  return boxes;
+}
+function systemIndexForY2(y, systemYOffsets) {
+  let index = 0;
+  for (let i = 0;i < systemYOffsets.length; i++) {
+    if (y >= (systemYOffsets[i] ?? 0) - LINE_SPACING * 2)
+      index = i;
+  }
+  return index;
+}
+function staffPairFacingInk(input) {
+  const { upperBoxes, lowerBoxes, upperOffsets, lowerOffsets, upperStackY, lowerStackY, systemCount } = input;
+  const bucket = LINE_SPACING;
+  const facing = new Array(systemCount).fill(0);
+  for (let s = 0;s < systemCount; s++) {
+    const upperBottomLine = upperStackY + (upperOffsets[s] ?? 0) + BOTTOM_LINE_Y;
+    const lowerTopLine = lowerStackY + (lowerOffsets[s] ?? 0) + STAFF_TOP;
+    const down = new Map;
+    const up = new Map;
+    for (const box of upperBoxes) {
+      const midY = (box.top + box.bottom) / 2 + upperStackY;
+      if (systemIndexForY2(midY - upperStackY, upperOffsets) !== s)
+        continue;
+      const below = box.bottom + upperStackY - upperBottomLine;
+      if (below <= 0)
+        continue;
+      const b0 = Math.floor(box.left / bucket);
+      const b1 = Math.floor(box.right / bucket);
+      for (let bx = b0;bx <= b1; bx++) {
+        if ((down.get(bx) ?? 0) < below)
+          down.set(bx, below);
+      }
+    }
+    for (const box of lowerBoxes) {
+      const midY = (box.top + box.bottom) / 2 + lowerStackY;
+      if (systemIndexForY2(midY - lowerStackY, lowerOffsets) !== s)
+        continue;
+      const above = lowerTopLine - (box.top + lowerStackY);
+      if (above <= 0)
+        continue;
+      const b0 = Math.floor(box.left / bucket);
+      const b1 = Math.floor(box.right / bucket);
+      for (let bx = b0;bx <= b1; bx++) {
+        if ((up.get(bx) ?? 0) < above)
+          up.set(bx, above);
+      }
+    }
+    let max = 0;
+    let maxBucket;
+    for (const [bx, d] of down) {
+      const sum = d + (up.get(bx) ?? 0);
+      if (sum > max) {
+        max = sum;
+        maxBucket = bx;
+      }
+    }
+    for (const [bx, u] of up) {
+      if (!down.has(bx) && u > max) {
+        max = u;
+        maxBucket = bx;
+      }
+    }
+    if (globalThis.process?.env?.["LILYJS_DEBUG_STAFFGAP"] && maxBucket != null && max > 0) {
+      const bxL = maxBucket * bucket;
+      const near = (box, ref, isDown) => {
+        if (box.left > bxL + bucket || box.right < bxL)
+          return false;
+        const midY = (box.top + box.bottom) / 2;
+        const offsets = isDown ? upperOffsets : lowerOffsets;
+        if (systemIndexForY2(midY, offsets) !== s)
+          return false;
+        const v = isDown ? box.bottom + upperStackY - upperBottomLine : lowerTopLine - (box.top + lowerStackY);
+        return v >= ref - 0.5;
+      };
+      const dv = down.get(maxBucket);
+      const uv = up.get(maxBucket);
+      console.error(`[inkdump] sys ${s}: facing ${(max / LINE_SPACING).toFixed(1)}ss at x=${bxL.toFixed(0)}px (down ${((dv ?? 0) / LINE_SPACING).toFixed(1)} up ${((uv ?? 0) / LINE_SPACING).toFixed(1)})`);
+      if (dv)
+        for (const box of upperBoxes.filter((b) => near(b, dv, true)))
+          console.error(`[inkdump]   down ${box.el}: y ${box.top.toFixed(0)}..${box.bottom.toFixed(0)} x ${box.left.toFixed(0)}..${box.right.toFixed(0)} (bottomLine ${(upperBottomLine - upperStackY).toFixed(0)})`);
+      if (uv)
+        for (const box of lowerBoxes.filter((b) => near(b, uv, false)))
+          console.error(`[inkdump]   up   ${box.el}: y ${box.top.toFixed(0)}..${box.bottom.toFixed(0)} x ${box.left.toFixed(0)}..${box.right.toFixed(0)} (topLine ${(lowerTopLine - lowerStackY).toFixed(0)})`);
+    }
+    facing[s] = max;
+  }
+  return facing;
+}
+function computeStaffGapAdjustments(input) {
+  const { staffSystemYOffsets, staffDocs, yOffsets, systemCount } = input;
+  const staffCount = staffDocs.length;
+  if (staffCount < 2 || systemCount < 1)
+    return;
+  const inkBoxes = staffDocs.map((doc) => doc ? collectStaffInkBoxes(doc.elements) : []);
+  const perStaffExtra = Array.from({ length: staffCount }, () => new Array(systemCount).fill(0));
+  const stackExtraGapBelow = new Array(staffCount).fill(0);
+  let any = false;
+  for (let k = 0;k + 1 < staffCount; k++) {
+    const upperOffsets = staffSystemYOffsets[k];
+    const lowerOffsets = staffSystemYOffsets[k + 1];
+    if (!upperOffsets || !lowerOffsets)
+      continue;
+    const facing = staffPairFacingInk({
+      upperBoxes: inkBoxes[k],
+      lowerBoxes: inkBoxes[k + 1],
+      upperOffsets,
+      lowerOffsets,
+      upperStackY: yOffsets[k] ?? 0,
+      lowerStackY: yOffsets[k + 1] ?? 0,
+      systemCount
+    });
+    for (let s = 0;s < systemCount; s++) {
+      const gap = (yOffsets[k + 1] ?? 0) + (lowerOffsets[s] ?? 0) + STAFF_TOP - ((yOffsets[k] ?? 0) + (upperOffsets[s] ?? 0) + BOTTOM_LINE_Y);
+      const extra = facing[s] + STAFF_STAFF_PADDING_PX - gap;
+      if (!Number.isFinite(extra) || extra <= 0.5)
+        continue;
+      any = true;
+      if (s === 0) {
+        stackExtraGapBelow[k] += extra;
+        for (let j = 0;j <= k; j++) {
+          for (let s2 = 1;s2 < systemCount; s2++)
+            perStaffExtra[j][s2] += extra;
+        }
+      } else {
+        for (let j = 0;j < staffCount; j++) {
+          for (let s2 = s;s2 < systemCount; s2++) {
+            if (s2 > s || j > k)
+              perStaffExtra[j][s2] += extra;
+          }
+        }
+      }
+    }
+  }
+  if (!any)
+    return;
+  return {
+    offsets: staffSystemYOffsets.map((offsets, j) => (offsets ? [...offsets] : []).map((y, s) => y + (perStaffExtra[j]?.[s] ?? 0))),
+    stackExtraGapBelow
+  };
+}
+function applyStaffGapPass(input) {
+  const { pass, validDocs, stack, systemCount, renderStaffPass } = input;
+  const adjustments = computeStaffGapAdjustments({
+    staffSystemYOffsets: pass.staffSystemYOffsets,
+    staffDocs: pass.staffDocs,
+    yOffsets: stack.yOffsets,
+    systemCount
+  });
+  if (!adjustments)
+    return { pass, validDocs, stack, adjustments: undefined };
+  const nextPass = renderStaffPass(adjustments.offsets);
+  const nextDocs = nextPass.staffDocs.filter((d) => d !== null);
+  if (!nextDocs.length)
+    return { pass, validDocs, stack, adjustments: undefined };
+  return {
+    pass: nextPass,
+    validDocs: nextDocs,
+    stack: solvedStaffGroupStack({
+      staffDocs: nextDocs,
+      staffSystemYOffsets: nextPass.staffSystemYOffsets,
+      extraGapBelow: adjustments.stackExtraGapBelow
+    }),
+    adjustments
+  };
+}
+
 // src/music-rendering/renderer/renderStaffGroupContextToSvgModel.ts
 var PIANO_FIRST_SYSTEM_CONTENT_INSET = LINE_SPACING;
 function prefixedEventId(eventId2, prefix) {
@@ -81920,40 +84480,6 @@ function prefixRenderTuneEventIds(tune, prefix) {
       }))
     } : {}
   };
-}
-function staffLabelsFromContextTree(contextTree) {
-  return contextTree?.children.filter((child) => child.kind === "Staff").map((staff2) => ({
-    ...staff2.instrumentName ? { instrumentName: staff2.instrumentName } : {},
-    ...staff2.shortInstrumentName ? { shortInstrumentName: staff2.shortInstrumentName } : {}
-  })) ?? [];
-}
-function groupLabelsFromContextTree(contextTree) {
-  return (contextTree?.nestedGroups ?? []).filter((group) => group.instrumentName).map((group) => ({
-    start: group.start,
-    end: group.end,
-    instrumentName: group.instrumentName
-  }));
-}
-function braceStaffRangeFromContextTree(contextTree, staffCount) {
-  const groups = contextTree?.nestedGroups ?? [];
-  if (groups.length !== 1)
-    return;
-  const group = groups[0];
-  const braced = group.groupType === "PianoStaff" || group.groupType === "GrandStaff";
-  if (!braced)
-    return;
-  if (group.end - group.start < 2)
-    return;
-  if (group.start === 0 && group.end >= staffCount)
-    return;
-  return { start: group.start, end: group.end };
-}
-function drawsSystemStartBrace(contextTree) {
-  if (!contextTree)
-    return true;
-  if (contextTree.nestedGroups?.length)
-    return true;
-  return contextTree.groupType !== "ImplicitStaffGroup";
 }
 function renderStaffGroupContextToSvgModel(opts) {
   const {
@@ -82016,7 +84542,7 @@ function renderStaffGroupContextToSvgModel(opts) {
   const staffLabels = staffLabelsFromContextTree(contextTree);
   const groupLabels = groupLabelsFromContextTree(contextTree);
   const staffLabelGutter = staffLabelGutterWidth(staffLabels, groupLabels);
-  const effectiveFirstIndent = staffLabelGutter > 0 ? Math.max(firstIndent ?? 0, staffLabelGutter / LINE_SPACING) : firstIndent;
+  const effectiveFirstIndent = foldStaffLabelGutterIntoIndentSs(firstIndent, staffLabelGutter / LINE_SPACING);
   const contextSystemPlan = computeContextTreeSystems({
     tree: contextTree,
     renderTunes,
@@ -82102,11 +84628,25 @@ function renderStaffGroupContextToSvgModel(opts) {
   if (initialPass.staffDocs.filter((d) => d !== null).length === 0)
     return null;
   const sharedGrid = sharedStaffSystemYOffsets(initialPass.staffSystemYOffsets);
-  const alignedPass = sharedGrid.changed ? renderStaffPass(sharedGrid.offsetsByStaff) : initialPass;
-  const alignedValidDocs = alignedPass.staffDocs.filter((d) => d !== null);
+  let alignedPass = sharedGrid.changed ? renderStaffPass(sharedGrid.offsetsByStaff) : initialPass;
+  let alignedValidDocs = alignedPass.staffDocs.filter((d) => d !== null);
   if (alignedValidDocs.length === 0)
     return null;
-  const alignedStack = computeStaffGroupStack(alignedValidDocs);
+  let alignedStack = solvedStaffGroupStack({
+    staffDocs: alignedValidDocs,
+    staffSystemYOffsets: alignedPass.staffSystemYOffsets
+  });
+  const gapPass = applyStaffGapPass({
+    pass: alignedPass,
+    validDocs: alignedValidDocs,
+    stack: alignedStack,
+    systemCount: sharedSystems.length,
+    renderStaffPass
+  });
+  alignedPass = gapPass.pass;
+  alignedValidDocs = gapPass.validDocs;
+  alignedStack = gapPass.stack;
+  const gapAdjust = gapPass.adjustments;
   const alignedPedals = renderPianoPedals({
     pedalEvents: renderTunes[0]?.pedalEvents,
     sharedSystems,
@@ -82133,7 +84673,11 @@ function renderStaffGroupContextToSvgModel(opts) {
   const validDocs = finalPass.staffDocs.filter((d) => d !== null);
   if (validDocs.length === 0)
     return null;
-  const { yOffsets, totalHeight } = computeStaffGroupStack(validDocs);
+  const { yOffsets, totalHeight } = solvedStaffGroupStack({
+    staffDocs: validDocs,
+    staffSystemYOffsets: finalPass.staffSystemYOffsets,
+    extraGapBelow: gapAdjust?.stackExtraGapBelow
+  });
   const hasPedalEvents = Boolean(renderTunes[0]?.pedalEvents?.length);
   const pedalElements = renderPianoPedals({
     pedalEvents: renderTunes[0]?.pedalEvents,
@@ -82172,31 +84716,40 @@ function renderStaffGroupContextToSvgModel(opts) {
     deferGlobalStaffSizeScale,
     staffSizeScale,
     drawBrace: drawsSystemStartBrace(contextTree),
+    drawBracket: drawsSystemStartBracket(contextTree),
+    firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING,
+    braceStaffRange: braceStaffRangeFromContextTree(contextTree, yOffsets.length),
     globalStaffSize,
     contentWidth
   });
   if (paginatedDoc)
     return paginatedDoc;
+  const frameArgs = {
+    yOffsets,
+    systemCount: sharedSystems.length,
+    systemBeatXs: finalPass.systemBeatXs,
+    lastStaffSystemYOffsets: finalPass.lastStaffSystemYOffsets,
+    fontInfo,
+    braceStaffRange: braceStaffRangeFromContextTree(contextTree, yOffsets.length),
+    staffSystemYOffsets: finalPass.staffSystemYOffsets,
+    firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING,
+    drawBrace: drawsSystemStartBrace(contextTree),
+    drawBracket: drawsSystemStartBracket(contextTree),
+    musicGlyphMode
+  };
   const allElements = [
     ...renderPianoGrandStaffFrame({
-      yOffsets,
-      systemCount: sharedSystems.length,
-      systemBeatXs: finalPass.systemBeatXs,
+      ...frameArgs,
       sharedSystems,
       systemMeasureBounds: finalPass.systemMeasureBounds,
-      lastStaffSystemYOffsets: finalPass.lastStaffSystemYOffsets,
-      fontInfo,
       fontFamily,
       firstSystemContentInset,
-      debugBeatLines,
-      braceStaffRange: braceStaffRangeFromContextTree(contextTree, yOffsets.length),
-      staffSystemYOffsets: finalPass.staffSystemYOffsets,
-      firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING,
-      drawBrace: drawsSystemStartBrace(contextTree)
+      debugBeatLines
     }),
     ...pedalElements,
     ...renderStackedStaffGroupContent({ staffDocs: validDocs, yOffsets })
   ];
+  const delimiterLeftXBySystem = systemStartDelimiterLeftXs(frameArgs);
   const labeledElements = staffLabelGutter > 0 ? [
     ...renderStaffSystemLabels({
       labels: staffLabels,
@@ -82204,7 +84757,9 @@ function renderStaffGroupContextToSvgModel(opts) {
       staffStackYOffsets: yOffsets,
       gutterWidth: staffLabelGutterPx(effectiveFirstIndent, staffLabelGutter),
       fontFamily: fontInfo.textFontFor("header"),
-      groupLabels
+      groupLabels,
+      delimiterLeftXBySystem,
+      firstIndentPx: (effectiveFirstIndent ?? 0) * LINE_SPACING
     }),
     ...allElements
   ] : allElements;
@@ -82446,7 +85001,7 @@ function renderableStaffContext(input) {
   const name = context?.name ?? staff2?.name;
   const staffTune = tune ?? staff2?.tune;
   const instrumentName = staffInstrumentName(staff2, context, ancestorOperations) ?? (typeof staffTune?.instrumentName === "string" ? staffTune.instrumentName : undefined);
-  const shortInstrumentName = staffShortInstrumentName(staff2, context, ancestorOperations);
+  const shortInstrumentName = staffShortInstrumentName(staff2, context, ancestorOperations) ?? (typeof staffTune?.shortInstrumentName === "string" ? staffTune.shortInstrumentName : undefined);
   const voices = context?.voices?.length ? context.voices.map((voice, voiceIndex) => renderableVoiceContext(voice, `${id}:voice_${voiceIndex}`, voiceIndex, events2)) : [{
     kind: "Voice",
     id: `${id}:voice_0`,
@@ -82637,8 +85192,11 @@ function documentInfoFromTune(tune) {
   const headerMeter = headerField(tune, "meter") ?? headerField(tune, "genre");
   return {
     lilypondVersion: tune.lilypondVersion,
+    dedication: headerField(tune, "dedication"),
     title: headerField(tune, "title"),
+    titleRuns: tune.info?.titleRuns ?? tune.header?.titleRuns,
     subtitle: headerField(tune, "subtitle"),
+    subtitleRuns: tune.info?.subtitleRuns ?? tune.header?.subtitleRuns,
     subsubtitle: headerField(tune, "subsubtitle"),
     composer: headerField(tune, "composer"),
     meter: headerMeter,
@@ -82646,8 +85204,10 @@ function documentInfoFromTune(tune) {
     piece: headerField(tune, "piece"),
     opus: headerField(tune, "opus"),
     tagline: tune.info?.tagline ?? tune.header?.tagline,
+    taglineLines: tune.info?.taglineLines ?? tune.header?.taglineLines,
     taglineBox: tune.info?.taglineBox ?? tune.header?.taglineBox,
     raggedLast: tune.raggedLast,
+    raggedLastBottom: tune.raggedLastBottom,
     raggedRight: tune.raggedRight,
     firstIndent: tune.firstIndent,
     paperFont: tune.paperFont,
@@ -82675,8 +85235,11 @@ function headerTextFont(musicFont) {
 }
 function renderHeaderToSvgModel(opts) {
   const {
+    dedication,
     title,
+    titleRuns,
     subtitle,
+    subtitleRuns,
     subsubtitle,
     composer,
     meter,
@@ -82691,12 +85254,15 @@ function renderHeaderToSvgModel(opts) {
     scoreReferenceBaseline,
     topMarkupSpacing
   } = opts;
-  if (!title && !subtitle && !subsubtitle && !composer && !meter && !poet && !piece && !opus)
+  if (!dedication && !title && !subtitle && !subsubtitle && !composer && !meter && !poet && !piece && !opus)
     return null;
   const textFont = headerTextFont(musicFontFamily);
   const layout = computeHeaderLayout({
+    dedication,
     title,
+    titleRuns,
     subtitle,
+    subtitleRuns,
     subsubtitle,
     composer,
     meter,
@@ -82732,7 +85298,7 @@ var MUSIC_GLYPH_ADVANCE_STAFF_SPACES = {
 function runWidth(run, fontSize) {
   const effectiveFontSize = Math.round(fontSize * (run.fontSizeScale ?? 1));
   if (run.text === " ")
-    return effectiveFontSize * 0.28;
+    return estimateMarkupAdvanceWidthPx(" ", effectiveFontSize);
   if (run.musicGlyph) {
     const staffSpacePx = effectiveFontSize / 4;
     return Array.from(run.text).reduce((sum, glyph) => sum + (MUSIC_GLYPH_ADVANCE_STAFF_SPACES[glyph] ?? 1) * staffSpacePx, 0);
@@ -83255,7 +85821,7 @@ function wrapInlineRuns(runs, fontSize, maxWidth) {
 
 // src/music-rendering/renderer/markup/layout.ts
 var INLINE_MARKUP_TOKEN_RE = /\\(bold|italic|typewriter|drawline|smallCaps|with-color|sub|super|raise|lower|boxed-(?:start|end|run)|rounded-(?:start|end)|circled-(?:start|end)|boxpad|thickness|cornerradius)\b/;
-var LILYPOND_WORDWRAP_WIDTH_COMPENSATION = 1.074;
+var LILYPOND_WORDWRAP_WIDTH_COMPENSATION = 1;
 var REFERENCE_COLUMN_VSPACE_SMALL_QUADRATIC = 1.1744;
 var REFERENCE_COLUMN_VSPACE_SMALL_LINEAR = 0.6512;
 var REFERENCE_COLUMN_VSPACE_INTERLINE_SCALE = 3;
@@ -83510,36 +86076,11 @@ function markupTextX(align, contentWidth, padX) {
 // src/music-rendering/renderer/markup/shapes.ts
 function createMarkupShapeMetrics(effectiveFontSize, style) {
   const isInlineShapeRun = (run) => Boolean(run?.boxed || run?.boxedGroup !== undefined || run?.roundedGroup !== undefined || run?.circledGroup !== undefined);
-  const inlineShapeGroupSize = (lineRuns, run, groupKey) => {
-    const groupId = run[groupKey];
-    if (groupId === undefined)
-      return run.text.trim().length > 0 ? 1 : 0;
-    return lineRuns.filter((candidate) => candidate[groupKey] === groupId && candidate.text.trim().length > 0).length;
-  };
-  const inlineShapeLeadInCorrection = (lineRuns, run) => {
-    if (run.roundedGroup !== undefined) {
-      if (run.boxPadding != null)
-        return effectiveFontSize * 0.496;
-      if (run.cornerRadius != null)
-        return effectiveFontSize * 0.129;
-      return -effectiveFontSize * 0.092;
-    }
-    if (run.boxedGroup !== undefined) {
-      if (run.boxPadding != null)
-        return effectiveFontSize * 0.711;
-      if (run.thickness != null)
-        return effectiveFontSize * 0.346;
-      return inlineShapeGroupSize(lineRuns, run, "boxedGroup") === 1 ? effectiveFontSize * 0.15 : 0;
-    }
-    if (run.circledGroup !== undefined) {
-      return effectiveFontSize * 0.665;
-    }
-    return 0;
-  };
+  const MARKUP_WORD_SPACE_PX = MARKUP_STAFF_SPACE_PX * 0.6;
   const defaultBoxPadding = style.boxPadding ?? 0.2;
   const defaultThickness = style.thickness ?? 1;
   const defaultCornerRadius = style.cornerRadius ?? 0.5;
-  const boxPadFor = (run) => Math.max(2, Math.ceil(MARKUP_STAFF_SPACE_PX * (run?.boxPadding ?? defaultBoxPadding)));
+  const boxPadFor = (run) => MARKUP_STAFF_SPACE_PX * (run?.boxPadding ?? defaultBoxPadding) + CANONICAL_STAFF_SPACE_PX * 0.1 * (run?.thickness ?? defaultThickness);
   const boxPadYFor = (run) => Math.max(1, Math.round(MARKUP_STAFF_SPACE_PX * (run?.boxPadding ?? defaultBoxPadding)));
   const boxStrokeFor = (run) => CANONICAL_STAFF_SPACE_PX * 0.1 * (run?.thickness ?? defaultThickness);
   const cornerRadiusFor = (run) => {
@@ -83573,7 +86114,7 @@ function createMarkupShapeMetrics(effectiveFontSize, style) {
     if (!isInlineShapeRun(run) && next?.text === " ") {
       const shapeRun = lineRuns[index + 2];
       if (isInlineShapeRun(shapeRun)) {
-        return width + inlineShapeLeadInCorrection(lineRuns, shapeRun);
+        return width + MARKUP_WORD_SPACE_PX;
       }
     }
     return width;
@@ -83842,9 +86383,10 @@ function renderExplicitMarkupRuns(input) {
 var MARKUP_TEXT_FONT_SIZE = MARKUP_STAFF_SPACE_PX * 2.2;
 var MARKUP_BOLD_FONT_SIZE = MARKUP_STAFF_SPACE_PX * 2.2;
 var MARKUP_CODE_FONT_SIZE = MARKUP_STAFF_SPACE_PX * 2.2;
-var MARKUP_CODE_FONT_FAMILY = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+var MARKUP_CODE_FONT_FAMILY = '"Liberation Mono", "DejaVu Sans Mono", monospace';
 var MARKUP_CODE_FONT_WEIGHT = 400;
 var MARKUP_DOCUMENT_X_CORRECTION_PX = -0.29;
+var MARKUP_LINE_THICKNESS_PX = MARKUP_STAFF_SPACE_PX * 0.1;
 var REFERENCE_MARKUP_BASELINE_SKIP_RATIO = 3 / 2.2;
 function themedCodeGraphicFill(color, code, fallback) {
   if (!code)
@@ -84147,6 +86689,24 @@ function renderMarkupToSvgModel(opts) {
   const graphicBaselineY = lineBaselines[0] ?? firstLineLeading;
   if (graphics && graphics.length > 0) {
     for (const graphic of graphics) {
+      if (graphic.type === "drawLine") {
+        const x1 = graphic.dx * MARKUP_STAFF_SPACE_PX;
+        const y1 = -graphic.dy * MARKUP_STAFF_SPACE_PX;
+        const strokeW = Math.max(0.5, graphic.thickness * MARKUP_LINE_THICKNESS_PX);
+        h = Math.max(h, Math.ceil(graphicBaselineY + Math.max(0, y1) + padY));
+        includeVisualExtent(graphicBaselineY + Math.min(0, y1), graphicBaselineY + Math.max(0, y1));
+        allEls.push(el("line", {
+          x1: 0,
+          y1: graphicBaselineY,
+          x2: x1,
+          y2: graphicBaselineY + y1,
+          stroke: themedCodeGraphicFill(graphic.color, code, textFill),
+          strokeWidth: strokeW,
+          strokeLinecap: "butt",
+          "data-lily-element": "markup-draw-line"
+        }, [], `lily-markup-draw-line-${allEls.length}`));
+        continue;
+      }
       if (graphic.type !== "filledBox")
         continue;
       const x = graphic.x0 * MARKUP_STAFF_SPACE_PX;
@@ -84577,8 +87137,11 @@ function renderDocumentHeaderBlock(input) {
   const defaults = paperDefaultsForVersion(documentInfo.lilypondVersion);
   const spacing = spacingWithOverrides(defaults.spacing, documentInfo.verticalSpacing);
   return renderHeaderToSvgModel({
+    dedication: documentInfo.dedication,
     title: documentInfo.title,
+    titleRuns: documentInfo.titleRuns,
     subtitle: documentInfo.subtitle,
+    subtitleRuns: documentInfo.subtitleRuns,
     subsubtitle: documentInfo.subsubtitle,
     composer: documentInfo.composer,
     meter: documentInfo.meter,
@@ -84714,6 +87277,7 @@ function renderPianoScoreBlock(input) {
         showTitle: false,
         paperFont: block.meta?.paperFont ?? documentInfo?.paperFont,
         raggedLast: block.meta?.raggedLast ?? documentInfo?.raggedLast,
+        raggedLastBottom: block.meta?.raggedLastBottom ?? documentInfo?.raggedLastBottom,
         raggedRight: documentRaggedRightDefault(block.meta?.raggedRight, documentInfo, true),
         firstIndent: block.meta?.firstIndent ?? documentInfo?.firstIndent,
         globalStaffSize: block.meta?.globalStaffSize ?? documentInfo?.globalStaffSize,
@@ -84789,6 +87353,7 @@ function renderScoreBlock(input) {
         selectedEventIds: selectedEventIds && selectedEventIds.size > 0 ? selectedEventIds : undefined,
         paperFont: blockTune?.paperFont ?? documentInfo?.paperFont,
         raggedLast: blockTune?.raggedLast ?? documentInfo?.raggedLast,
+        raggedLastBottom: blockTune?.raggedLastBottom ?? documentInfo?.raggedLastBottom,
         raggedRight: documentRaggedRightDefault(blockTune?.raggedRight, documentInfo, false),
         firstIndent: blockTune?.firstIndent ?? documentInfo?.firstIndent,
         globalStaffSize: blockTune?.globalStaffSize ?? documentInfo?.globalStaffSize,
@@ -84923,7 +87488,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.7.1",
+  version: "0.8.0",
   type: "module",
   exports: {
     ".": {
@@ -84970,9 +87535,9 @@ var package_default = {
     "web:preview": "bun run tools/serve/web-preview.ts"
   },
   dependencies: {
-    "@codemirror/commands": "^6.10.3",
-    "@codemirror/language": "^6.12.3",
-    "@codemirror/state": "^6.6.0",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.1",
     "@codemirror/view": "6.41.1",
     react: "^18.3.1",
     "react-dom": "^18.3.1"
@@ -84982,11 +87547,11 @@ var package_default = {
   },
   devDependencies: {
     "@types/bun": "latest",
-    "@types/node": "^25.5.2",
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
-    "fast-check": "^4.7.0",
-    typescript: "~5.7.2"
+    "@types/node": "^25.9.5",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "fast-check": "^4.9.0",
+    typescript: "~5.7.3"
   }
 };
 
@@ -84999,6 +87564,11 @@ var TAGLINE_FRAME_THICKNESS_SS = 0.1;
 var TAGLINE_LINE_HEIGHT_EM = 1.35;
 var TAGLINE_ASCENT_EM = 0.76;
 var TAGLINE_DESCENT_EM = 0.24;
+var TAGLINE_INK_DESCENDER_EM = 0.217;
+var DESCENDER_GLYPHS = /[gjpqy]/;
+function taglineInkDescentEm(text) {
+  return DESCENDER_GLYPHS.test(text) ? TAGLINE_INK_DESCENDER_EM : 0;
+}
 function wrapTaglineLines(text, fontSize, maxWidthPx) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines = [];
@@ -85026,12 +87596,13 @@ function resolveTaglineText(tagline, _lilypondVersion) {
   return `Music engraving by LilyJS ${APP_VERSION}—www.lilyJS.org`;
 }
 function buildDocumentTagline(input) {
-  const { taglineText, taglineBox, totalWidth, totalHeight, staffSizeScale = 1, bottomOffsetPx, wrapWidthPx, bottomMarginPx } = input;
+  const { taglineText, taglineLines, taglineBox, totalWidth, totalHeight, staffSizeScale = 1, bottomOffsetPx, wrapWidthPx, bottomMarginPx, autoHeightPage = false } = input;
   if (!taglineText)
     return { elements: [], grobs: [] };
   const fontSize = TAGLINE_FONT_SIZE * staffSizeScale;
   const boxPaddingPx = (taglineBox?.padding ?? 0) * LINE_SPACING * staffSizeScale;
-  const bottomOffset = taglineBox && bottomMarginPx != null ? bottomMarginPx + boxPaddingPx + fontSize * TAGLINE_DESCENT_EM : bottomOffsetPx ?? TAGLINE_BOTTOM_OFFSET * staffSizeScale;
+  const marginDerived = bottomMarginPx != null && (!autoHeightPage || taglineBox);
+  const bottomOffset = marginDerived ? bottomMarginPx + boxPaddingPx + fontSize * (taglineBox ? TAGLINE_DESCENT_EM : taglineInkDescentEm(taglineText)) : bottomOffsetPx ?? TAGLINE_BOTTOM_OFFSET * staffSizeScale;
   const anchor = {
     x: totalWidth / 2,
     y: totalHeight - bottomOffset
@@ -85044,7 +87615,7 @@ function buildDocumentTagline(input) {
   };
   const paddingPx = boxPaddingPx;
   const maxLineWidthPx = Math.max(fontSize * 4, (wrapWidthPx ?? totalWidth * 0.86) - paddingPx * 2);
-  const lines = taglineBox?.wordwrap ? wrapTaglineLines(taglineText, fontSize, maxLineWidthPx) : [taglineText];
+  const lines = taglineLines && taglineLines.length > 1 ? [...taglineLines] : taglineBox?.wordwrap ? wrapTaglineLines(taglineText, fontSize, maxLineWidthPx) : [taglineText];
   const lineHeight = fontSize * TAGLINE_LINE_HEIGHT_EM;
   const baselines = lines.map((_, index) => anchor.y - (lines.length - 1 - index) * lineHeight);
   const textElements = lines.map((line, index) => el("text", {
@@ -85623,22 +88194,72 @@ function textContent2(node) {
   return children.map(textContent2).join("");
 }
 var TEXT_DESCENT_RATIO = 0.28;
-var TEXT_ASCENT_RATIO = 0.75;
+var TEXT_INK_DESCENT_RATIO = 0.217;
 var STRONG_DESCENDERS = new Set(["g", "j", "p", "q", "y"]);
 var MILD_DESCENDERS = new Set(["(", ")", "[", "]", "{", "}", ",", ";", "@"]);
-function glyphDescentRatio(ch) {
+function glyphDescentRatio(ch, profile) {
+  const full = profile === "ink" ? TEXT_INK_DESCENT_RATIO : TEXT_DESCENT_RATIO;
   if (STRONG_DESCENDERS.has(ch))
-    return TEXT_DESCENT_RATIO;
+    return full;
   if (MILD_DESCENDERS.has(ch))
-    return TEXT_DESCENT_RATIO * 0.5;
+    return full * 0.5;
   return 0;
 }
-function collectTextSkylineBoxes(nodes, edge, ty, out) {
+var NOMINAL_ASCENT_RATIO = 0.75;
+var TEXT_CAP_HEIGHT_RATIO = 0.662;
+var TEXT_ASCENDER_RATIO = 0.683;
+var TEXT_X_HEIGHT_RATIO = 0.45;
+var ASCENDER_LETTERS = new Set(["b", "d", "f", "h", "k", "l", "i", "j"]);
+var X_HEIGHT_LETTERS = new Set([
+  "a",
+  "c",
+  "e",
+  "g",
+  "m",
+  "n",
+  "o",
+  "p",
+  "q",
+  "r",
+  "s",
+  "u",
+  "v",
+  "w",
+  "x",
+  "y",
+  "z"
+]);
+var BASELINE_MARKS = {
+  ".": 0.11,
+  ",": 0.11,
+  _: 0,
+  "-": 0.26,
+  "–": 0.26,
+  "—": 0.26,
+  ":": 0.45,
+  ";": 0.45,
+  "=": 0.39
+};
+function glyphAscentRatio(ch) {
+  if (ch === " ")
+    return 0;
+  const mark = BASELINE_MARKS[ch];
+  if (mark !== undefined)
+    return mark;
+  if (ASCENDER_LETTERS.has(ch))
+    return TEXT_ASCENDER_RATIO;
+  if (X_HEIGHT_LETTERS.has(ch))
+    return TEXT_X_HEIGHT_RATIO;
+  if (ch === "t")
+    return 0.612;
+  return TEXT_CAP_HEIGHT_RATIO;
+}
+function collectTextSkylineBoxes(nodes, edge, ty, out, profile = "nominal") {
   for (const node of nodes) {
     if (!node || typeof node !== "object")
       continue;
     if (node.type === "fragment") {
-      collectTextSkylineBoxes(node.children, edge, ty, out);
+      collectTextSkylineBoxes(node.children, edge, ty, out, profile);
       continue;
     }
     const element = node;
@@ -85655,29 +88276,63 @@ function collectTextSkylineBoxes(nodes, edge, ty, out) {
       const anchor = element.props.textAnchor;
       const x1 = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
       const baseline = ny + Number(element.props.y);
-      if (edge === "top") {
-        out.push({ x1, x2: x1 + width, y: baseline - fontSize * TEXT_ASCENT_RATIO });
+      if (edge === "top" && profile === "nominal") {
+        out.push({ x1, x2: x1 + width, y: baseline - fontSize * NOMINAL_ASCENT_RATIO });
+      } else if (edge === "top") {
+        let prevW = 0;
+        for (let i = 0;i < text.length; i++) {
+          const w = estimateMarkupAdvanceWidthPx(text.slice(0, i + 1), fontSize);
+          const ch = text[i];
+          if (ch !== " ") {
+            out.push({ x1: x1 + prevW, x2: x1 + w, y: baseline - fontSize * glyphAscentRatio(ch) });
+          }
+          prevW = w;
+        }
       } else {
         let prevW = 0;
         for (let i = 0;i < text.length; i++) {
           const w = estimateMarkupAdvanceWidthPx(text.slice(0, i + 1), fontSize);
           const ch = text[i];
           if (ch !== " ") {
-            out.push({ x1: x1 + prevW, x2: x1 + w, y: baseline + fontSize * glyphDescentRatio(ch) });
+            out.push({ x1: x1 + prevW, x2: x1 + w, y: baseline + fontSize * glyphDescentRatio(ch, profile) });
           }
           prevW = w;
         }
       }
+      let dyRun = 0;
+      for (const child of element.children ?? []) {
+        if (!child || typeof child !== "object")
+          continue;
+        const span = child;
+        if (span.type !== "tspan")
+          continue;
+        dyRun += Number(span.props?.dy ?? 0);
+        if (dyRun === 0)
+          continue;
+        const spanText = textContent2(span);
+        if (!spanText.trim())
+          continue;
+        const spanFontSize = Number(span.props?.fontSize ?? fontSize);
+        const spanWidth = estimateMarkupAdvanceWidthPx(spanText, spanFontSize);
+        const spanBaseline = baseline + dyRun;
+        out.push(edge === "top" ? { x1, x2: x1 + spanWidth, y: spanBaseline - spanFontSize * glyphAscentRatio(spanText[0] ?? "x") } : { x1, x2: x1 + spanWidth, y: spanBaseline + spanFontSize * glyphDescentRatio(spanText[0] ?? "x", profile) });
+      }
       continue;
     }
     if (Array.isArray(element.children)) {
-      collectTextSkylineBoxes(element.children.filter((c) => typeof c === "object" && c !== null), edge, ny, out);
+      collectTextSkylineBoxes(element.children.filter((c) => typeof c === "object" && c !== null), edge, ny, out, profile);
     }
   }
   return out;
 }
 function textBottomSkylineBoxes(nodes, ty = 0, out = []) {
   return collectTextSkylineBoxes(nodes, "bottom", ty, out);
+}
+function textInkTopBoxes(nodes, ty = 0, out = []) {
+  return collectTextSkylineBoxes(nodes, "top", ty, out, "ink");
+}
+function textInkBottomBoxes(nodes, ty = 0, out = []) {
+  return collectTextSkylineBoxes(nodes, "bottom", ty, out, "ink");
 }
 function firstSystemTopSkylineBoxes(signature, scoreY, scoreScale, firstStaffTopScoreY) {
   const out = [];
@@ -85963,6 +88618,7 @@ function finalizeDocumentSvgModel(input) {
     width,
     musicGlyphMode,
     taglineText,
+    taglineLines,
     taglineBox,
     taglineBottomOffsetPx,
     taglineBottomMarginPx,
@@ -85987,12 +88643,14 @@ function finalizeDocumentSvgModel(input) {
   const isLastDocumentPage = targetPageIndex >= maxPageIndexReached;
   const tagline = isLastDocumentPage ? buildDocumentTagline({
     taglineText: taglineText ?? null,
+    taglineLines,
     taglineBox,
     totalWidth,
     totalHeight,
     staffSizeScale,
     bottomOffsetPx: taglineBottomOffsetPx,
     bottomMarginPx: taglineBottomMarginPx,
+    autoHeightPage: isAutoHeightPageBreaking(pageBreaking),
     wrapWidthPx: totalWidth - marginLeftPx * 2
   }) : { elements: [], grobs: [] };
   signatureGrobs.push(...tagline.grobs);
@@ -86180,13 +88838,15 @@ function renderDocumentToSvgModel(opts) {
   let lastScoreStaffBottomY;
   let pendingMarkupToScoreHandoff;
   let previousDocumentBandBottomY;
+  let previousMarkupInkBottomY;
   let previousDocumentBandKind;
   const onTargetPage = () => currentPageIndex === targetPageIndex;
   const avoidPreviousDocumentBandOverlap = (kind, proposedY, visualTop) => {
     if (markupOnlyBaselineFlow)
       return proposedY;
-    if (compactTutorialDocumentFlow)
+    if (compactTutorialDocumentFlow && previousDocumentBandKind !== "title") {
       return proposedY;
+    }
     if (previousDocumentBandBottomY === undefined || previousDocumentBandKind === undefined) {
       return proposedY;
     }
@@ -86214,6 +88874,7 @@ function renderDocumentToSvgModel(opts) {
     pageContentCount = 0;
     previousDocumentBandBottomY = undefined;
     previousDocumentBandKind = undefined;
+    previousMarkupInkBottomY = undefined;
     yOffset = currentPageIndex > 0 ? continuationPageContentY : 0;
     return false;
   };
@@ -86265,7 +88926,7 @@ function renderDocumentToSvgModel(opts) {
       staffSizeScale: staffSizeScale === 1 ? undefined : staffSizeScale,
       scoreReferenceBaseline: renderTunes.length > 0 && firstRenderableBlock?.type !== "pianoScore" || markupOnlySourceHeaderBaseline
     });
-    if (headerDoc) {
+    if (headerDoc && !isOneLinePageBreaking(pageBreaking)) {
       if (preparePlacement(headerDoc.height + headerToFirstBlockGap)) {} else {
         const sourceHeaderVisualCorrection = markupOnlySourceHeaderBaseline ? LINE_SPACING * 0.141 : 0;
         const visualY = yOffset + documentHeaderVisualYOffset(renderTunes.length > 0) + sourceHeaderVisualCorrection + onePagePianoHeaderBaselineCorrectionPx(documentInfo, firstRenderableBlock);
@@ -86287,6 +88948,8 @@ function renderDocumentToSvgModel(opts) {
         });
         const headerDeepestBaseline = deepestTextBaselineY(headerDoc.elements);
         rememberDocumentBandBottom("title", visualY, headerDeepestBaseline ?? headerDoc.height);
+        const headerInkBottoms = textInkBottomBoxes(headerDoc.elements);
+        previousMarkupInkBottomY = headerInkBottoms.length > 0 ? visualY + headerInkBottoms.reduce((b, box) => Math.max(b, box.y), Number.NEGATIVE_INFINITY) : undefined;
         const headerBottomRowXRange = deepestTextRowXRange(headerDoc.elements);
         if (headerDeepestBaseline !== undefined && isScoreLikeBlock(firstRenderableBlock)) {
           pendingMarkupToScoreHandoff = {
@@ -86311,6 +88974,9 @@ function renderDocumentToSvgModel(opts) {
     const prevPrevPrevPrevBlock = blocks[bi - 4];
     const nextBlock = blocks[bi + 1];
     if (block.type === "error" || block.type === "warning") {
+      continue;
+    }
+    if (isOneLinePageBreaking(pageBreaking) && (block.type === "markup" || block.type === "fillLine")) {
       continue;
     }
     if (block.type === "fillLine") {
@@ -86374,7 +89040,38 @@ function renderDocumentToSvgModel(opts) {
         nextBlock,
         baseYOffset: yOffset
       });
-      const visualYOffset = avoidPreviousDocumentBandOverlap("markup", rawVisualYOffset, markupDoc.visualTop);
+      const markupSpringY = (() => {
+        if (previousDocumentBandKind !== "markup" && previousDocumentBandKind !== "title") {
+          return;
+        }
+        if (previousMarkupInkBottomY === undefined)
+          return;
+        if (firstMarkupLeadingGapStaffSpaces(block) > 0)
+          return;
+        const inkTops = textInkTopBoxes(markupDoc.elements);
+        if (inkTops.length === 0)
+          return;
+        const inkTopOffset = inkTops.reduce((t, b) => Math.min(t, b.y), Number.POSITIVE_INFINITY);
+        if (!Number.isFinite(inkTopOffset))
+          return;
+        const padding = documentSpacingPaddingPx("markup-markup-spacing", documentInfo);
+        return previousMarkupInkBottomY + padding - inkTopOffset;
+      })();
+      const scoreToMarkupY = (() => {
+        if (previousDocumentBandKind !== "score" && previousDocumentBandKind !== "pianoScore") {
+          return;
+        }
+        if (lastScoreStaffBottomY === undefined)
+          return;
+        const firstBaseline = baselines.length > 0 ? Math.min(...baselines) : undefined;
+        if (firstBaseline === undefined)
+          return;
+        const basicPx = documentSpacingDistancePx("score-markup-spacing", documentInfo);
+        const staffCentreFromBottomPx = LINE_SPACING * 2;
+        return lastScoreStaffBottomY + basicPx - staffCentreFromBottomPx - firstBaseline;
+      })();
+      const floorY = avoidPreviousDocumentBandOverlap("markup", rawVisualYOffset, markupDoc.visualTop);
+      const visualYOffset = scoreToMarkupY !== undefined ? Math.max(scoreToMarkupY, floorY) : markupSpringY ?? floorY;
       const deepestBaseline = baselines.length > 0 ? Math.max(...baselines) : deepestTextBaselineY(markupDoc.elements);
       if (renderTunes.length === 0 && deepestBaseline !== undefined) {
         lastMarkupTextBaselineY = Math.max(lastMarkupTextBaselineY ?? -Infinity, visualYOffset + deepestBaseline);
@@ -86404,6 +89101,8 @@ function renderDocumentToSvgModel(opts) {
         y: visualYOffset + markupDoc.visualTop,
         height: Math.max(0, markupDoc.visualBottom - markupDoc.visualTop)
       });
+      const inkBottoms = textInkBottomBoxes(markupDoc.elements);
+      previousMarkupInkBottomY = inkBottoms.length > 0 ? visualYOffset + inkBottoms.reduce((b, box) => Math.max(b, box.y), Number.NEGATIVE_INFINITY) : undefined;
       rememberDocumentBandBottom("markup", visualYOffset, markupDoc.visualBottom);
       rememberMarkupOnlyFlowBlock(block, visualYOffset, baselines);
       const scoreFollows = isScoreLikeBlock(nextBlock);
@@ -86724,6 +89423,7 @@ function renderDocumentToSvgModel(opts) {
     width,
     musicGlyphMode,
     taglineText,
+    taglineLines: documentInfo?.taglineLines,
     taglineBox: documentInfo?.taglineBox,
     taglineBottomOffsetPx: taglineBottomOffsetForPage,
     taglineBottomMarginPx: mmToPx(documentInfo?.bottomMarginMm ?? 10),
@@ -86747,9 +89447,14 @@ function documentInfoFromMusicDocumentInfo(info) {
     poet: typeof info.header?.poet === "string" ? info.header.poet : undefined,
     piece: info.header?.piece,
     opus: info.header?.opus,
+    dedication: typeof info.header?.dedication === "string" ? info.header.dedication : undefined,
+    titleRuns: info.header?.titleRuns,
+    subtitleRuns: info.header?.subtitleRuns,
     tagline: info.header?.tagline,
+    taglineLines: info.header?.taglineLines,
     taglineBox: info.header?.taglineBox,
     raggedLast: info.raggedLast,
+    raggedLastBottom: info.raggedLastBottom,
     raggedRight: info.raggedRight,
     firstIndent: info.firstIndent,
     paperFont: info.paperFont,
@@ -86816,11 +89521,21 @@ function scoreForPart(score2, part2) {
 function staffNameForPart(part2, index) {
   return part2.name || part2.staves[0]?.name || `staff_${index}`;
 }
-function blockFromScore(score2) {
+function parsedOverlay(parsed) {
+  if (!parsed || parsed.type !== "score" && parsed.type !== "pianoScore")
+    return {};
+  return {
+    ...parsed.context ? { context: parsed.context } : {},
+    ...parsed.engravingEvents ? { engravingEvents: parsed.engravingEvents } : {},
+    ...parsed.type === "pianoScore" && parsed.nestedGroups?.length ? { nestedGroups: parsed.nestedGroups } : {},
+    ...parsed.range ? { range: parsed.range } : {}
+  };
+}
+function blockFromScore(score2, parsed) {
   if (score2.parts.length <= 1) {
     const tune = scoreToRenderModel(score2);
     return {
-      blocks: [{ type: "score", tune }],
+      blocks: [{ type: "score", tune, ...parsedOverlay(parsed) }],
       renderTunes: [tune],
       scores: [score2]
     };
@@ -86830,17 +89545,19 @@ function blockFromScore(score2) {
   const renderTunes = partScores.map((partScore) => scoreToRenderModel(partScore));
   const groupType = scoreWithMetadata.__lilyStaffGroupType ?? "PianoStaff";
   const nestedGroups = scoreWithMetadata.__lilyNestedStaffGroups;
+  const staffInstrumentNames = scoreWithMetadata.__lilyStaffInstrumentNames;
   const staves = renderTunes.map((tune, index) => ({
     name: staffNameForPart(score2.parts[index], index),
-    tune
+    tune: staffInstrumentNames?.[index]?.instrumentName || staffInstrumentNames?.[index]?.shortInstrumentName ? { ...tune, ...staffInstrumentNames[index] } : tune
   }));
   return {
     blocks: [{
       type: "pianoScore",
-      groupType,
+      groupType: parsed?.type === "pianoScore" ? parsed.groupType : groupType,
       staves,
       meta: renderTunes[0],
-      ...nestedGroups?.length ? { nestedGroups } : {}
+      ...nestedGroups?.length ? { nestedGroups } : {},
+      ...parsedOverlay(parsed)
     }],
     renderTunes,
     scores: partScores
@@ -86853,7 +89570,7 @@ function appendProjected(target, projected) {
 }
 function projectMusicDocumentBlock(block) {
   if (block.type === "score") {
-    return blockFromScore(block.score);
+    return blockFromScore(block.score, block.parsed);
   }
   if (block.type === "markup") {
     return {
