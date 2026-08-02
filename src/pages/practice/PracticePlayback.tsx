@@ -174,6 +174,14 @@ export default function PracticePlayback({
   const backingArrangementRef = useRef<BackingLayer[]>([])
   const printedOnsetsRef = useRef<number[]>([])
   const noteEventsRef = useRef<NotePlaybackEvent[]>([])
+  /**
+   * The beat currently being HEARD, tracked by the highlight rAF loop.
+   *
+   * `PlaybackClock.currentBeat` is the next beat to SCHEDULE — it runs a
+   * lookahead ahead of the audio, so pausing on it showed the following
+   * chord (paused while "D" sounded, displayed "Gm7").
+   */
+  const soundingBeatRef = useRef<number | null>(null)
   const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [], pizzicato: [] })
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
@@ -301,6 +309,7 @@ export default function PracticePlayback({
     if (noteRafRef.current !== null) cancelAnimationFrame(noteRafRef.current)
     noteRafRef.current = null
     noteAnchorRef.current = null
+    soundingBeatRef.current = null
     applyNoteHighlight([])
     setIsPlaying(false)
     setIsCountingIn(false)
@@ -315,7 +324,9 @@ export default function PracticePlayback({
    * you cannot find your place before pressing space again.
    */
   const pausePlayback = useCallback(() => {
-    const beat = clockRef.current?.currentBeat
+    const heard = soundingBeatRef.current
+    const scheduled = clockRef.current?.currentBeat
+    const beat = heard != null && heard > 0 ? heard : scheduled
     stopPlayback()
     const at = beat != null && beat > 0 ? beat : null
     resumeBeatRef.current = at
@@ -475,6 +486,7 @@ export default function PracticePlayback({
         const secondsPer = 60 / clock.bpm
         const frac = Math.min(0.999, Math.max(0, (ctx.currentTime - anchor.time) / secondsPer))
         const beat = (shouldLoop ? anchor.beat % total : anchor.beat) + frac
+        soundingBeatRef.current = beat
         applyNoteHighlight(noteEventIdsAtBeat(noteEvents, beat))
       }
       noteRafRef.current = requestAnimationFrame(noteTick)
