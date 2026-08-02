@@ -13,6 +13,7 @@ import LilyScore from './LilyScore'
 import ExercisePicker, { recordRecentExercise } from './ExercisePicker'
 import {
   exerciseUrl,
+  refreshedExercise,
   useExerciseCatalog,
   type ExerciseCatalogEntry,
 } from '../../hooks/useExerciseCatalog'
@@ -499,6 +500,15 @@ export default function PracticePlayback({
     setBpm(entry.bpm ?? DEFAULT_BPM)
     onSelectExercise(entry)
   }, [stopPlayback, onSelectExercise])
+
+  // The selection is persisted as a whole entry, so a returning user carries
+  // the metadata that was published when they picked it. Re-adopt the catalog's
+  // version once it loads, or newly published fields (a corrected bpm, the
+  // `backing` style) would never reach an existing installation.
+  useEffect(() => {
+    const fresh = refreshedExercise(exercise, catalog.exercises)
+    if (fresh) onSelectExercise(fresh)
+  }, [catalog.exercises, exercise, onSelectExercise])
 
   // An exercise can declare its own backing style (catalog `backing`, e.g. the
   // Merry-Go-Round waltz); apply it when that exercise opens. The meter-gate

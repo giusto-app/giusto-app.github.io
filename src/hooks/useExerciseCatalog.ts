@@ -73,6 +73,25 @@ export function readStoredExercise(): ExerciseCatalogEntry {
   }
 }
 
+/**
+ * The freshly published version of a stored selection, or null when it is
+ * already current (or is not in the catalog).
+ *
+ * The selection is persisted as a whole entry so it keeps working offline
+ * before the catalog fetch resolves — which also means a returning user holds
+ * whatever metadata was published the day they picked it. Anything the catalog
+ * later adds (a corrected bpm or title, a `backing` style) would never reach
+ * them. Reconciling by id on load fixes that whole class.
+ */
+export function refreshedExercise(
+  stored: ExerciseCatalogEntry,
+  catalog: readonly ExerciseCatalogEntry[],
+): ExerciseCatalogEntry | null {
+  const fresh = catalog.find((entry) => entry.id === stored.id)
+  if (!fresh) return null
+  return JSON.stringify(fresh) === JSON.stringify(stored) ? null : fresh
+}
+
 export function storeExercise(entry: ExerciseCatalogEntry): void {
   try {
     localStorage.setItem(SELECTED_KEY, JSON.stringify(entry))
