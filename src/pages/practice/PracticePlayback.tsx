@@ -232,7 +232,10 @@ export default function PracticePlayback({
   const schedule: ChordScheduleResult | null = parsed?.chords ?? null
   const noteEvents: NotePlaybackEvent[] = parsed?.notes ?? []
   const hasChordTrack = (schedule?.events.length ?? 0) > 0
-  const meterNumerator = parsed?.meterNumerator ?? 4
+  // null until the score parses — a DEFAULT meter must never evict a style
+  // (see the meter-gate effect).
+  const parsedMeter = parsed?.meterNumerator ?? null
+  const meterNumerator = parsedMeter ?? 4
 
   // Only offer styles that suit the exercise's meter (Waltz → 3/4, Gypsy → 4/4).
   const backingOptions = useMemo(
@@ -471,12 +474,17 @@ export default function PracticePlayback({
     if (instrumentsRef.current) for (const inst of Object.values(instrumentsRef.current)) inst.setVolume(vol)
   }, [backingSelection, backingVol])
 
-  // Drop a style that doesn't fit the exercise's meter (e.g. Waltz on a 4/4 piece).
+  // Drop a style that doesn't fit the exercise's meter (e.g. Waltz on a 4/4
+  // piece) — but only once the meter is KNOWN. While the score is still being
+  // fetched and parsed the fallback is 4, and gating against that evicted a
+  // declared style before its own meter was ever read: Merry-Go-Round asks for
+  // the waltz, was reset to Drone, and its 3/4 arrived a beat too late.
   useEffect(() => {
-    if (isStyle(backingSelection) && !isStyleAvailable(backingSelection, meterNumerator)) {
+    if (parsedMeter == null) return
+    if (isStyle(backingSelection) && !isStyleAvailable(backingSelection, parsedMeter)) {
       setBackingSelection('drone')
     }
-  }, [meterNumerator, backingSelection])
+  }, [parsedMeter, backingSelection])
 
   // Gypsy jazz swings against the bass, not a click — default its metronome off.
   useEffect(() => {
