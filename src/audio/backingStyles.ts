@@ -183,11 +183,50 @@ export function buildBackingArrangement(score: ScoreLike, style: BackingStyle): 
   return [{ instrument: 'strings', notes: buildBackingSchedule(score, style) }]
 }
 
+/**
+ * Meters a style requires; absent = fits any meter. The waltz pattern is
+ * three beats long and the gypsy pompe alternates on a duple bar, so those
+ * two are the only meter-gated styles.
+ */
+const STYLE_METERS: Partial<Record<BackingStyle, readonly number[]>> = {
+  waltz: [3],
+  gypsy: [2, 4],
+}
+
 /** Whether a style suits the meter — Waltz needs 3/4, Gypsy Jazz a duple/quadruple meter. */
 export function isStyleAvailable(style: BackingStyle, meterNumerator: number): boolean {
-  if (style === 'waltz') return meterNumerator === 3
-  if (style === 'gypsy') return meterNumerator === 4 || meterNumerator === 2
-  return true
+  const meters = STYLE_METERS[style]
+  return !meters || meters.includes(meterNumerator)
+}
+
+/** Silence, the tuning drone, or a musical style. */
+export type BackingSelection = 'off' | 'drone' | BackingStyle
+
+const BACKING_SELECTIONS: readonly BackingSelection[] = [
+  'off', 'drone', 'chords', 'arpeggio', 'pulse', 'waltz', 'gypsy',
+]
+
+export const isStyle = (s: BackingSelection): s is BackingStyle => s !== 'off' && s !== 'drone'
+
+/**
+ * The backing an opening exercise should switch to for its declared catalog
+ * `backing`, or null to leave the current selection alone.
+ *
+ * A METER-GATED style (Waltz 3/4, Gypsy 2|4/4) is adopted only once the meter
+ * is known to match — never optimistically. `meterNumerator` is null while the
+ * score is still being fetched and parsed, and also when a parse FAILS, so
+ * adopting first and evicting later could strand a 4/4 piece on a three-beat
+ * pattern. Meter-agnostic styles need no such wait.
+ */
+export function declaredBackingSelection(
+  declared: string | undefined,
+  meterNumerator: number | null,
+): BackingSelection | null {
+  if (!declared) return null
+  const selection = BACKING_SELECTIONS.find((value) => value === declared)
+  if (!selection) return null
+  if (!isStyle(selection) || !STYLE_METERS[selection]) return selection
+  return meterNumerator != null && isStyleAvailable(selection, meterNumerator) ? selection : null
 }
 
 /** MIDI notes to preload per instrument so any style plays gaplessly. */

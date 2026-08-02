@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { parseSource, type ScoreLike } from 'lilyjs'
 import {
   allBackingMidis,
+  declaredBackingSelection,
   backingNotesInWindow,
   buildBackingArrangement,
   buildBackingSchedule,
@@ -137,5 +138,35 @@ describe('prepareMidisByInstrument', () => {
     expect(midis.bass).toContain(43) // G2 (waltz boom register)
     expect(midis.guitar.length).toBeGreaterThan(0)
     expect(midis.pizzicato.length).toBeGreaterThan(0)
+  })
+})
+
+describe('declaredBackingSelection', () => {
+  test("adopts a catalog-declared waltz only for music actually in 3/4", () => {
+    expect(declaredBackingSelection('waltz', 3)).toBe('waltz')
+    expect(declaredBackingSelection('waltz', 4)).toBeNull()
+    expect(declaredBackingSelection('waltz', 6)).toBeNull()
+  })
+
+  test('waits for the meter rather than adopting a gated style optimistically', () => {
+    // null = still fetching/parsing, or the parse FAILED. Adopting now and
+    // evicting later would strand a 4/4 piece on a three-beat pattern.
+    expect(declaredBackingSelection('waltz', null)).toBeNull()
+    expect(declaredBackingSelection('gypsy', null)).toBeNull()
+    expect(declaredBackingSelection('gypsy', 4)).toBe('gypsy')
+    expect(declaredBackingSelection('gypsy', 3)).toBeNull()
+  })
+
+  test('meter-agnostic styles and non-styles need no meter', () => {
+    expect(declaredBackingSelection('chords', null)).toBe('chords')
+    expect(declaredBackingSelection('arpeggio', null)).toBe('arpeggio')
+    expect(declaredBackingSelection('pulse', null)).toBe('pulse')
+    expect(declaredBackingSelection('drone', null)).toBe('drone')
+    expect(declaredBackingSelection('off', null)).toBe('off')
+  })
+
+  test('ignores an absent or unknown declaration', () => {
+    expect(declaredBackingSelection(undefined, 3)).toBeNull()
+    expect(declaredBackingSelection('bossa-nova', 3)).toBeNull()
   })
 })

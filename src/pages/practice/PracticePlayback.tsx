@@ -29,11 +29,13 @@ import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/s
 import {
   backingNotesInWindow,
   buildBackingArrangement,
+  declaredBackingSelection,
+  isStyle,
   isStyleAvailable,
   prepareMidisByInstrument,
   BACKING_STYLE_LABELS,
   type BackingLayer,
-  type BackingStyle,
+  type BackingSelection,
 } from '../../audio/backingStyles'
 import {
   buildChordSchedule,
@@ -71,8 +73,6 @@ function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score
 
 // One backing selector: silence, the tuning drone, or a musical style. Each
 // style renders the same harmony as a different texture (see backingStyles).
-type BackingSelection = 'off' | 'drone' | BackingStyle
-
 const BACKING_OPTIONS: Array<[BackingSelection, string]> = [
   ['off', 'Off'],
   ['drone', 'Drone'],
@@ -82,8 +82,6 @@ const BACKING_OPTIONS: Array<[BackingSelection, string]> = [
   ['waltz', BACKING_STYLE_LABELS.waltz],
   ['gypsy', BACKING_STYLE_LABELS.gypsy],
 ]
-
-const isStyle = (s: BackingSelection): s is BackingStyle => s !== 'off' && s !== 'drone'
 
 // The play-along drone uses the sampled cello (steady, no wavy detune); the
 // tuning-voice choice lives in the Drone tab. Styles play through the strings.
@@ -519,13 +517,13 @@ export default function PracticePlayback({
   }, [catalog.exercises, exercise, onSelectExercise])
 
   // An exercise can declare its own backing style (catalog `backing`, e.g. the
-  // Merry-Go-Round waltz); apply it when that exercise opens. The meter-gate
-  // effect above still drops it if the declared style doesn't fit.
+  // Merry-Go-Round waltz). A meter-gated style waits for the parsed meter, so
+  // Waltz is adopted only for music actually in 3/4 — see
+  // declaredBackingSelection.
   useEffect(() => {
-    const declared = exercise.backing as BackingSelection | undefined
-    if (!declared) return
-    if (BACKING_OPTIONS.some(([value]) => value === declared)) setBackingSelection(declared)
-  }, [exercise.id, exercise.backing])
+    const declared = declaredBackingSelection(exercise.backing, parsedMeter)
+    if (declared) setBackingSelection(declared)
+  }, [exercise.id, exercise.backing, parsedMeter])
 
   // Resolve #practice/<exercise-id> after the remote catalog (or cache) is
   // available. The bundled exercise can resolve immediately while loading.
