@@ -6,7 +6,7 @@
 //
 // Samples: FluidR3_GM (CC-BY 3.0), self-hosted by scripts/fetch-samples.ts.
 
-export type InstrumentId = 'strings' | 'bass' | 'guitar'
+export type InstrumentId = 'strings' | 'bass' | 'guitar' | 'pizzicato'
 
 export interface SampleSet {
   dir: string
@@ -58,7 +58,20 @@ const GUITAR: SampleSet = {
   attackS: 0.004, releaseS: 0.14, gain: 0.85, loopSustain: false, reverbWet: 0.16, voices: 2, detuneCents: 6,
 }
 
-export const SAMPLE_SETS: Record<InstrumentId, SampleSet> = { strings: STRINGS, bass: BASS, guitar: GUITAR }
+const PIZZICATO: SampleSet = {
+  dir: '/sounds/pizzicato',
+  samples: [
+    { midiNote: 36, note: 'C2' }, { midiNote: 40, note: 'E2' }, { midiNote: 43, note: 'G2' },
+    { midiNote: 48, note: 'C3' }, { midiNote: 52, note: 'E3' }, { midiNote: 55, note: 'G3' },
+    { midiNote: 60, note: 'C4' }, { midiNote: 64, note: 'E4' }, { midiNote: 67, note: 'G4' },
+    { midiNote: 72, note: 'C5' },
+  ],
+  // Section pizzicato: instant pluck, natural ring, two detuned voices for
+  // orchestral width, a bit of the same hall as the bowed ensemble.
+  attackS: 0.003, releaseS: 0.22, gain: 1.0, loopSustain: false, reverbWet: 0.26, voices: 2, detuneCents: 6,
+}
+
+export const SAMPLE_SETS: Record<InstrumentId, SampleSet> = { strings: STRINGS, bass: BASS, guitar: GUITAR, pizzicato: PIZZICATO }
 
 export interface SampledInstrumentOptions {
   concertPitchHz: number

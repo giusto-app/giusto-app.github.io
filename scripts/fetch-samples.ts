@@ -30,6 +30,11 @@ const INSTRUMENTS: { soundfont: string; dir: string; notes: string[] }[] = [
     dir: 'guitar',
     notes: ['E2', 'G2', 'C3', 'E3', 'G3', 'C4', 'E4', 'G4', 'C5', 'E5'],
   },
+  {
+    soundfont: 'pizzicato_strings',
+    dir: 'pizzicato',
+    notes: ['C2', 'E2', 'G2', 'C3', 'E3', 'G3', 'C4', 'E4', 'G4', 'C5'],
+  },
 ]
 
 for (const { soundfont, dir, notes } of INSTRUMENTS) {

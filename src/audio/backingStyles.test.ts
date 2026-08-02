@@ -45,15 +45,35 @@ describe('buildBackingSchedule', () => {
     expect(backingNotesInWindow(notes, 0, 1).map((n) => n.midi)).toEqual([55, 58, 62])
   })
 
-  test('waltz: bass on the beat, upper tones on the off-beat', () => {
-    const notes = buildBackingSchedule(witness(), 'waltz')
-    const firstBeat = backingNotesInWindow(notes, 0, 1)
-    // Beat 0.0 → bass (G3=55); beat 0.5 → upper tones (58, 62).
-    expect(firstBeat.map((n) => [n.startBeat, n.midi])).toEqual([
-      [0, 55],
-      [0.5, 58],
-      [0.5, 62],
+  test('waltz: orchestral boom-chick-chick arrangement in 3/4', () => {
+    // Gm held for TWO bars (g1. = 6 beats in 3/4), then Cm for one.
+    const src = `\\language "english"
+      chordNames = \\chordmode { g1.:m c2.:m }
+      \\score {
+        <<
+          \\new ChordNames { \\chordNames }
+          \\new Staff { \\time 3/4 \\relative c' { c2. c2. c2. } }
+        >>
+      }`
+    const doc = parseSource(src).document
+    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
+    const layers = buildBackingArrangement(block!.score, 'waltz')
+    expect(layers.map((l) => l.instrument)).toEqual(['bass', 'pizzicato', 'strings'])
+
+    const [bass, pizzicato, pad] = layers.map((l) => l.notes)
+    // "Boom": double bass on beat 1 of every bar — root (G2=43) on the chord's
+    // first bar, the fifth (D3=50) on its second, root (C2=36) at the change.
+    expect(bass!.map((n) => [n.startBeat, n.midi])).toEqual([
+      [0, 43],
+      [3, 50],
+      [6, 36],
     ])
+    // "Chick-chick": pizzicato upper tones on beats 2 and 3 only.
+    expect([...new Set(pizzicato!.map((n) => n.startBeat))]).toEqual([1, 2, 4, 5, 7, 8])
+    expect(backingNotesInWindow(pizzicato!, 1, 2).map((n) => n.midi)).toEqual([58, 62])
+    // Section pad: the same tones sustained softly across the harmony span.
+    expect(pad!.every((n) => n.velocity < 40)).toBe(true)
+    expect(backingNotesInWindow(pad!, 0, 1).map((n) => n.durationBeats)).toEqual([6, 6])
   })
 
   test('arpeggio: sequential eighth-note tones', () => {
@@ -113,7 +133,9 @@ describe('prepareMidisByInstrument', () => {
   test('provides preload notes for each instrument', () => {
     const midis = prepareMidisByInstrument(witness())
     expect(midis.strings.length).toBeGreaterThan(0)
-    expect(midis.bass).toContain(31) // G1
+    expect(midis.bass).toContain(31) // G1 (gypsy pompe register)
+    expect(midis.bass).toContain(43) // G2 (waltz boom register)
     expect(midis.guitar.length).toBeGreaterThan(0)
+    expect(midis.pizzicato.length).toBeGreaterThan(0)
   })
 })

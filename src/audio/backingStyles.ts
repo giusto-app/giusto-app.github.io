@@ -10,9 +10,9 @@ import { buildChordBackingSchedule, type ChordBlock } from './chordBacking'
 import type { InstrumentId } from './sampledInstrument'
 
 /** Styles rendered by the string ensemble alone (single instrument). */
-export type StringsStyle = 'chords' | 'arpeggio' | 'pulse' | 'waltz'
-/** All backing styles, including the multi-instrument gypsy-jazz arrangement. */
-export type BackingStyle = StringsStyle | 'gypsy'
+export type StringsStyle = 'chords' | 'arpeggio' | 'pulse'
+/** All backing styles, including the multi-instrument waltz/gypsy arrangements. */
+export type BackingStyle = StringsStyle | 'waltz' | 'gypsy'
 
 export const BACKING_STYLE_LABELS: Record<BackingStyle, string> = {
   chords: 'Chords',
@@ -52,27 +52,6 @@ function pulse(blocks: ChordBlock[]): TimedNote[] {
   return out
 }
 
-/** Broken chord — bass on the beat, upper tones on the off-beat (oom-pah feel). */
-function waltz(blocks: ChordBlock[]): TimedNote[] {
-  const out: TimedNote[] = []
-  for (const b of blocks) {
-    if (b.midis.length === 0) continue
-    const end = b.startBeat + b.durationBeats
-    const bass = b.midis[0]!
-    const upper = b.midis.slice(1)
-    for (let t = b.startBeat; t < end - 1e-6; t += 1) {
-      out.push({ startBeat: t, durationBeats: Math.min(0.5, end - t), midi: bass, velocity: b.velocity })
-      const off = t + 0.5
-      if (off < end - 1e-6) {
-        for (const midi of upper) {
-          out.push({ startBeat: off, durationBeats: Math.min(0.5, end - off), midi, velocity: Math.round(b.velocity * 0.85) })
-        }
-      }
-    }
-  }
-  return out
-}
-
 /** Build the note schedule for a single-instrument (strings) style. */
 export function buildBackingSchedule(score: ScoreLike, style: StringsStyle): TimedNote[] {
   if (style === 'arpeggio') {
@@ -85,8 +64,7 @@ export function buildBackingSchedule(score: ScoreLike, style: StringsStyle): Tim
   }
   const blocks = buildChordBackingSchedule(score)
   if (style === 'chords') return sustained(blocks)
-  if (style === 'pulse') return pulse(blocks)
-  return waltz(blocks)
+  return pulse(blocks)
 }
 
 /** Notes starting in `[fromBeat, toBeat)` — scheduled per clock beat. */
@@ -116,6 +94,58 @@ export interface BackingLayer {
 /** Lowest MIDI at or above `floorMidi` with the given pitch class. */
 function placePc(pc: number, floorMidi: number): number {
   return floorMidi + ((((pc % 12) - floorMidi) % 12) + 12) % 12
+}
+
+/**
+ * Orchestral waltz — the classic 3/4 boom-chick-chick, scored like a pit
+ * orchestra:
+ *
+ *   bass       "boom":  root on beat 1 of each bar (fifth on a long chord's
+ *                       alternate bars), ringing under the chicks
+ *   pizzicato  "chick": the upper chord tones plucked on beats 2 and 3
+ *   strings    pad:     the same tones sustained very softly across the
+ *                       harmony span, the section body under the pulse
+ *
+ * Beat 1 of the bar is `(t − blockStart) % 3` relative to the harmony block —
+ * chords in a waltz change on downbeats, so a block's first beat IS a bar
+ * start (same bar convention the gypsy pompe uses for 4/4).
+ */
+function waltz(score: ScoreLike): BackingLayer[] {
+  const bass: TimedNote[] = []
+  const pizzicato: TimedNote[] = []
+  const pad: TimedNote[] = []
+  for (const b of buildChordBackingSchedule(score)) {
+    if (b.midis.length === 0) continue
+    const rootPc = ((b.midis[0]! % 12) + 12) % 12
+    const bassRoot = placePc(rootPc, 36) // orchestral double-bass register (C2 floor)
+    const bassFifth = bassRoot + 7
+    const upper = b.midis.slice(1)
+    const end = b.startBeat + b.durationBeats
+    for (const midi of (upper.length ? upper : b.midis)) {
+      pad.push({ startBeat: b.startBeat, durationBeats: b.durationBeats, midi, velocity: 34 })
+    }
+    for (let t = b.startBeat; t < end - 1e-6; t += 1) {
+      const beatInBlock = Math.round(t - b.startBeat)
+      const beatInBar = ((beatInBlock % 3) + 3) % 3
+      if (beatInBar === 0) {
+        // Root on the chord's first bar, alternating with the fifth when one
+        // harmony spans several bars.
+        const midi = Math.floor(beatInBlock / 3) % 2 === 0 ? bassRoot : bassFifth
+        bass.push({ startBeat: t, durationBeats: Math.min(1.9, end - t), midi, velocity: 106 })
+      } else {
+        const dur = Math.min(0.45, end - t)
+        const velocity = beatInBar === 1 ? 78 : 68 // beat 2 slightly leads beat 3
+        for (const midi of (upper.length ? upper : b.midis)) {
+          pizzicato.push({ startBeat: t, durationBeats: dur, midi, velocity })
+        }
+      }
+    }
+  }
+  return [
+    { instrument: 'bass', notes: bass },
+    { instrument: 'pizzicato', notes: pizzicato },
+    { instrument: 'strings', notes: pad },
+  ]
 }
 
 /**
@@ -149,6 +179,7 @@ function gypsy(score: ScoreLike): BackingLayer[] {
 /** Build the full arrangement (one or more instrument layers) for a style. */
 export function buildBackingArrangement(score: ScoreLike, style: BackingStyle): BackingLayer[] {
   if (style === 'gypsy') return gypsy(score)
+  if (style === 'waltz') return waltz(score)
   return [{ instrument: 'strings', notes: buildBackingSchedule(score, style) }]
 }
 
@@ -162,11 +193,13 @@ export function isStyleAvailable(style: BackingStyle, meterNumerator: number): b
 /** MIDI notes to preload per instrument so any style plays gaplessly. */
 export function prepareMidisByInstrument(score: ScoreLike): Record<InstrumentId, number[]> {
   const gyp = buildBackingArrangement(score, 'gypsy')
-  const midisOf = (id: InstrumentId) =>
-    gyp.filter((l) => l.instrument === id).flatMap((l) => l.notes.map((n) => n.midi))
+  const wal = buildBackingArrangement(score, 'waltz')
+  const midisOf = (layers: BackingLayer[], id: InstrumentId) =>
+    layers.filter((l) => l.instrument === id).flatMap((l) => l.notes.map((n) => n.midi))
   return {
-    strings: allBackingMidis(score),
-    bass: midisOf('bass'),
-    guitar: midisOf('guitar'),
+    strings: [...new Set([...allBackingMidis(score), ...midisOf(wal, 'strings')])],
+    bass: [...new Set([...midisOf(gyp, 'bass'), ...midisOf(wal, 'bass')])],
+    guitar: midisOf(gyp, 'guitar'),
+    pizzicato: midisOf(wal, 'pizzicato'),
   }
 }

@@ -170,7 +170,7 @@ export default function PracticePlayback({
   const backingSelectionRef = useRef(backingSelection)
   backingSelectionRef.current = backingSelection
   const backingArrangementRef = useRef<BackingLayer[]>([])
-  const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [] })
+  const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [], pizzicato: [] })
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
   const metronomeOnRef = useRef(metronomeOn)
@@ -249,7 +249,7 @@ export default function PracticePlayback({
   backingArrangementRef.current = backingArrangement
   // Per-instrument preload notes, so switching styles never falls back to synth.
   const prepareMidis = useMemo(
-    () => (parsed?.score ? prepareMidisByInstrument(parsed.score) : { strings: [], bass: [], guitar: [] }),
+    () => (parsed?.score ? prepareMidisByInstrument(parsed.score) : { strings: [], bass: [], guitar: [], pizzicato: [] }),
     [parsed],
   )
   prepareMidisRef.current = prepareMidis
@@ -312,12 +312,14 @@ export default function PracticePlayback({
       strings: new SampledInstrument(ctx, SAMPLE_SETS.strings, { concertPitchHz: concertPitch, volume: instrumentVol }),
       bass: new SampledInstrument(ctx, SAMPLE_SETS.bass, { concertPitchHz: concertPitch, volume: instrumentVol }),
       guitar: new SampledInstrument(ctx, SAMPLE_SETS.guitar, { concertPitchHz: concertPitch, volume: instrumentVol }),
+      pizzicato: new SampledInstrument(ctx, SAMPLE_SETS.pizzicato, { concertPitchHz: concertPitch, volume: instrumentVol }),
     }
     // Preload every instrument's notes so switching styles never falls back to synth.
     await Promise.all([
       instruments.strings.prepare(prep.strings),
       instruments.bass.prepare(prep.bass),
       instruments.guitar.prepare(prep.guitar),
+      instruments.pizzicato.prepare(prep.pizzicato),
     ])
 
     // Tempo training repeats the exercise until its target is completed.
@@ -497,6 +499,15 @@ export default function PracticePlayback({
     setBpm(entry.bpm ?? DEFAULT_BPM)
     onSelectExercise(entry)
   }, [stopPlayback, onSelectExercise])
+
+  // An exercise can declare its own backing style (catalog `backing`, e.g. the
+  // Merry-Go-Round waltz); apply it when that exercise opens. The meter-gate
+  // effect above still drops it if the declared style doesn't fit.
+  useEffect(() => {
+    const declared = exercise.backing as BackingSelection | undefined
+    if (!declared) return
+    if (BACKING_OPTIONS.some(([value]) => value === declared)) setBackingSelection(declared)
+  }, [exercise.id, exercise.backing])
 
   // Resolve #practice/<exercise-id> after the remote catalog (or cache) is
   // available. The bundled exercise can resolve immediately while loading.

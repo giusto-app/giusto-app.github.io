@@ -25,6 +25,9 @@ export interface ExerciseCatalogEntry {
   bars: number
   hasChords: boolean
   bpm?: number
+  /** Backing style this exercise opens with (e.g. "waltz") — a
+   *  BackingStyle name; ignored when it doesn't fit the meter. */
+  backing?: string
   tags: string[]
 }
 
