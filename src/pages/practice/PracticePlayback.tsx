@@ -144,6 +144,8 @@ export default function PracticePlayback({
   // Transpose the exercise to a target key (0 = original).
   const [transposeSemitones, setTransposeSemitones] = useState(0)
   const [activeChordIndex, setActiveChordIndex] = useState<number>(-1)
+  /** Bar the transport is parked on (1-based), or null at the top. */
+  const [parkedMeasure, setParkedMeasure] = useState<number | null>(null)
   const [isCountingIn, setIsCountingIn] = useState(false)
   const [shareStatus, setShareStatus] = useState('')
   const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
@@ -317,6 +319,33 @@ export default function PracticePlayback({
   }, [applyNoteHighlight])
 
   /**
+   * Measure <-> beat, using the schedule's own bar length so it holds in any
+   * meter. Measures are 1-based, as printed and as `data-lily-measure`.
+   */
+  const beatsPerBar = schedule?.beatsPerBar ?? 4
+  const measureAtBeat = useCallback(
+    (beat: number) => Math.floor(Math.max(0, beat) / beatsPerBar) + 1,
+    [beatsPerBar],
+  )
+  const beatAtMeasure = useCallback(
+    (measure: number) => Math.max(0, measure - 1) * beatsPerBar,
+    [beatsPerBar],
+  )
+
+  /** Park the transport on a measure and show it on the score. */
+  const parkAtMeasure = useCallback((measure: number | null) => {
+    setParkedMeasure(measure)
+    noteBindingRef.current?.setActiveMeasure(measure)
+  }, [])
+
+  /** Back to the top: clear the resume point and the parked marker. */
+  const rewind = useCallback(() => {
+    stopPlayback()
+    resumeBeatRef.current = null
+    parkAtMeasure(null)
+  }, [stopPlayback, parkAtMeasure])
+
+  /**
    * Stop, but keep BOTH the resume point and the on-screen position.
    *
    * stopPlayback() clears the chord and note highlights because ending a take
@@ -333,8 +362,11 @@ export default function PracticePlayback({
     if (at !== null) {
       setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, at))
       applyNoteHighlight(noteEventIdsAtBeat(noteEventsRef.current, at))
+      // Colour the bar we stopped in — the thing the user looks for before
+      // pressing play again.
+      parkAtMeasure(measureAtBeat(at))
     }
-  }, [stopPlayback, applyNoteHighlight])
+  }, [stopPlayback, applyNoteHighlight, parkAtMeasure, measureAtBeat])
 
   const startPlayback = useCallback(async (resumeFromBeat?: number) => {
     if (!schedule || schedule.totalBeats === 0) return
@@ -503,6 +535,8 @@ export default function PracticePlayback({
     clockRef.current = clock
     droneRef.current = drone
     instrumentsRef.current = instruments
+    noteBindingRef.current?.setActiveMeasure(null)
+    setParkedMeasure(null)
     clock.start(resumeFromBeat)
     setIsPlaying(true)
   }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
@@ -660,6 +694,25 @@ export default function PracticePlayback({
     })
   }, [activeChordIndex])
 
+  /**
+   * Click a bar to select it as the start point.
+   *
+   * The rendered elements carry a score-wide `data-lily-measure` (lilyJS
+   * >= 0.11), so the nearest element under the pointer names the bar without
+   * the app needing its own coordinate model.
+   */
+  const handleScoreClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isPlaying) return
+    const target = (e.target as Element | null)?.closest?.('[data-lily-measure]')
+    const raw = target?.getAttribute('data-lily-measure')
+    if (!raw) return
+    const measure = Number(raw)
+    if (!Number.isFinite(measure)) return
+    resumeBeatRef.current = beatAtMeasure(measure)
+    parkAtMeasure(measure)
+    setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, beatAtMeasure(measure)))
+  }, [isPlaying, beatAtMeasure, parkAtMeasure])
+
   const handleRendered = useCallback((container: HTMLDivElement) => {
     scoreContainerRef.current = container
     // The SVG was rebuilt (font swap, resize) — the old binding holds dead
@@ -756,7 +809,11 @@ export default function PracticePlayback({
       {source && !loadError && (
         <>
       {/* Score */}
-      <div id="play-along-score" className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto">
+      <div
+        id="play-along-score"
+        className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto"
+        onClick={handleScoreClick}
+      >
         <LilyScore
           source={source}
           scoreIndex={parsed?.renderScoreIndex}
@@ -769,23 +826,52 @@ export default function PracticePlayback({
       {/* Transport */}
       <div id="play-along-transport" className="flex items-center gap-3">
         <button
-          onClick={() => (isPlaying ? stopPlayback() : void startPlayback())}
+          onClick={rewind}
+          disabled={!schedule || schedule.totalBeats === 0}
+          className={[
+            'w-10 h-10 rounded-full flex items-center justify-center text-lg transition-colors shrink-0',
+            'bg-gray-800/60 text-gray-300 hover:text-white',
+            !schedule ? 'opacity-40 cursor-not-allowed' : '',
+          ].join(' ')}
+          aria-label="Rewind to the start"
+          title="Rewind to the start"
+        >
+          ⏮
+        </button>
+        <button
+          onClick={() => (isPlaying ? pausePlayback() : void startPlayback(resumeBeatRef.current ?? undefined))}
           disabled={!schedule || schedule.totalBeats === 0}
           className={[
             'w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors shrink-0',
             isPlaying ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white',
             !schedule ? 'opacity-40 cursor-not-allowed' : '',
           ].join(' ')}
-          aria-label={isPlaying ? 'Stop' : 'Play'}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+          title={isPlaying ? 'Pause (space)' : 'Play (space)'}
         >
-          {isPlaying ? '■' : '▶'}
+          {isPlaying ? '❙❙' : '▶'}
+        </button>
+
+        <button
+          onClick={() => setLoop(l => !l)}
+          className={[
+            'w-10 h-10 rounded-full flex items-center justify-center text-lg transition-colors shrink-0',
+            loop ? 'bg-amber-400/90 text-gray-900' : 'bg-gray-800/60 text-gray-300 hover:text-white',
+          ].join(' ')}
+          aria-label={loop ? 'Loop on' : 'Loop off'}
+          aria-pressed={loop}
+          title="Loop"
+        >
+          ↻
         </button>
 
         <div className="flex-1">
           <div className="flex justify-between text-xs text-gray-500 mb-1">
             <span>Tempo</span>
             <span className="tabular-nums">
-              {isCountingIn ? 'count-in…' : `♩ = ${bpm}`}
+              {isCountingIn ? 'count-in…'
+                : parkedMeasure !== null ? `bar ${parkedMeasure} · ♩ = ${bpm}`
+                : `♩ = ${bpm}`}
             </span>
           </div>
           <input

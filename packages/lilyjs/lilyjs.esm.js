@@ -76615,10 +76615,22 @@ function renderMeasureNoteheadGlyphs(ctx) {
 
 // src/music-rendering/renderer/staffRow/measureNotes/renderMeasureNotes.ts
 function renderMeasureNotes(opts) {
+  const stampMeasureNumber = (nodes, from) => {
+    if (globalMeasureNumber === undefined)
+      return;
+    for (let i = from;i < nodes.length; i++) {
+      const node = nodes[i];
+      if (node?.props && node.props["data-lily-measure"] === undefined) {
+        node.props["data-lily-measure"] = globalMeasureNumber;
+      }
+    }
+  };
+  const measureNodeStart = opts.els.length;
   const {
     els,
     measure: measure2,
     mi,
+    globalMeasureNumber,
     measureStartX,
     noteAreaPx,
     yOffset,
@@ -76905,6 +76917,7 @@ function renderMeasureNotes(opts) {
       ...onSlurTrace ? { onSlurTrace } : {}
     });
   }
+  stampMeasureNumber(els, measureNodeStart);
   return noteIdx;
 }
 // src/music-rendering/engraving/bracketGeometry.ts
@@ -78069,6 +78082,7 @@ function renderMeasureContent(input) {
     els,
     measure: measure2,
     mi,
+    globalMeasureNumber: input.globalMi + 1,
     measureStartX: mx,
     noteAreaPx: noteArea,
     yOffset,
@@ -87968,7 +87982,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.10.1",
+  version: "0.11.0",
   type: "module",
   exports: {
     ".": {
@@ -90616,6 +90630,16 @@ var RENDERER_STYLE_TEXT = `/* music-renderer styles — auto-injected by the sta
 [data-lily-playback-active="true"] {
   transition: fill 80ms linear, stroke 80ms linear;
 }
+
+/*
+ * The measure the transport is parked on — where a stopped playback resumes
+ * from, and what a "play from here" selection marks. Deliberately weaker than
+ * the sounding-note colour: it is a place marker, not the thing being heard.
+ */
+[data-lily-measure-active="true"] {
+  fill: var(--lily-measure-active, #60a5fa);
+  stroke: var(--lily-measure-active, #60a5fa);
+}
 `;
 // src/music-playback/types.ts
 function tempoSegmentQuarterBpm(segment) {
@@ -92370,6 +92394,9 @@ function midiProgramForScore(score2) {
 }
 // src/music-playback/svgBinding.ts
 var DEFAULT_EVENT_ATTRIBUTE = "data-lily-event-id";
+var MEASURE_ATTRIBUTE = "data-lily-measure";
+var MEASURE_ACTIVE_ATTRIBUTE = "data-lily-measure-active";
+var MEASURE_ACTIVE_CLASS = "lily-measure-active";
 var DEFAULT_MULTI_EVENT_ATTRIBUTE = "data-lily-event-ids";
 var DEFAULT_ACTIVE_ATTRIBUTE = "data-lily-playback-active";
 var DEFAULT_PRIMARY_ATTRIBUTE = "data-lily-playback-primary";
@@ -92381,7 +92408,10 @@ var PRIMARY_ELEMENT_TYPES = new Set([
   "rest",
   "percent-repeat",
   "dot",
-  "ledger-line"
+  "ledger-line",
+  "stem",
+  "flag",
+  "accidental"
 ]);
 function toArray(items) {
   const maybeLength = items.length;
@@ -92510,10 +92540,36 @@ function createSvgPlaybackBinding(root, options = {}) {
       }
     }
   }
+  const measureForElement = (element) => {
+    const raw = element.getAttribute(MEASURE_ATTRIBUTE);
+    if (!raw)
+      return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const getElementsForMeasure = (measure2) => toArray(root.querySelectorAll(`[${MEASURE_ATTRIBUTE}="${measure2}"]`));
+  const setActiveMeasure = (measure2) => {
+    for (const element of toArray(root.querySelectorAll(`[${MEASURE_ACTIVE_ATTRIBUTE}]`))) {
+      element.removeAttribute?.(MEASURE_ACTIVE_ATTRIBUTE);
+      element.classList?.remove(MEASURE_ACTIVE_CLASS);
+    }
+    if (measure2 === null)
+      return;
+    for (const element of getElementsForMeasure(measure2)) {
+      element.setAttribute(MEASURE_ACTIVE_ATTRIBUTE, "true");
+      element.classList?.add(MEASURE_ACTIVE_CLASS);
+    }
+  };
   return {
     setActiveEvents,
+    setActiveMeasure,
+    measureForElement,
+    getElementsForMeasure,
     clear,
-    destroy: clear,
+    destroy: () => {
+      clear();
+      setActiveMeasure(null);
+    },
     getElementsForEventId
   };
 }

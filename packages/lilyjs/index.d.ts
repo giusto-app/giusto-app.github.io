@@ -132,6 +132,12 @@ export function renderScore(
  *  a fresh binding after every re-render of the score SVG. */
 export interface SvgPlaybackBinding {
   setActiveEvents(events: Iterable<string | { eventId: string }>): void
+  /** Park the transport on a measure (score-wide, 1-based); null clears. */
+  setActiveMeasure(measure: number | null): void
+  /** Score-wide measure number for a rendered element, if it has one. */
+  measureForElement(element: Element): number | null
+  /** Every element belonging to a measure — for hit-testing a click. */
+  getElementsForMeasure(measure: number): Element[]
   clear(): void
   destroy(): void
 }
