@@ -12125,6 +12125,7 @@ function computeContentHeightFromPaper(heightMm, topMarginMm, bottomMarginMm, so
 var C_WHITE = "var(--lily-note)";
 var C_SELECTED = "var(--lily-selected)";
 var BARLINE_FONT_SIZE = 4 * LINE_SPACING;
+var MEASURE_AREA_PAD_SS = 1.5;
 
 // src/music-rendering/smufl/glyphs.ts
 var BARLINE_SINGLE = "";
@@ -77879,6 +77880,21 @@ function buildMeasureRenderPlan(input) {
   };
 }
 
+// src/music-rendering/renderer/systemLayout/measureAreaRect.ts
+function measureAreaRect(input) {
+  const { mx, rightX, topY, btmY, yOffset, mi, measureNumber } = input;
+  const pad = LINE_SPACING * MEASURE_AREA_PAD_SS;
+  return el("rect", {
+    x: mx,
+    y: topY - pad,
+    width: Math.max(0, rightX - mx),
+    height: btmY - topY + pad * 2,
+    fill: "transparent",
+    "data-lily-element": "measure-area",
+    ...measureNumber !== undefined ? { "data-lily-measure": measureNumber } : {}
+  }, undefined, `marea-${yOffset}-${mi}`);
+}
+
 // src/music-rendering/renderer/systemLayout/renderMeasureContent.ts
 function renderMeasureContent(input) {
   const plan = buildMeasureRenderPlan(input);
@@ -77950,6 +77966,16 @@ function renderMeasureContent(input) {
     onSlurTrace
   } = input;
   const els = [];
+  els.push(measureAreaRect({
+    mx,
+    mw,
+    topY,
+    btmY,
+    yOffset,
+    mi,
+    measureNumber: input.globalMi + 1,
+    rightX: mi === renderMeasureCount - 1 ? staffEndX : mx + mw
+  }));
   let noteIdx = startNoteIdx;
   let changeX = mx + repStartOffset + HEADER_GAP;
   if (showClefChange) {
@@ -87982,7 +88008,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.11.0",
+  version: "0.12.0",
   type: "module",
   exports: {
     ".": {
@@ -90636,9 +90662,14 @@ var RENDERER_STYLE_TEXT = `/* music-renderer styles — auto-injected by the sta
  * from, and what a "play from here" selection marks. Deliberately weaker than
  * the sounding-note colour: it is a place marker, not the thing being heard.
  */
-[data-lily-measure-active="true"] {
-  fill: var(--lily-measure-active, #60a5fa);
-  stroke: var(--lily-measure-active, #60a5fa);
+/*
+ * The parked measure. The measure-area rect takes a LIGHT WASH so the whole
+ * bar reads as selected — notes are small and mostly whitespace, so tinting
+ * the glyphs alone is both hard to see and hard to aim at. The notation
+ * inside keeps its own colour; only the area behind it is tinted.
+ */
+[data-lily-element="measure-area"][data-lily-measure-active="true"] {
+  fill: var(--lily-measure-active, rgba(96, 165, 250, 0.18));
 }
 `;
 // src/music-playback/types.ts

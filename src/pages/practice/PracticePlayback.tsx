@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LoopIcon, PauseIcon, PlayIcon, RewindIcon } from '../../components/TransportIcons'
 import {
   createSvgPlaybackBinding,
   measureRange,
@@ -736,20 +737,66 @@ export default function PracticePlayback({
   return (
     <div id="play-along" className="flex flex-col gap-4">
       {/* Current exercise and primary actions stay visible even on load errors. */}
-      <div id="play-along-exercise-header" className="flex flex-col gap-3 border-b border-gray-700/70 pb-4">
-        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-widest uppercase text-gray-500 mb-1">Exercise</p>
-            <h2 className="text-lg font-semibold text-gray-100 leading-tight break-words">{exercise.title}</h2>
-            {exercise.subtitle && <p className="text-sm text-gray-500 mt-1">{exercise.subtitle}</p>}
-            <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-gray-500 mt-2">
-              <span>{exercise.category}</span>
-              {exercise.key && <span>Key {exercise.key}</span>}
-              {exercise.timeSig && <span>{exercise.timeSig}</span>}
-              <span>{exercise.bars} bars</span>
+      <div id="play-along-header" className="flex flex-col gap-3 border-b border-gray-700/70 pb-4">
+        <div className="flex items-center gap-3">
+        <div id="play-along-transport" className="flex items-center gap-3 flex-1 min-w-0">
+          <button
+            onClick={rewind}
+            disabled={!schedule || schedule.totalBeats === 0}
+            className={[
+              'w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0',
+              'bg-gray-800/60 text-gray-300 hover:text-white',
+              !schedule ? 'opacity-40 cursor-not-allowed' : '',
+            ].join(' ')}
+            aria-label="Rewind to the start"
+            title="Rewind to the start"
+          >
+            <RewindIcon />
+          </button>
+          <button
+            onClick={() => (isPlaying ? pausePlayback() : void startPlayback(resumeBeatRef.current ?? undefined))}
+            disabled={!schedule || schedule.totalBeats === 0}
+            className={[
+              'w-14 h-14 rounded-full flex items-center justify-center transition-colors shrink-0',
+              isPlaying ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white',
+              !schedule ? 'opacity-40 cursor-not-allowed' : '',
+            ].join(' ')}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            title={isPlaying ? 'Pause (space)' : 'Play (space)'}
+          >
+            {isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+          </button>
+
+          <button
+            onClick={() => setLoop(l => !l)}
+            className={[
+              'w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0',
+              loop ? 'bg-amber-400/90 text-gray-900' : 'bg-gray-800/60 text-gray-300 hover:text-white',
+            ].join(' ')}
+            aria-label={loop ? 'Loop on' : 'Loop off'}
+            aria-pressed={loop}
+            title="Loop"
+          >
+            <LoopIcon />
+          </button>
+
+          <div className="flex-1">
+            <div className="flex justify-between text-xs text-gray-500 mb-1">
+              <span>Tempo</span>
+              <span className="tabular-nums">
+                {isCountingIn ? 'count-in…'
+                  : parkedMeasure !== null ? `bar ${parkedMeasure} · ♩ = ${bpm}`
+                  : `♩ = ${bpm}`}
+              </span>
             </div>
+            <input
+              type="range" min={40} max={208} step={1} value={bpm}
+              onChange={e => setBpm(Number(e.target.value))}
+              className="w-full accent-amber-400"
+            />
           </div>
-          <div className="flex gap-2 shrink-0 sm:w-auto">
+        </div>
+          <div className="flex gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setShowPicker(s => !s)}
@@ -834,64 +881,6 @@ export default function PracticePlayback({
         />
       </div>
 
-      {/* Transport */}
-      <div id="play-along-transport" className="flex items-center gap-3">
-        <button
-          onClick={rewind}
-          disabled={!schedule || schedule.totalBeats === 0}
-          className={[
-            'w-10 h-10 rounded-full flex items-center justify-center text-lg transition-colors shrink-0',
-            'bg-gray-800/60 text-gray-300 hover:text-white',
-            !schedule ? 'opacity-40 cursor-not-allowed' : '',
-          ].join(' ')}
-          aria-label="Rewind to the start"
-          title="Rewind to the start"
-        >
-          ⏮
-        </button>
-        <button
-          onClick={() => (isPlaying ? pausePlayback() : void startPlayback(resumeBeatRef.current ?? undefined))}
-          disabled={!schedule || schedule.totalBeats === 0}
-          className={[
-            'w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-colors shrink-0',
-            isPlaying ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white',
-            !schedule ? 'opacity-40 cursor-not-allowed' : '',
-          ].join(' ')}
-          aria-label={isPlaying ? 'Pause' : 'Play'}
-          title={isPlaying ? 'Pause (space)' : 'Play (space)'}
-        >
-          {isPlaying ? '❙❙' : '▶'}
-        </button>
-
-        <button
-          onClick={() => setLoop(l => !l)}
-          className={[
-            'w-10 h-10 rounded-full flex items-center justify-center text-lg transition-colors shrink-0',
-            loop ? 'bg-amber-400/90 text-gray-900' : 'bg-gray-800/60 text-gray-300 hover:text-white',
-          ].join(' ')}
-          aria-label={loop ? 'Loop on' : 'Loop off'}
-          aria-pressed={loop}
-          title="Loop"
-        >
-          ↻
-        </button>
-
-        <div className="flex-1">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>Tempo</span>
-            <span className="tabular-nums">
-              {isCountingIn ? 'count-in…'
-                : parkedMeasure !== null ? `bar ${parkedMeasure} · ♩ = ${bpm}`
-                : `♩ = ${bpm}`}
-            </span>
-          </div>
-          <input
-            type="range" min={40} max={208} step={1} value={bpm}
-            onChange={e => setBpm(Number(e.target.value))}
-            className="w-full accent-amber-400"
-          />
-        </div>
-      </div>
 
       {/* Options */}
       <div id="play-along-options" className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
