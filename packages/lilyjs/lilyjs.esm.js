@@ -87968,7 +87968,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.10.0",
+  version: "0.10.1",
   type: "module",
   exports: {
     ".": {
@@ -92375,7 +92375,14 @@ var DEFAULT_ACTIVE_ATTRIBUTE = "data-lily-playback-active";
 var DEFAULT_PRIMARY_ATTRIBUTE = "data-lily-playback-primary";
 var DEFAULT_ACTIVE_CLASS = "lily-playback-active";
 var DEFAULT_PRIMARY_CLASS = "lily-playback-primary";
-var PRIMARY_ELEMENT_TYPES = new Set(["notehead", "chord-notehead", "rest", "percent-repeat"]);
+var PRIMARY_ELEMENT_TYPES = new Set([
+  "notehead",
+  "chord-notehead",
+  "rest",
+  "percent-repeat",
+  "dot",
+  "ledger-line"
+]);
 function toArray(items) {
   const maybeLength = items.length;
   if (typeof maybeLength === "number") {

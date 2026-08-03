@@ -546,8 +546,11 @@ export default function PracticePlayback({
       if (e.code !== 'Space' && e.key !== ' ') return
       const target = e.target as HTMLElement | null
       const tag = target?.tagName
-      // Never steal the key from a control the user is operating.
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' ||
+      // Leave TEXT ENTRY alone — but NOT buttons. Clicking Play leaves that
+      // button focused, so a space bar that deferred to the default action
+      // re-activated it and restarted the take instead of pausing. Transport
+      // control wins over button activation here, so preventDefault always.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
           target?.isContentEditable) return
       e.preventDefault()
       if (isPlaying) {
