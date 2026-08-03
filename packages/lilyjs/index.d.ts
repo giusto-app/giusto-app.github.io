@@ -403,3 +403,9 @@ export function resolveSelection(score: ScoreLike, range: { from: MeasureIndex; 
  *  by `semitones` over the selected measures (harmony is transposed in full).
  *  Returns a new score; the input is not mutated. */
 export function transpose(score: ScoreLike, selection: Selection, semitones: number): TransformResult
+
+/** The key `name` becomes when transposed by `semitones`, spelled the way
+ *  `transpose` spells the music and keeping the MODE (`Gm` + 2 → `Am`).
+ *  Ask here instead of re-deriving a key name, or a UI label will eventually
+ *  disagree with the signature on the page. */
+export function transposedKeyName(name: string | undefined, semitones: number): string

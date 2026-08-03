@@ -445,12 +445,13 @@ function keySignatureInfoFromName(name) {
     return { type: "flat", count: fIdx };
   return { type: "natural", count: 0 };
 }
-function keySignatureNameFromInfo(info) {
-  if (info.type === "sharp")
-    return SHARP_KEYS_ORDER[info.count] ?? "C";
-  if (info.type === "flat")
-    return FLAT_KEYS_ORDER[info.count] ?? "C";
-  return "C";
+var RELATIVE_MAJOR_TO_MINOR = Object.fromEntries(Object.entries(MINOR_TO_RELATIVE_MAJOR).map(([minor, major]) => [major, minor]));
+function keySignatureNameFromInfo(info, minor = false) {
+  const major = info.type === "sharp" ? SHARP_KEYS_ORDER[info.count] ?? "C" : info.type === "flat" ? FLAT_KEYS_ORDER[info.count] ?? "C" : "C";
+  return minor ? RELATIVE_MAJOR_TO_MINOR[major] ?? major : major;
+}
+function isMinorKeyName(name) {
+  return /^[A-Ga-g][#♯b♭]*\s*(m|min|minor)$/i.test(name?.trim() ?? "");
 }
 function keySignatureAccidentalNames(info) {
   if (info.type === "sharp")
@@ -88008,7 +88009,7 @@ function computeDocumentContentHeight(input) {
 // package.json
 var package_default = {
   name: "lily-js",
-  version: "0.12.0",
+  version: "0.13.0",
   type: "module",
   exports: {
     ".": {
@@ -92757,6 +92758,30 @@ function createArpeggioPlan(timeline, options) {
   }
   return { schemaVersion: 1, durationQN: windowLength, events: events2, diagnostics };
 }
+// src/music-tools/transforms/transposeKey.ts
+function transposeKeySignatureInfo(info, semitones) {
+  const fifths = info.type === "sharp" ? info.count : info.type === "flat" ? -info.count : 0;
+  let shift = semitones * 7 % 12;
+  if (shift > 6)
+    shift -= 12;
+  if (shift < -6)
+    shift += 12;
+  const out = fifths + shift;
+  if (out > 0)
+    return { type: "sharp", count: Math.min(out, 7) };
+  if (out < 0)
+    return { type: "flat", count: Math.min(-out, 7) };
+  return { type: "natural", count: 0 };
+}
+function transposedKeyName(name, semitones) {
+  const info = transposeKeySignatureInfo(keySignatureInfoFromName(name), semitones);
+  return keySignatureNameFromInfo(info, isMinorKeyName(name));
+}
+function transposeKeySignature(keySig3, semitones) {
+  const info = transposeKeySignatureInfo(keySig3, semitones);
+  return keySig3.name ? new KeySignature(transposedKeyName(keySig3.name, semitones)) : new KeySignature(info.type, info.count);
+}
+
 // src/music-tools/transforms/pitchAdapter.ts
 var ALTER_TO_ACC = {
   0: "",
@@ -92793,27 +92818,6 @@ function adaptAndTranspose(modelPitch, semitones) {
     outOctave = parseInt(transposed.octave.slice(4), 10);
   }
   return new Pitch(outStep, outAlter, outOctave);
-}
-function transposeKeySignature(keySig3, semitones) {
-  let fifths = 0;
-  if (keySig3.type === "sharp") {
-    fifths = keySig3.count;
-  } else if (keySig3.type === "flat") {
-    fifths = -keySig3.count;
-  }
-  let shift = semitones * 7 % 12;
-  if (shift > 6)
-    shift -= 12;
-  if (shift < -6)
-    shift += 12;
-  const outFifths = fifths + shift;
-  if (outFifths > 0) {
-    return new KeySignature("sharp", Math.min(outFifths, 7));
-  } else if (outFifths < 0) {
-    return new KeySignature("flat", Math.min(Math.abs(outFifths), 7));
-  } else {
-    return new KeySignature("natural", 0);
-  }
 }
 
 // src/music-tools/transforms/transposeChords.ts
@@ -93281,6 +93285,9 @@ class MusicRender {
 }
 var music_render = MusicRender;
 export {
+  transposedKeyName,
+  transposeKeySignatureInfo,
+  transposeKeySignature,
   transpose,
   toQuarterBpm,
   timelineToMidiMessageSchedule,
