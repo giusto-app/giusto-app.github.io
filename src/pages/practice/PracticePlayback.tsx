@@ -71,8 +71,6 @@ function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score
   return b.type === 'score' && 'score' in b
 }
 
-// One backing selector: silence, the tuning drone, or a musical style. Each
-// style renders the same harmony as a different texture (see backingStyles).
 /**
  * The user picks WHO PLAYS, not a rhythm. The groove follows the music's own
  * meter inside each ensemble (see buildEnsembleArrangement), so nothing is
@@ -110,7 +108,7 @@ function SegRow<T extends string>({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-xs text-gray-500">{label}</span>
+      <span className="w-16 shrink-0 text-xs text-gray-400">{label}</span>
       <div className="flex gap-1 flex-wrap">
         {options.map(([val, lbl]) => (
           <button
@@ -119,7 +117,12 @@ function SegRow<T extends string>({
             onClick={() => onChange(val)}
             className={[
               'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
-              value === val ? 'bg-gray-700 text-gray-100' : 'bg-gray-800/60 text-gray-500 hover:text-gray-300',
+              // The unselected pills were gray-500 on gray-800: under 3:1 at
+              // 12px, so the choice the feature hangs on read as disabled.
+              // Selected takes the app's amber accent, as the sliders do.
+              value === val
+                ? 'bg-amber-400 text-gray-900'
+                : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white',
             ].join(' ')}
           >
             {lbl}
@@ -146,7 +149,7 @@ export default function PracticePlayback({
   // starting playback does not drown the accompaniment.
   const [metronomeVol, setMetronomeVol] = useState(0.45)
   const [metronomeOn, setMetronomeOn] = useState(true)
-  // Backing: Off / Drone / a musical style, with a single volume.
+  // Backing: Off / the tuning drone / an ensemble, with a single volume.
   const [backingSelection, setBackingSelection] = useState<BackingSelection>('drone')
   const [backingVol, setBackingVol] = useState(0.65)
   // Transpose the exercise to a target key (0 = original).
@@ -1041,7 +1044,7 @@ export default function PracticePlayback({
         <div id="play-along-backing" className="rounded-xl bg-gray-800/40 p-3 flex flex-col gap-3">
           <SegRow label="Backing" value={backingSelection} onChange={setBackingSelection} options={backingOptions} />
           {isEnsemble(backingSelection) && (
-            <p className="pl-[4.5rem] text-xs text-gray-500">
+            <p className="pl-[4.5rem] text-xs text-gray-400">
               {BACKING_ENSEMBLE_HINTS[backingSelection]}
             </p>
           )}
