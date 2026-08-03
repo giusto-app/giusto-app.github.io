@@ -332,9 +332,20 @@ export default function PracticePlayback({
     [beatsPerBar],
   )
 
-  /** Park the transport on a measure and show it on the score. */
+  /**
+   * Park the transport on a measure and show it on the score.
+   *
+   * The binding is created lazily by the note-cursor loop, which only runs
+   * WHILE PLAYING — but parking happens when stopped (pause, or clicking a
+   * bar), so it has to be created here too or the marker silently does
+   * nothing.
+   */
   const parkAtMeasure = useCallback((measure: number | null) => {
     setParkedMeasure(measure)
+    const container = scoreContainerRef.current
+    if (!noteBindingRef.current && container) {
+      noteBindingRef.current = createSvgPlaybackBinding(container)
+    }
     noteBindingRef.current?.setActiveMeasure(measure)
   }, [])
 
