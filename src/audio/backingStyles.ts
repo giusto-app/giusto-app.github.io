@@ -9,17 +9,33 @@ import { buildArpeggioSchedule } from './arpeggioSchedule'
 import { buildChordBackingSchedule, type ChordBlock } from './chordBacking'
 import type { InstrumentId } from './sampledInstrument'
 
-/** Styles rendered by the string ensemble alone (single instrument). */
+/** Figures rendered by the string ensemble alone (single instrument). */
 export type StringsStyle = 'chords' | 'arpeggio' | 'pulse'
-/** All backing styles, including the multi-instrument waltz/gypsy arrangements. */
-export type BackingStyle = StringsStyle | 'waltz' | 'gypsy'
 
-export const BACKING_STYLE_LABELS: Record<BackingStyle, string> = {
-  chords: 'Chords',
-  arpeggio: 'Arpeggio',
-  pulse: 'Pulse',
-  waltz: 'Waltz',
+/**
+ * What the user actually chooses: an ENSEMBLE — who is playing — rather than a
+ * rhythmic pattern.
+ *
+ * "Waltz" sat in the same list as "Chords" and "Gypsy Jazz", which mixes two
+ * different questions: a waltz is a RHYTHM (and only exists in 3), while
+ * gypsy jazz is a BAND. Picking a sound and having the groove follow the
+ * music's own meter is the choice a player wants to make; the pattern is then
+ * derived, so an ensemble is never hidden just because the tune is in 3/4.
+ */
+export type BackingEnsemble = 'orchestra' | 'pizzicato' | 'piano' | 'gypsy'
+
+export const BACKING_ENSEMBLE_LABELS: Record<BackingEnsemble, string> = {
+  orchestra: 'Orchestra',
+  pizzicato: 'Pizzicato',
+  piano: 'Piano',
   gypsy: 'Gypsy Jazz',
+}
+
+export const BACKING_ENSEMBLE_HINTS: Record<BackingEnsemble, string> = {
+  orchestra: 'Strings, double bass and pizzicato — a pit orchestra',
+  pizzicato: 'Plucked strings over bass, In the Mood for Love',
+  piano: 'Piano comp with a walking bass',
+  gypsy: 'La pompe: archtop guitar and upright bass',
 }
 
 /**
@@ -198,86 +214,112 @@ function gypsy(score: ScoreLike, meterNumerator = 4): BackingLayer[] {
   }
   return [
     { instrument: 'bass', notes: bass },
-    { instrument: 'guitar', notes: guitar },
+    { instrument: 'guitarJazz', notes: guitar },
   ]
 }
 
-/** Build the full arrangement (one or more instrument layers) for a style. */
-export function buildBackingArrangement(
+/**
+ * Pizzicato ensemble — plucked upper strings over a walking-ish bass, the
+ * "In the Mood for Love" texture. Same skeleton as the waltz but the pad is
+ * dropped and the plucks carry the beat in any meter.
+ */
+function pizzicatoEnsemble(score: ScoreLike, meterNumerator: number): BackingLayer[] {
+  const bass: TimedNote[] = []
+  const pizz: TimedNote[] = []
+  for (const b of buildChordBackingSchedule(score)) {
+    if (b.midis.length === 0) continue
+    const rootPc = ((b.midis[0]! % 12) + 12) % 12
+    const bassRoot = placePc(rootPc, 36)
+    const upper = b.midis.slice(1)
+    const end = b.startBeat + b.durationBeats
+    for (let t = b.startBeat; t < end - 1e-6; t += 1) {
+      const beatInBar = ((Math.round(t - b.startBeat) % meterNumerator) + meterNumerator) % meterNumerator
+      if (beatInBar === 0) {
+        bass.push({ startBeat: t, durationBeats: Math.min(1.8, end - t), midi: bassRoot, velocity: 96 })
+      }
+      for (const midi of (upper.length ? upper : b.midis)) {
+        pizz.push({
+          startBeat: t,
+          durationBeats: Math.min(0.7, end - t),
+          midi,
+          velocity: beatInBar === 0 ? 78 : 66,
+        })
+      }
+    }
+  }
+  return [
+    { instrument: 'bass', notes: bass },
+    { instrument: 'pizzicato', notes: pizz },
+  ]
+}
+
+/** Piano comp — chord on the downbeat, lighter answers on the other beats. */
+function pianoEnsemble(score: ScoreLike, meterNumerator: number): BackingLayer[] {
+  const bass: TimedNote[] = []
+  const piano: TimedNote[] = []
+  for (const b of buildChordBackingSchedule(score)) {
+    if (b.midis.length === 0) continue
+    const rootPc = ((b.midis[0]! % 12) + 12) % 12
+    const bassRoot = placePc(rootPc, 36)
+    const upper = b.midis.slice(1)
+    const end = b.startBeat + b.durationBeats
+    for (let t = b.startBeat; t < end - 1e-6; t += 1) {
+      const beatInBar = ((Math.round(t - b.startBeat) % meterNumerator) + meterNumerator) % meterNumerator
+      if (beatInBar === 0) {
+        bass.push({ startBeat: t, durationBeats: Math.min(1.6, end - t), midi: bassRoot, velocity: 92 })
+        for (const midi of b.midis) {
+          piano.push({ startBeat: t, durationBeats: Math.min(1.2, end - t), midi, velocity: 74 })
+        }
+      } else {
+        for (const midi of (upper.length ? upper : b.midis)) {
+          piano.push({ startBeat: t, durationBeats: Math.min(0.8, end - t), midi, velocity: 58 })
+        }
+      }
+    }
+  }
+  return [
+    { instrument: 'bass', notes: bass },
+    { instrument: 'piano', notes: piano },
+  ]
+}
+
+/**
+ * The arrangement for an ENSEMBLE, with the groove derived from the meter:
+ * triple metre gets the waltz/musette figure, duple the straight one. This is
+ * what the UI selects — see BackingEnsemble.
+ */
+export function buildEnsembleArrangement(
   score: ScoreLike,
-  style: BackingStyle,
+  ensemble: BackingEnsemble,
   meterNumerator = 4,
 ): BackingLayer[] {
   const layers =
-    style === 'gypsy' ? gypsy(score, meterNumerator)
-    : style === 'waltz' ? waltz(score)
-    : [{ instrument: 'strings' as InstrumentId, notes: buildBackingSchedule(score, style) }]
-  // Shade velocities so a repeated chord is not four identical hits.
+    ensemble === 'gypsy' ? gypsy(score, meterNumerator)
+    : ensemble === 'piano' ? pianoEnsemble(score, meterNumerator)
+    : ensemble === 'pizzicato' ? pizzicatoEnsemble(score, meterNumerator)
+    : meterNumerator === 3 ? waltz(score)
+    : [{ instrument: 'strings' as InstrumentId, notes: buildBackingSchedule(score, 'chords') }]
   return layers.map((layer) => ({
     ...layer,
     notes: layer.notes.map((n) => ({ ...n, velocity: humanizeVelocity(n.velocity, n.startBeat, n.midi) })),
   }))
 }
 
-/**
- * Meters a style requires; absent = fits any meter. The waltz pattern is
- * three beats long and the gypsy pompe alternates on a duple bar, so those
- * two are the only meter-gated styles.
- */
-const STYLE_METERS: Partial<Record<BackingStyle, readonly number[]>> = {
-  waltz: [3],
-  // La pompe is a duple figure, but gypsy jazz has its own triple-metre form —
-  // the valse musette — so 3/4 is offered too and `gypsy()` swings the pattern
-  // to match the bar (it was hidden entirely on a 3/4 tune before).
-  gypsy: [2, 3, 4],
-}
-
-/** Whether a style suits the meter — Waltz needs 3/4, Gypsy Jazz a duple/quadruple meter. */
-export function isStyleAvailable(style: BackingStyle, meterNumerator: number): boolean {
-  const meters = STYLE_METERS[style]
-  return !meters || meters.includes(meterNumerator)
-}
-
-/** Silence, the tuning drone, or a musical style. */
-export type BackingSelection = 'off' | 'drone' | BackingStyle
-
-const BACKING_SELECTIONS: readonly BackingSelection[] = [
-  'off', 'drone', 'chords', 'arpeggio', 'pulse', 'waltz', 'gypsy',
-]
-
-export const isStyle = (s: BackingSelection): s is BackingStyle => s !== 'off' && s !== 'drone'
-
-/**
- * The backing an opening exercise should switch to for its declared catalog
- * `backing`, or null to leave the current selection alone.
- *
- * A METER-GATED style (Waltz 3/4, Gypsy 2|4/4) is adopted only once the meter
- * is known to match — never optimistically. `meterNumerator` is null while the
- * score is still being fetched and parsed, and also when a parse FAILS, so
- * adopting first and evicting later could strand a 4/4 piece on a three-beat
- * pattern. Meter-agnostic styles need no such wait.
- */
-export function declaredBackingSelection(
-  declared: string | undefined,
-  meterNumerator: number | null,
-): BackingSelection | null {
-  if (!declared) return null
-  const selection = BACKING_SELECTIONS.find((value) => value === declared)
-  if (!selection) return null
-  if (!isStyle(selection) || !STYLE_METERS[selection]) return selection
-  return meterNumerator != null && isStyleAvailable(selection, meterNumerator) ? selection : null
-}
-
-/** MIDI notes to preload per instrument so any style plays gaplessly. */
+/** MIDI notes to preload per instrument so any ensemble plays gaplessly. */
 export function prepareMidisByInstrument(score: ScoreLike): Record<InstrumentId, number[]> {
-  const gyp = [...buildBackingArrangement(score, 'gypsy', 4), ...buildBackingArrangement(score, 'gypsy', 3)]
-  const wal = buildBackingArrangement(score, 'waltz')
-  const midisOf = (layers: BackingLayer[], id: InstrumentId) =>
+  // Both meters for every ensemble: the user can switch mid-piece, and the
+  // groove (and so the register) differs between triple and duple.
+  const layers: BackingLayer[] = (['orchestra', 'pizzicato', 'piano', 'gypsy'] as BackingEnsemble[])
+    .flatMap((e) => [...buildEnsembleArrangement(score, e, 4), ...buildEnsembleArrangement(score, e, 3)])
+  const midisOf = (id: InstrumentId) =>
     layers.filter((l) => l.instrument === id).flatMap((l) => l.notes.map((n) => n.midi))
+  const set = (id: InstrumentId, extra: number[] = []) => [...new Set([...extra, ...midisOf(id)])]
   return {
-    strings: [...new Set([...allBackingMidis(score), ...midisOf(wal, 'strings')])],
-    bass: [...new Set([...midisOf(gyp, 'bass'), ...midisOf(wal, 'bass')])],
-    guitar: midisOf(gyp, 'guitar'),
-    pizzicato: midisOf(wal, 'pizzicato'),
+    strings: set('strings', allBackingMidis(score)),
+    bass: set('bass'),
+    guitar: set('guitar'),
+    guitarJazz: set('guitarJazz'),
+    pizzicato: set('pizzicato'),
+    piano: set('piano'),
   }
 }

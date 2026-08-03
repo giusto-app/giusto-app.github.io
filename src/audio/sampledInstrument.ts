@@ -6,7 +6,7 @@
 //
 // Samples: FluidR3_GM (CC-BY 3.0), self-hosted by scripts/fetch-samples.ts.
 
-export type InstrumentId = 'strings' | 'bass' | 'guitar' | 'pizzicato'
+export type InstrumentId = 'strings' | 'bass' | 'guitar' | 'guitarJazz' | 'pizzicato' | 'piano'
 
 export interface SampleSet {
   dir: string
@@ -79,7 +79,43 @@ const PIZZICATO: SampleSet = {
   attackS: 0.003, releaseS: 0.55, gain: 1.0, loopSustain: false, reverbWet: 0.3, voices: 2, detuneCents: 6,
 }
 
-export const SAMPLE_SETS: Record<InstrumentId, SampleSet> = { strings: STRINGS, bass: BASS, guitar: GUITAR, pizzicato: PIZZICATO }
+/**
+ * Selmer-Maccaferri archtop, the gypsy-jazz rhythm voice. A flat-top steel
+ * string (GUITAR) is the wrong instrument for la pompe: too much sustain and
+ * top end, so the chop bloomed instead of snapping shut. Short release does
+ * most of the work — the pompe is a percussive, damped stroke.
+ */
+const GUITAR_JAZZ: SampleSet = {
+  dir: '/sounds/guitar-jazz',
+  samples: [
+    { midiNote: 40, note: 'E2' }, { midiNote: 43, note: 'G2' }, { midiNote: 45, note: 'A2' },
+    { midiNote: 48, note: 'C3' }, { midiNote: 52, note: 'E3' }, { midiNote: 55, note: 'G3' },
+    { midiNote: 57, note: 'A3' }, { midiNote: 60, note: 'C4' }, { midiNote: 64, note: 'E4' },
+    { midiNote: 67, note: 'G4' }, { midiNote: 72, note: 'C5' },
+  ],
+  attackS: 0.003, releaseS: 0.12, gain: 0.95, loopSustain: false, reverbWet: 0.1, voices: 2, detuneCents: 5,
+}
+
+const PIANO: SampleSet = {
+  dir: '/sounds/piano',
+  samples: [
+    { midiNote: 36, note: 'C2' }, { midiNote: 41, note: 'F2' }, { midiNote: 45, note: 'A2' },
+    { midiNote: 48, note: 'C3' }, { midiNote: 52, note: 'E3' }, { midiNote: 55, note: 'G3' },
+    { midiNote: 59, note: 'B3' }, { midiNote: 62, note: 'D4' }, { midiNote: 65, note: 'F4' },
+    { midiNote: 69, note: 'A4' }, { midiNote: 72, note: 'C5' }, { midiNote: 76, note: 'E5' },
+    { midiNote: 79, note: 'G5' },
+  ],
+  attackS: 0.002, releaseS: 0.7, gain: 0.9, loopSustain: false, reverbWet: 0.2, voices: 1, detuneCents: 0,
+}
+
+export const SAMPLE_SETS: Record<InstrumentId, SampleSet> = {
+  strings: STRINGS,
+  bass: BASS,
+  guitar: GUITAR,
+  guitarJazz: GUITAR_JAZZ,
+  pizzicato: PIZZICATO,
+  piano: PIANO,
+}
 
 export interface SampledInstrumentOptions {
   concertPitchHz: number

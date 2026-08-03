@@ -2,11 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { parseSource, type ScoreLike } from 'lilyjs'
 import {
   allBackingMidis,
-  declaredBackingSelection,
   backingNotesInWindow,
-  buildBackingArrangement,
+  buildEnsembleArrangement,
   buildBackingSchedule,
-  isStyleAvailable,
   prepareMidisByInstrument,
 } from './backingStyles'
 
@@ -58,7 +56,7 @@ describe('buildBackingSchedule', () => {
       }`
     const doc = parseSource(src).document
     const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
-    const layers = buildBackingArrangement(block!.score, 'waltz')
+    const layers = buildEnsembleArrangement(block!.score, 'orchestra', 3)
     expect(layers.map((l) => l.instrument)).toEqual(['bass', 'pizzicato', 'strings'])
 
     const [bass, pizzicato, pad] = layers.map((l) => l.notes)
@@ -93,10 +91,10 @@ describe('allBackingMidis', () => {
 })
 
 describe('gypsy jazz arrangement', () => {
-  const layers = buildBackingArrangement(witness(), 'gypsy')
+  const layers = buildEnsembleArrangement(witness(), 'gypsy', 4)
 
   test('two layers: double bass + guitar', () => {
-    expect(layers.map((l) => l.instrument)).toEqual(['bass', 'guitar'])
+    expect(layers.map((l) => l.instrument)).toEqual(['bass', 'guitarJazz'])
   })
 
   test('bass walks root-on-beat, fifth-off, in the low register', () => {
@@ -110,7 +108,7 @@ describe('gypsy jazz arrangement', () => {
   })
 
   test('guitar chops the chord every beat, off-beats accented', () => {
-    const guitar = layers.find((l) => l.instrument === 'guitar')!.notes
+    const guitar = layers.find((l) => l.instrument === 'guitarJazz')!.notes
     expect(guitar).toHaveLength(48) // 4 chords × 4 beats × 3 tones
     // Beat 0 (on-beat): soft chop; beat 1 (off): strongly accented. What must
     // hold is the ACCENT, which the per-note shading (+/-4) must never invert.
@@ -123,17 +121,28 @@ describe('gypsy jazz arrangement', () => {
   })
 })
 
-describe('isStyleAvailable', () => {
-  test('waltz only in 3/4; gypsy in duple/quadruple AND the 3/4 musette', () => {
-    expect(isStyleAvailable('waltz', 3)).toBe(true)
-    expect(isStyleAvailable('waltz', 4)).toBe(false)
-    expect(isStyleAvailable('gypsy', 4)).toBe(true)
-    // Gypsy jazz has its own triple-metre form, the valse musette.
-    expect(isStyleAvailable('gypsy', 3)).toBe(true)
-    expect(isStyleAvailable('gypsy', 5)).toBe(false)
-    // Meter-agnostic styles are always available.
-    expect(isStyleAvailable('chords', 3)).toBe(true)
-    expect(isStyleAvailable('arpeggio', 7)).toBe(true)
+describe('every ensemble plays in every meter', () => {
+  test('the groove follows the bar instead of hiding the ensemble', () => {
+    // Gypsy jazz used to vanish on a 3/4 tune, and Waltz on a 4/4 one. An
+    // ensemble is WHO PLAYS; the figure adapts, so none of them may be empty.
+    for (const ensemble of ['orchestra', 'pizzicato', 'piano', 'gypsy'] as const) {
+      for (const meter of [3, 4]) {
+        const layers = buildEnsembleArrangement(witness(), ensemble, meter)
+        expect(layers.length).toBeGreaterThan(0)
+        expect(layers.every((l) => l.notes.length > 0)).toBe(true)
+      }
+    }
+  })
+
+  test('triple metre changes the figure, not the players', () => {
+    const duple = buildEnsembleArrangement(witness(), 'gypsy', 4)
+    const triple = buildEnsembleArrangement(witness(), 'gypsy', 3)
+    expect(triple.map((l) => l.instrument)).toEqual(duple.map((l) => l.instrument))
+    // The musette bass takes beat 1 alone; the duple pompe walks root-and-fifth
+    // across the bar, so the same music yields more bass onsets in 4/4.
+    const bassOnsets = (ls: ReturnType<typeof buildEnsembleArrangement>) =>
+      ls.find((l) => l.instrument === 'bass')!.notes.length
+    expect(bassOnsets(triple)).toBeLessThan(bassOnsets(duple))
   })
 })
 
@@ -143,39 +152,9 @@ describe('prepareMidisByInstrument', () => {
     expect(midis.strings.length).toBeGreaterThan(0)
     expect(midis.bass).toContain(31) // G1 (gypsy pompe register)
     expect(midis.bass).toContain(43) // G2 (waltz boom register)
-    expect(midis.guitar.length).toBeGreaterThan(0)
+    expect(midis.guitarJazz.length).toBeGreaterThan(0)
     expect(midis.pizzicato.length).toBeGreaterThan(0)
-  })
-})
-
-describe('declaredBackingSelection', () => {
-  test("adopts a catalog-declared waltz only for music actually in 3/4", () => {
-    expect(declaredBackingSelection('waltz', 3)).toBe('waltz')
-    expect(declaredBackingSelection('waltz', 4)).toBeNull()
-    expect(declaredBackingSelection('waltz', 6)).toBeNull()
-  })
-
-  test('waits for the meter rather than adopting a gated style optimistically', () => {
-    // null = still fetching/parsing, or the parse FAILED. Adopting now and
-    // evicting later would strand a 4/4 piece on a three-beat pattern.
-    expect(declaredBackingSelection('waltz', null)).toBeNull()
-    expect(declaredBackingSelection('gypsy', null)).toBeNull()
-    expect(declaredBackingSelection('gypsy', 4)).toBe('gypsy')
-    expect(declaredBackingSelection('gypsy', 3)).toBe('gypsy')
-    expect(declaredBackingSelection('gypsy', 5)).toBeNull()
-  })
-
-  test('meter-agnostic styles and non-styles need no meter', () => {
-    expect(declaredBackingSelection('chords', null)).toBe('chords')
-    expect(declaredBackingSelection('arpeggio', null)).toBe('arpeggio')
-    expect(declaredBackingSelection('pulse', null)).toBe('pulse')
-    expect(declaredBackingSelection('drone', null)).toBe('drone')
-    expect(declaredBackingSelection('off', null)).toBe('off')
-  })
-
-  test('ignores an absent or unknown declaration', () => {
-    expect(declaredBackingSelection(undefined, 3)).toBeNull()
-    expect(declaredBackingSelection('bossa-nova', 3)).toBeNull()
+    expect(midis.piano.length).toBeGreaterThan(0)
   })
 })
 
@@ -191,9 +170,9 @@ describe('gypsy in 3/4 (valse musette)', () => {
       }`
     const doc = parseSource(src).document
     const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
-    const layers = buildBackingArrangement(block!.score, 'gypsy', 3)
+    const layers = buildEnsembleArrangement(block!.score, 'gypsy', 3)
     const bass = layers.find((l) => l.instrument === 'bass')!.notes
-    const guitar = layers.find((l) => l.instrument === 'guitar')!.notes
+    const guitar = layers.find((l) => l.instrument === 'guitarJazz')!.notes
     expect(bass.map((n) => n.startBeat)).toEqual([0, 3])
     expect([...new Set(guitar.map((n) => n.startBeat))]).toEqual([1, 2, 4, 5])
   })

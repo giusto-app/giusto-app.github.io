@@ -29,14 +29,12 @@ import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
 import {
   backingNotesInWindow,
-  buildBackingArrangement,
-  declaredBackingSelection,
-  isStyle,
-  isStyleAvailable,
+  buildEnsembleArrangement,
+  BACKING_ENSEMBLE_HINTS,
+  BACKING_ENSEMBLE_LABELS,
+  type BackingEnsemble,
   prepareMidisByInstrument,
-  BACKING_STYLE_LABELS,
   type BackingLayer,
-  type BackingSelection,
 } from '../../audio/backingStyles'
 import {
   buildChordSchedule,
@@ -75,15 +73,24 @@ function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score
 
 // One backing selector: silence, the tuning drone, or a musical style. Each
 // style renders the same harmony as a different texture (see backingStyles).
+/**
+ * The user picks WHO PLAYS, not a rhythm. The groove follows the music's own
+ * meter inside each ensemble (see buildEnsembleArrangement), so nothing is
+ * hidden just because a tune is in 3/4 — which is what happened when "Waltz"
+ * and "Gypsy Jazz" competed in one list.
+ */
+type BackingSelection = 'off' | 'drone' | BackingEnsemble
+
 const BACKING_OPTIONS: Array<[BackingSelection, string]> = [
   ['off', 'Off'],
   ['drone', 'Drone'],
-  ['chords', BACKING_STYLE_LABELS.chords],
-  ['arpeggio', BACKING_STYLE_LABELS.arpeggio],
-  ['pulse', BACKING_STYLE_LABELS.pulse],
-  ['waltz', BACKING_STYLE_LABELS.waltz],
-  ['gypsy', BACKING_STYLE_LABELS.gypsy],
+  ['orchestra', BACKING_ENSEMBLE_LABELS.orchestra],
+  ['pizzicato', BACKING_ENSEMBLE_LABELS.pizzicato],
+  ['piano', BACKING_ENSEMBLE_LABELS.piano],
+  ['gypsy', BACKING_ENSEMBLE_LABELS.gypsy],
 ]
+
+const isEnsemble = (s: BackingSelection): s is BackingEnsemble => s !== 'off' && s !== 'drone'
 
 // The play-along drone uses the sampled cello (steady, no wavy detune); the
 // tuning-voice choice lives in the Drone tab. Styles play through the strings.
@@ -185,7 +192,7 @@ export default function PracticePlayback({
    * chord (paused while "D" sounded, displayed "Gm7").
    */
   const soundingBeatRef = useRef<number | null>(null)
-  const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [], pizzicato: [] })
+  const prepareMidisRef = useRef<Record<InstrumentId, number[]>>({ strings: [], bass: [], guitar: [], guitarJazz: [], pizzicato: [], piano: [] })
   const metronomeVolRef = useRef(metronomeVol)
   metronomeVolRef.current = metronomeVol
   const metronomeOnRef = useRef(metronomeOn)
@@ -252,10 +259,9 @@ export default function PracticePlayback({
   const meterNumerator = parsedMeter ?? 4
 
   // Only offer styles that suit the exercise's meter (Waltz → 3/4, Gypsy → 4/4).
-  const backingOptions = useMemo(
-    () => BACKING_OPTIONS.filter(([v]) => v === 'off' || v === 'drone' || isStyleAvailable(v, meterNumerator)),
-    [meterNumerator],
-  )
+  // Every ensemble works in every meter — the groove adapts inside the
+  // arrangement — so the list no longer shrinks based on the time signature.
+  const backingOptions = BACKING_OPTIONS
   const keyOptions = useMemo(() => keyTransposeOptions(exercise.key), [exercise.key])
 
   // Active-style arrangement (one or more instrument layers) — rebuilt when the
@@ -269,13 +275,13 @@ export default function PracticePlayback({
   noteEventsRef.current = noteEvents
 
   const backingArrangement = useMemo<BackingLayer[]>(
-    () => (parsed?.score && isStyle(backingSelection) ? buildBackingArrangement(parsed.score, backingSelection, meterNumerator) : []),
+    () => (parsed?.score && isEnsemble(backingSelection) ? buildEnsembleArrangement(parsed.score, backingSelection, meterNumerator) : []),
     [parsed, backingSelection, meterNumerator],
   )
   backingArrangementRef.current = backingArrangement
   // Per-instrument preload notes, so switching styles never falls back to synth.
   const prepareMidis = useMemo(
-    () => (parsed?.score ? prepareMidisByInstrument(parsed.score) : { strings: [], bass: [], guitar: [], pizzicato: [] }),
+    () => (parsed?.score ? prepareMidisByInstrument(parsed.score) : { strings: [], bass: [], guitar: [], guitarJazz: [], pizzicato: [], piano: [] }),
     [parsed],
   )
   prepareMidisRef.current = prepareMidis
@@ -389,7 +395,7 @@ export default function PracticePlayback({
     // Both backing instruments are created up front; the active one is chosen
     // live by backingSelectionRef, each enable-gated by volume (see effects).
     const droneActive = backingSelection === 'drone'
-    const stringsActive = isStyle(backingSelection)
+    const stringsActive = isEnsemble(backingSelection)
     const drone = new ChordDrone(ctx, {
       soundType: DRONE_SOUND,
       concertPitchHz: concertPitch,
@@ -403,6 +409,8 @@ export default function PracticePlayback({
       bass: new SampledInstrument(ctx, SAMPLE_SETS.bass, { concertPitchHz: concertPitch, volume: instrumentVol }),
       guitar: new SampledInstrument(ctx, SAMPLE_SETS.guitar, { concertPitchHz: concertPitch, volume: instrumentVol }),
       pizzicato: new SampledInstrument(ctx, SAMPLE_SETS.pizzicato, { concertPitchHz: concertPitch, volume: instrumentVol }),
+      guitarJazz: new SampledInstrument(ctx, SAMPLE_SETS.guitarJazz, { concertPitchHz: concertPitch, volume: instrumentVol }),
+      piano: new SampledInstrument(ctx, SAMPLE_SETS.piano, { concertPitchHz: concertPitch, volume: instrumentVol }),
     }
     // Preload every instrument's notes so switching styles never falls back to synth.
     await Promise.all([
@@ -410,6 +418,8 @@ export default function PracticePlayback({
       instruments.bass.prepare(prep.bass),
       instruments.guitar.prepare(prep.guitar),
       instruments.pizzicato.prepare(prep.pizzicato),
+      instruments.guitarJazz.prepare(prep.guitarJazz),
+      instruments.piano.prepare(prep.piano),
     ])
 
     // Tempo training repeats the exercise until its target is completed.
@@ -559,21 +569,10 @@ export default function PracticePlayback({
   // is silenced but keeps running, so switching needs no restart.
   useEffect(() => {
     droneRef.current?.setVolume(backingSelection === 'drone' ? backingVol * 0.4 : 0)
-    const vol = isStyle(backingSelection) ? backingVol : 0
+    const vol = isEnsemble(backingSelection) ? backingVol : 0
     if (instrumentsRef.current) for (const inst of Object.values(instrumentsRef.current)) inst.setVolume(vol)
   }, [backingSelection, backingVol])
 
-  // Drop a style that doesn't fit the exercise's meter (e.g. Waltz on a 4/4
-  // piece) — but only once the meter is KNOWN. While the score is still being
-  // fetched and parsed the fallback is 4, and gating against that evicted a
-  // declared style before its own meter was ever read: Merry-Go-Round asks for
-  // the waltz, was reset to Drone, and its 3/4 arrived a beat too late.
-  useEffect(() => {
-    if (parsedMeter == null) return
-    if (isStyle(backingSelection) && !isStyleAvailable(backingSelection, parsedMeter)) {
-      setBackingSelection('drone')
-    }
-  }, [parsedMeter, backingSelection])
 
   // Gypsy jazz swings against the bass, not a click — default its metronome off.
   useEffect(() => {
@@ -639,8 +638,15 @@ export default function PracticePlayback({
   // Waltz is adopted only for music actually in 3/4 — see
   // declaredBackingSelection.
   useEffect(() => {
-    const declared = declaredBackingSelection(exercise.backing, parsedMeter)
-    if (declared) setBackingSelection(declared)
+    // Catalog `backing` names an ENSEMBLE now; the old style names map onto
+    // the ensemble that plays them, so published entries keep working.
+    const LEGACY: Record<string, BackingSelection> = {
+      waltz: 'orchestra', chords: 'orchestra', pulse: 'orchestra', arpeggio: 'orchestra',
+    }
+    const raw = exercise.backing
+    if (!raw) return
+    const declared = (LEGACY[raw] ?? raw) as BackingSelection
+    if (BACKING_OPTIONS.some(([value]) => value === declared)) setBackingSelection(declared)
   }, [exercise.id, exercise.backing, parsedMeter])
 
   // Resolve #practice/<exercise-id> after the remote catalog (or cache) is
@@ -1034,11 +1040,16 @@ export default function PracticePlayback({
         )}
       </div>
 
-      {/* Backing — one control: Off / Drone / Chords / Arpeggio, played by the
-          sampled cello (drone) and string ensemble (chords/arpeggio) */}
+      {/* Backing — the user picks WHO plays (or a tuning drone, or silence);
+          the groove is derived from the tune's own meter. */}
       {hasChordTrack ? (
         <div id="play-along-backing" className="rounded-xl bg-gray-800/40 p-3 flex flex-col gap-3">
           <SegRow label="Backing" value={backingSelection} onChange={setBackingSelection} options={backingOptions} />
+          {isEnsemble(backingSelection) && (
+            <p className="pl-[4.5rem] text-xs text-gray-500">
+              {BACKING_ENSEMBLE_HINTS[backingSelection]}
+            </p>
+          )}
           {backingSelection !== 'off' && (
             <label className="flex items-center gap-2 text-xs text-gray-500">
               <span className="w-16 shrink-0">Volume</span>

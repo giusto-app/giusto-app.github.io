@@ -35,6 +35,20 @@ const INSTRUMENTS: { soundfont: string; dir: string; notes: string[] }[] = [
     dir: 'pizzicato',
     notes: ['C2', 'E2', 'G2', 'C3', 'E3', 'G3', 'C4', 'E4', 'G4', 'C5'],
   },
+  {
+    // La pompe is played on a Selmer-Maccaferri archtop, not a flat-top steel
+    // string: drier, more midrange, far less sustain. GM's jazz guitar is the
+    // closest voice in this soundfont, and a denser note spread keeps the
+    // pitch-shift small across the chop register.
+    soundfont: 'electric_guitar_jazz',
+    dir: 'guitar-jazz',
+    notes: ['E2', 'G2', 'A2', 'C3', 'E3', 'G3', 'A3', 'C4', 'E4', 'G4', 'C5'],
+  },
+  {
+    soundfont: 'acoustic_grand_piano',
+    dir: 'piano',
+    notes: ['C2', 'F2', 'A2', 'C3', 'E3', 'G3', 'B3', 'D4', 'F4', 'A4', 'C5', 'E5', 'G5'],
+  },
 ]
 
 for (const { soundfont, dir, notes } of INSTRUMENTS) {
