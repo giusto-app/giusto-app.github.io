@@ -819,26 +819,21 @@ export default function PracticePlayback({
               className="h-9 w-9 shrink-0 rounded-md bg-amber-400 text-gray-950 hover:bg-amber-300 transition-colors flex items-center justify-center"
             >
               {shareStatus ? (
-                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-                  <path
-                    d="m5 12.5 4.25 4.25L19 7"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
+                // Feather `check` and `link` — the family the rest of the app
+                // chrome uses. These were hand-drawn approximations of both.
+                <svg
+                  viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+                >
+                  <polyline points="20 6 9 17 4 12" />
                 </svg>
               ) : (
-                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-                  <path
-                    d="M12 3v12m0-12L8 7m4-4 4 4M6 11v8h12v-8"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
+                <svg
+                  viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+                >
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                 </svg>
               )}
             </button>
