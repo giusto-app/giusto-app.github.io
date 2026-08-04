@@ -112,8 +112,15 @@ export class PlaybackClock {
   start(fromBeat?: number): void {
     if (this._isPlaying) return
     this._isPlaying = true
+    // The beat grid is INTEGRAL: scheduleAhead() advances by whole beats, so a
+    // fractional start offsets every following beat and downbeat by that same
+    // fraction for the rest of the take. The resume point comes from
+    // pausePlayback(), which stores the SOUNDING beat — deliberately fractional
+    // so the highlight shows exactly where you stopped — so it has to be
+    // snapped here. Floor, not round: restart at the beginning of the beat you
+    // paused inside, rather than skipping the rest of it.
     this.nextBeat = fromBeat !== undefined
-      ? fromBeat
+      ? Math.floor(fromBeat)
       : -this.opts.countInBeats || 0 // `|| 0` normalizes -0
     // Small offset so the first beat is comfortably schedulable.
     this.nextBeatTime = this.ctx.currentTime + 0.05

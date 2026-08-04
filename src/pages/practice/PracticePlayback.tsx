@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoopIcon, PauseIcon, PlayIcon, RewindIcon } from '../../components/TransportIcons'
+import { useIsActiveTab } from '../../activeTab'
 import {
   createSvgPlaybackBinding,
   measureRange,
@@ -138,6 +139,7 @@ export default function PracticePlayback({
   onSelectExercise,
   concertPitch = 440,
 }: PracticePlaybackProps) {
+  const isPracticeTabActive = useIsActiveTab('practice')
   const [source, setSource] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showPicker, setShowPicker] = useState(false)
@@ -590,6 +592,9 @@ export default function PracticePlayback({
   // highlight), so pressing it again continues from the same bar rather than
   // restarting the take.
   useEffect(() => {
+    // Background tabs stay mounted (App.tsx toggles `hidden`), so without this
+    // the space bar drove Practice playback while the user was on Drone.
+    if (!isPracticeTabActive) return
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== 'Space' && e.key !== ' ') return
       const target = e.target as HTMLElement | null
@@ -611,7 +616,7 @@ export default function PracticePlayback({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isPlaying, pausePlayback, startPlayback])
+  }, [isPracticeTabActive, isPlaying, pausePlayback, startPlayback])
 
   // Tear down audio when the view unmounts or the exercise changes
   useEffect(() => stopPlayback, [stopPlayback, exercise.id])

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import TabBar, { type AppTab } from './components/TabBar'
+import { ActiveTabContext } from './activeTab'
 import ThemeToggle from './components/ThemeToggle'
 import TunerTab from './pages/tuner/TunerTab'
 import DroneTab from './pages/drone/DroneTab'
@@ -61,6 +62,7 @@ export default function App() {
   }
 
   return (
+    <ActiveTabContext.Provider value={activeTab}>
     <div className="h-full flex flex-col relative overflow-hidden">
 
       {/* ── Tab content ─────────────────────────────────────────────────────── */}
@@ -110,5 +112,6 @@ export default function App() {
         return next
       })} />
     </div>
+    </ActiveTabContext.Provider>
   )
 }
