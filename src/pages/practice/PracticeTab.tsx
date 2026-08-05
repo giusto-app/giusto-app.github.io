@@ -49,7 +49,7 @@ export default function PracticeTab({
     storeExercise(entry)
     replacePlayAlongUrl(entry.id)
   }
-  const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, setInterval: droneInterval, setVolume: droneVolume, shiftOctave: droneShiftOctave, setSoundType: droneSoundType, stop: droneStop } = useDrone()
+  const { droneState, toggle: droneToggle, setPitchClass: dronePitchClass, toggleInterval: droneToggleInterval, setVolume: droneVolume, shiftOctave: droneShiftOctave, setSoundType: droneSoundType, stop: droneStop } = useDrone()
   const {
     recorderState, preCountdown, countdown, liveNote, session, errorMessage,
     startRecording, stopRecording, reset, cleanup,
@@ -291,7 +291,7 @@ export default function PracticeTab({
             concertPitchHz={concertPitch}
             onToggle={droneToggle}
             onPitchClass={dronePitchClass}
-            onInterval={droneInterval}
+            onToggleInterval={droneToggleInterval}
             onVolume={droneVolume}
             onShiftOctave={droneShiftOctave}
             onSoundType={droneSoundType}

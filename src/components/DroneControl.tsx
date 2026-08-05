@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { type DroneInterval, type DroneSoundType, type DroneState } from '../hooks/useDrone'
+import { type DroneIntervalName, type DroneSoundType, type DroneState } from '../hooks/useDrone'
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
 
-const INTERVALS: { value: DroneInterval; label: string }[] = [
-  { value: 'unison', label: '·' },
-  { value: 'octave', label: '8ve' },
-  { value: 'fifth',  label: '5th' },
+// Independent add-on toggles — both can sound at once (root + 5th + 8ve).
+const INTERVALS: { value: DroneIntervalName; label: string; title: string }[] = [
+  { value: 'fifth',  label: '5th', title: 'Add the fifth above the root' },
+  { value: 'octave', label: '8ve', title: 'Add the octave above the root' },
 ]
 
 // Pitch-stable voices only — the wavy detuned/chorused "Synth Wavy" (shruti)
@@ -22,7 +22,7 @@ interface DroneControlProps {
   concertPitchHz?: number
   onToggle: (concertPitchHz?: number) => void
   onPitchClass: (pc: number, concertPitchHz?: number) => void
-  onInterval: (interval: DroneInterval, concertPitchHz?: number) => void
+  onToggleInterval: (name: DroneIntervalName, concertPitchHz?: number) => void
   onVolume: (v: number) => void
   onShiftOctave: (delta: number, concertPitchHz?: number) => void
   onSoundType: (type: DroneSoundType, concertPitchHz?: number) => void
@@ -32,10 +32,10 @@ interface DroneControlProps {
 
 export default function DroneControl({
   droneState, concertPitchHz = 440,
-  onToggle, onPitchClass, onInterval, onVolume, onShiftOctave, onSoundType,
+  onToggle, onPitchClass, onToggleInterval, onVolume, onShiftOctave, onSoundType,
   alwaysExpanded = false,
 }: DroneControlProps) {
-  const { active, pitchClass, interval, volume, octaveOffset, soundType } = droneState
+  const { active, pitchClass, intervals, volume, octaveOffset, soundType } = droneState
   const [expanded, setExpanded] = useState(alwaysExpanded)
   const isSampleBased = soundType === 'cello' || soundType === 'tanpura'
   const isOctaveFixed = soundType === 'tanpura'
@@ -186,19 +186,21 @@ export default function DroneControl({
 
           {/* Interval + volume row */}
           <div id="drone-interval-volume-row" className="flex items-center gap-3">
-            {/* Interval — disabled in tanpura mode (tanpura has its own fixed string pattern) */}
+            {/* Interval toggles — only the synth voice can add intervals; sample voices are fixed recordings */}
             <div
               id="drone-interval-buttons"
               className={['flex gap-1 shrink-0 transition-opacity', isSampleBased ? 'opacity-30 pointer-events-none' : ''].join(' ')}
-              title={isSampleBased ? 'Interval not available in this mode' : undefined}
+              title={isSampleBased ? 'Intervals not available in this mode' : undefined}
             >
-              {INTERVALS.map(({ value, label }) => (
+              {INTERVALS.map(({ value, label, title }) => (
                 <button
                   key={value}
-                  onClick={() => onInterval(value, concertPitchHz)}
+                  title={title}
+                  aria-pressed={intervals[value]}
+                  onClick={() => onToggleInterval(value, concertPitchHz)}
                   className={[
                     'px-2.5 py-1 rounded-lg text-xs font-medium transition-colors neu-btn',
-                    interval === value
+                    intervals[value]
                       ? 'neu-pill-active text-[color:var(--neu-fg)]'
                       : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
                   ].join(' ')}

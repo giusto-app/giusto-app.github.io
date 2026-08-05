@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useDrone } from '../../hooks/useDrone'
+import { useIsActiveTab } from '../../activeTab'
 import DroneControl from '../../components/DroneControl'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
 
@@ -8,12 +9,40 @@ interface DroneTabProps {
 }
 
 export default function DroneTab({ concertPitch }: DroneTabProps) {
-  const { droneState, toggle, setPitchClass, setInterval, setVolume, shiftOctave, setSoundType, stop } = useDrone()
+  const { droneState, toggle, setPitchClass, toggleInterval, setVolume, shiftOctave, setSoundType, stop } = useDrone()
+  const isDroneTabActive = useIsActiveTab('drone')
 
   // Stop drone when tab unmounts
   useEffect(() => () => { stop() }, [stop])
 
-  const currentOctave = 4 + droneState.octaveOffset
+  // Space bar stops/restarts the drone. Scoped to the active tab — background
+  // tabs stay mounted (App.tsx toggles `hidden`), see activeTab.ts.
+  useEffect(() => {
+    if (!isDroneTabActive) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      // Leave text entry alone — but NOT buttons: a note button keeps focus
+      // after a click, and letting space re-activate it would fight the
+      // transport toggle. preventDefault always.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+          target?.isContentEditable) return
+      e.preventDefault()
+      toggle(concertPitch)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isDroneTabActive, toggle, concertPitch])
+
+  // Tanpura is a fixed octave-3 recording; every other voice sounds at 4 + offset.
+  const currentOctave = droneState.soundType === 'tanpura' ? 3 : 4 + droneState.octaveOffset
+
+  // Added intervals only sound on the synth voice; sample voices play the root.
+  const intervalParts = droneState.soundType === 'sawtooth'
+    ? [droneState.intervals.fifth ? '5th' : null, droneState.intervals.octave ? '8ve' : null].filter(Boolean)
+    : []
+  const intervalLabel = intervalParts.length > 0 ? `Root + ${intervalParts.join(' + ')}` : 'Unison'
 
   return (
     <div id="drone-tab" className="min-h-full flex flex-col py-6 px-4 md:px-10 gap-6">
@@ -38,7 +67,7 @@ export default function DroneTab({ concertPitch }: DroneTabProps) {
                 </span>
               </div>
               <span className="text-sm text-[color:var(--neu-fg2)] tracking-widest uppercase">
-                {INTERVAL_LABELS[droneState.interval]}
+                {intervalLabel}
               </span>
               <div className="mt-3 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -56,7 +85,7 @@ export default function DroneTab({ concertPitch }: DroneTabProps) {
           concertPitchHz={concertPitch}
           onToggle={toggle}
           onPitchClass={setPitchClass}
-          onInterval={setInterval}
+          onToggleInterval={toggleInterval}
           onVolume={setVolume}
           onShiftOctave={shiftOctave}
           onSoundType={setSoundType}
@@ -78,8 +107,3 @@ export default function DroneTab({ concertPitch }: DroneTabProps) {
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
-const INTERVAL_LABELS: Record<string, string> = {
-  unison: 'Unison',
-  octave: 'Octave',
-  fifth: 'Fifth',
-}

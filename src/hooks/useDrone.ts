@@ -18,13 +18,15 @@ import {
 // chord-following drone — see src/audio/droneVoices.ts and
 // DRONE-AUDIO-RESEARCH.md for the research notes behind each voice.
 
-export type DroneInterval = 'unison' | 'octave' | 'fifth'
+export type DroneIntervalName = 'fifth' | 'octave'
+/** Independent add-on toggles above the root — both can be on at once. */
+export interface DroneIntervals { fifth: boolean; octave: boolean }
 export type DroneSoundType = 'sawtooth' | 'shruti' | 'cello' | 'tanpura'
 
 export interface DroneState {
   active: boolean
   pitchClass: number      // 0–11, 0=C
-  interval: DroneInterval
+  intervals: DroneIntervals // sounded by the synth voice only
   volume: number          // 0–1
   octaveOffset: number    // -2..+2, applied on top of base octave 4
   soundType: DroneSoundType
@@ -36,10 +38,10 @@ export function useDrone() {
   const [state, setState] = useState<DroneState>({
     active: false,
     pitchClass: 9,         // A (matches default concert pitch reference)
-    interval: 'unison',
+    intervals: { fifth: true, octave: true },
     volume: 0.35,
-    octaveOffset: -1, // all voices sound at octave 3 (A3) — see setSoundType
-    soundType: 'cello',
+    octaveOffset: -2,      // octave 2
+    soundType: 'sawtooth',
   })
 
   const sourcesRef = useRef<DroneSource[]>([])
@@ -60,7 +62,7 @@ export function useDrone() {
   // -------------------------------------------------------------------------
   const startOscillators = useCallback((
     pitchClass: number,
-    interval: DroneInterval,
+    intervals: DroneIntervals,
     volume: number,
     concertPitchHz: number,
     octaveOffset: number,
@@ -95,12 +97,13 @@ export function useDrone() {
     } else {
       const rootOctave = 4 + octaveOffset
       const pitches: SawtoothPitch[] = [{ pitchClass, octave: rootOctave, relVol: 1.0 }]
-      if (interval === 'octave') {
-        pitches.push({ pitchClass, octave: rootOctave + 1, relVol: 0.6 })
-      } else if (interval === 'fifth') {
+      if (intervals.fifth) {
         const fifthPitchClass = (pitchClass + 7) % 12
         const fifthOctave = pitchClass + 7 >= 12 ? rootOctave + 1 : rootOctave
         pitches.push({ pitchClass: fifthPitchClass, octave: fifthOctave, relVol: 0.7 })
+      }
+      if (intervals.octave) {
+        pitches.push({ pitchClass, octave: rootOctave + 1, relVol: 0.6 })
       }
       sourcesRef.current.push(...startSawtoothVoices(ctx, masterGain, pitches, concertPitchHz))
     }
@@ -121,7 +124,7 @@ export function useDrone() {
         return { ...prev, active: false }
       } else {
         stopOscillators()
-        startOscillators(prev.pitchClass, prev.interval, prev.volume, concertPitchHz, prev.octaveOffset, prev.soundType)
+        startOscillators(prev.pitchClass, prev.intervals, prev.volume, concertPitchHz, prev.octaveOffset, prev.soundType)
         return { ...prev, active: true }
       }
     })
@@ -132,20 +135,20 @@ export function useDrone() {
       const next = { ...prev, pitchClass }
       if (prev.active) {
         stopOscillators()
-        startOscillators(pitchClass, prev.interval, prev.volume, concertPitchHz, prev.octaveOffset, prev.soundType)
+        startOscillators(pitchClass, prev.intervals, prev.volume, concertPitchHz, prev.octaveOffset, prev.soundType)
       }
       return next
     })
   }, [stopOscillators, startOscillators])
 
-  const setInterval = useCallback((interval: DroneInterval, concertPitchHz = 440) => {
+  const toggleInterval = useCallback((name: DroneIntervalName, concertPitchHz = 440) => {
     setState(prev => {
-      const next = { ...prev, interval }
+      const intervals = { ...prev.intervals, [name]: !prev.intervals[name] }
       if (prev.active) {
         stopOscillators()
-        startOscillators(prev.pitchClass, interval, prev.volume, concertPitchHz, prev.octaveOffset, prev.soundType)
+        startOscillators(prev.pitchClass, intervals, prev.volume, concertPitchHz, prev.octaveOffset, prev.soundType)
       }
-      return next
+      return { ...prev, intervals }
     })
   }, [stopOscillators, startOscillators])
 
@@ -163,7 +166,7 @@ export function useDrone() {
       const next = { ...prev, octaveOffset: Math.max(-2, Math.min(2, prev.octaveOffset + delta)) }
       if (prev.active) {
         stopOscillators()
-        startOscillators(next.pitchClass, next.interval, next.volume, concertPitchHz, next.octaveOffset, next.soundType)
+        startOscillators(next.pitchClass, next.intervals, next.volume, concertPitchHz, next.octaveOffset, next.soundType)
       }
       return next
     })
@@ -171,15 +174,14 @@ export function useDrone() {
 
   const setSoundType = useCallback((soundType: DroneSoundType, concertPitchHz = 440) => {
     setState(prev => {
-      // Keep every voice at the same sounding octave (octave 3 / A3): synth and
-      // cello both use offset -1; tanpura is a fixed recording already at octave
-      // 3 (offset irrelevant). This stops the octave jumping when you switch
-      // sounds — synth no longer inherits the previous voice's offset.
-      const octaveOffset = soundType === 'tanpura' ? 0 : -1
-      const next = { ...prev, soundType, octaveOffset }
+      // The chosen octave carries across sound switches — synth and cello both
+      // sound at octave 4 + offset, so the pitch stays put. Tanpura is a fixed
+      // octave-3 recording and ignores the offset (its octave buttons are
+      // disabled in the UI).
+      const next = { ...prev, soundType }
       if (prev.active) {
         stopOscillators()
-        startOscillators(next.pitchClass, next.interval, next.volume, concertPitchHz, next.octaveOffset, soundType)
+        startOscillators(next.pitchClass, next.intervals, next.volume, concertPitchHz, next.octaveOffset, soundType)
       }
       return next
     })
@@ -190,5 +192,5 @@ export function useDrone() {
     setState(prev => ({ ...prev, active: false }))
   }, [stopOscillators])
 
-  return { droneState: state, toggle, setPitchClass, setInterval, setVolume, shiftOctave, setSoundType, stop }
+  return { droneState: state, toggle, setPitchClass, toggleInterval, setVolume, shiftOctave, setSoundType, stop }
 }
