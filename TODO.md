@@ -4,6 +4,20 @@ Goal: Help violinists and bowed string players improve their intonation.
 
 ---
 
+## ❓ Open decision — Play-Along start point (2026-08-09)
+
+Raised while fixing the stale resume point on tune change (`PracticePlayback.tsx`,
+`playFromResumePoint`):
+
+- [ ] clearing on start is what the space bar already did, and it means a take that plays
+      through to the end leaves you back at the top rather than at the bar you once paused
+      on. If you'd rather a bar you clicked on the score be sticky — so repeated plays keep
+      restarting from bar 5 until you rewind — that's a different rule and I'd implement it
+      by distinguishing a user-chosen start point from a pause point. Say the word if that's
+      the feel you want.
+
+---
+
 ## ✅ Recently shipped
 
 ### Play-Along: score + metronome + chord-change drones (2026-07-15)
@@ -12,7 +26,11 @@ gapless chord-following drone on one sample-accurate Web Audio clock. Plan and m
 log: `../lilyJS/PLAN_GIUSTO_PRACTICE_PLAYBACK.md`. Remaining QA (needs a human ear /
 devices):
 - [ ] Listen: chord changes land on measures 1/3/5/7 of Practice Arpeggios, no clicks/gaps
-- [ ] Drone tab manual regression after the `droneVoices` extraction (4 sounds × interval × octave)
+- [ ] Drone tab manual regression: 3 sounds (Cello · Synth · Tanpura) × octave shift, and — on
+      Synth — the now-INDEPENDENT 5th/8ve toggles (both on, either alone, both off = unison).
+      The old "4 sounds × interval × octave" matrix is gone: Synth Wavy is no longer offered,
+      the intervals stopped being mutually exclusive, and the default is Synth at octave 2 with
+      5th + 8ve both on. Also check the space bar stops/restarts the drone on the Drone tab only.
 - [ ] iOS Safari / Android Chrome (gesture-gated audio, wake lock, backgrounding)
 - [ ] Follow-up: beat cursor on the score (expose `onSystemBeatX` via the vendored `lilyjs` surface)
 
@@ -29,7 +47,7 @@ Full decisions + phases: `PLAN_PRACTICE_FEATURES.md`.
 - [ ] Follow-up: mic-assisted review grading — record the attempt, score vs notes.json with pitch detection + DTW, pre-select the suggested grade
 - [ ] Follow-up: Tempo Trainer saved sessions (named presets with last-practiced dates, like the reference metronome app)
 - [x] Push violin-music.github.io exercise assets (or just push violin-music_private and let CI regenerate) so the catalog goes live (2026-07-15)
-- [ ] ExercisePicker: search box across titles/tags (plan promised "searchable list"; v1 has category pills only) + show subtitle/key badges
+- [x] ExercisePicker: search box across titles/keys/categories + subtitle, key, meter, bars and chord-drone badges (verified 2026-08-09)
 - [ ] Exercise curation leftovers: Violin-Harmonics.ly (nine 1-bar score blocks — needs per-entry titles), Gypsy-scales.ly (WIP placeholders), Practice_All.ly (include-based aggregator); give Jig-Pulse/Practice_Shifts explicit per-score titles instead of auto "Part N"
 - [x] Compound meter: metronome now clicks the meter's felt pulse via `src/audio/meter.ts` — dotted quarters for 6/8–12/8 (2 per jig bar, count-in included), halves for 2/2; also fixed \tempo unit conversion (\tempo 8 = 120 → ♩ = 60) in chordSchedule AND the catalog generator (2026-07-15)
 - [ ] lilyJS parser: dotted tempo units lose their dot (\tempo 4. = 120 parses as quarter = 120, \tempo 1. = 84 as whole → Jig-Pulse part 4 shows bpm 336) — fix in ../lilyJS emit phase, re-vendor, then drop the workaround notes in chordSchedule.ts / generate-exercises-catalog.mjs
@@ -94,13 +112,13 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
 ### Learn Tab — Spaced Repetition Practice Queue
 Full research and implementation plan in `LEARN-TAB-RESEARCH.md`.
 
-**Phase 1 — MVP**
-- [ ] Tune browser: fetch catalog from violin-music.github.io, filter by difficulty/genre
-- [ ] Tune detail: display SVG score, MIDI reference playback, "add to queue" button
-- [ ] Practice view: SVG score + live pitch meter + self-grade 1–4
-- [ ] FSRS-simplified scheduling algorithm (`src/utils/spaceRepetition.ts`)
-- [ ] localStorage CRUD for learn items (`src/utils/learnStorage.ts`)
-- [ ] Add Learn tab to TabBar
+**Phase 1 — MVP** ✅ shipped (ticked 2026-08-09 — the boxes lagged the code)
+- [x] Tune browser: fetch catalog from violin-music.github.io, filter by difficulty/genre
+- [x] Tune detail: display SVG score, MIDI reference playback, "add to queue" button
+- [x] Practice view: SVG score + live pitch meter + self-grade 1–4
+- [x] FSRS-simplified scheduling algorithm (`src/utils/spaceRepetition.ts`)
+- [x] localStorage CRUD for learn items (`src/utils/learnStorage.ts`)
+- [x] Add Learn tab to TabBar
 
 **Phase 2 — Measure highlighting**
 - [ ] Parse MIDI to extract measure timestamps → overlay highlight on SVG

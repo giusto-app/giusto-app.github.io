@@ -568,6 +568,20 @@ export default function PracticePlayback({
     setIsPlaying(true)
   }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
 
+  /**
+   * Start from the resume point and CONSUME it — both transport entry points
+   * (space bar and the play button) go through here so they agree.
+   *
+   * Consuming matters because a take that runs to the end calls stopPlayback(),
+   * which leaves the ref untouched: without this, the next start would jump
+   * back to the bar you once paused on instead of the top.
+   */
+  const playFromResumePoint = useCallback(() => {
+    const from = resumeBeatRef.current
+    resumeBeatRef.current = null
+    void startPlayback(from ?? undefined)
+  }, [startPlayback])
+
   // Live control forwarding
   useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
   // Backing selection/volume are volume-gated (gapless): the inactive instrument
@@ -606,23 +620,29 @@ export default function PracticePlayback({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
           target?.isContentEditable) return
       e.preventDefault()
-      if (isPlaying) {
-        pausePlayback()
-      } else {
-        const from = resumeBeatRef.current
-        resumeBeatRef.current = null
-        void startPlayback(from ?? undefined)
-      }
+      if (isPlaying) pausePlayback()
+      else playFromResumePoint()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isPracticeTabActive, isPlaying, pausePlayback, startPlayback])
+  }, [isPracticeTabActive, isPlaying, pausePlayback, playFromResumePoint])
 
   // Tear down audio when the view unmounts or the exercise changes
   useEffect(() => stopPlayback, [stopPlayback, exercise.id])
 
   // A new exercise starts in its own key.
   useEffect(() => { setTransposeSemitones(0) }, [exercise.id])
+
+  // ...and at its own bar 1. This component is never remounted between
+  // exercises (PracticeTab renders it without a `key`), so the resume point
+  // survives in its ref: without this, picking a new tune after pausing
+  // mid-take started it at the bar you left the OLD one on — or past the end
+  // entirely, when the new tune is shorter.
+  useEffect(() => {
+    resumeBeatRef.current = null
+    noteBindingRef.current?.setActiveMeasure(null)
+    setParkedMeasure(null)
+  }, [exercise.id])
 
   const handlePick = useCallback((entry: ExerciseCatalogEntry) => {
     stopPlayback()
@@ -768,7 +788,7 @@ export default function PracticePlayback({
             <RewindIcon />
           </button>
           <button
-            onClick={() => (isPlaying ? pausePlayback() : void startPlayback(resumeBeatRef.current ?? undefined))}
+            onClick={() => (isPlaying ? pausePlayback() : playFromResumePoint())}
             disabled={!schedule || schedule.totalBeats === 0}
             className={[
               'w-14 h-14 rounded-full flex items-center justify-center transition-colors shrink-0',
