@@ -28,8 +28,12 @@ state machine, and test plan: `PLAN_PLAYBACK_START_POINT.md`.
 - [ ] **QA by ear** — the only way to confirm any of this: section + Loop wraps cleanly
       (chords and note cursor across the seam, no click), section + Loop off stops after the
       last bar, per-loop trainer steps once per pass including on a 6/8 or 9/8 tune
-- [ ] **Needs Marc:** how a section looks — span vs end bars only, section vs pause marks,
-      and the `bars 5–12 · ♩ = 120` readout. Blocks the UI step only.
+- [ ] Section UI — **decided 2026-08-09: tint the whole span.** Every bar 5→12 gets a
+      background wash, the paused bar keeps the existing solid marker painted over it, readout
+      becomes `bars 5–12 · ♩ = 120` (`· at 7` while paused inside). Must re-apply on the
+      score-render nonce like the parked marker, or a resize drops the wash. An armed
+      selection with no end yet tints just its start bar. Details:
+      `PLAN_PLAYBACK_START_POINT.md`.
 
 ---
 
@@ -70,11 +74,12 @@ Full decisions + phases: `PLAN_PRACTICE_FEATURES.md`.
   - [x] Measure derivation: `src/utils/tuneMeasures.ts` — bars out of notes.json by
         accumulating each note's `d` against the meter from `time_sig`, 16 tests. Means
         segmentation does NOT need the `.ly` pipeline first. Pure and unwired (2026-08-09)
-  - [ ] **Needs Marc — pickup bars.** notes.json has no barlines, so derived bars assume the
-        tune starts on a downbeat; a pickup shifts every bar and "bars 5–8" would drill 4–7.
-        `pickupBeats` is an explicit parameter and a test pins the failure, but nothing can
-        supply the true value yet. Publish the `.ly` (Phase 3 item 1), add a pickup field to
-        the tune catalog, or accept the error on pickup tunes?
+  - [ ] Pickup bars — **decided 2026-08-09: publish each tune's `.ly`** (Phase 3 item 1, as
+        originally planned). The `.ly` states barlines outright, so pickups, repeats and
+        irregular bars are exact rather than inferred. Work lands in violin-music_private +
+        the catalog pipeline. Until it ships, `tuneMeasures` stays a stopgap with
+        `pickupBeats` explicit — and once the `.ly` is available it can be deleted rather
+        than kept as a second source of truth for barlines.
   - [ ] Wire it: `LearnCard.segment`, card generation on add-to-queue, bar-based sections in
         `PracticeView` (replacing the 12-note chunks), intra-session re-queue for "Again"
   - [ ] Synergy — now unblocked by Play-Along section looping: a "practice this segment" link

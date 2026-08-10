@@ -279,18 +279,32 @@ correct after a take ends with a section set.
 
 ---
 
-## Open decision — how a section looks (S14)
+## How a section looks (S14) — decided by Marc, 2026-08-09
 
-The only thing still unsettled, and it needs answering before the UI work. A sticky section
-that isn't visible is a trap: play "refuses" to start at the top and nothing on screen says
-why. Three parts to decide:
+**Tint the whole span.** Every bar in the section gets a background wash; the bar you paused
+in keeps the existing solid marker on top, so section and pause are never confused.
 
-- **The span.** Marking only the two end bars is cheapest; tinting every bar from 5 to 12
-  reads instantly but means styling a range of `data-lily-measure` elements.
-- **Section versus pause.** They're different things and want different marks — an outline
-  for "this is the passage" and a fill for "this is where I stopped" would do it.
-- **The readout.** Today it shows `bar 13 · ♩ = 120`. With a section it could read
-  `bars 5–12 · ♩ = 120`, and while paused inside one, `bars 5–12 · at 7 · ♩ = 120`.
+```
+  bars 5–12 · ♩ = 120
+
+  │ 1 │ 2 │ 3 │ 4 │
+  │▒▒5│▒▒6│▒▒7│██8│      ▒ = section
+  │▒▒9│▒10│▒11│▒12│      █ = paused in bar 8
+  │13 │14 │15 │16 │
+```
+
+Implementation notes:
+
+- The wash styles every `data-lily-measure` element from `startMeasure` to `endMeasure`, not
+  just the two ends — that is the whole point of the choice, so it has to survive a score
+  that wraps across systems.
+- The pause marker is the existing `setActiveMeasure` fill and must paint *over* the wash.
+- Re-apply on the score-render nonce, exactly like the parked marker (S13) — a resize drops
+  the SVG and would otherwise drop the section wash with it.
+- Readout becomes `bars 5–12 · ♩ = 120`, and while paused inside a section,
+  `bars 5–12 · at 7 · ♩ = 120`.
+- An ARMED section (start set, no end yet) has no span to wash. Tint just the start bar so a
+  half-made selection still reads as "something is set".
 
 Not blocking, decide later: whether a section persists per exercise across sessions
 (`localStorage`, keyed by `exercise.id`) or is forgotten when you switch away.
