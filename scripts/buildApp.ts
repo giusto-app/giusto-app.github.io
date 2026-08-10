@@ -18,6 +18,10 @@ export async function buildApp({
     entrypoints: ['./index.html'],
     outdir,
     minify,
+    // Required for the dynamic import in main.tsx to become its own chunk.
+    // Without it Bun inlines dynamic imports, and the dev-only `?compare` page
+    // rides along in the main bundle — 2.0 MB of 3.6 MB shipped to everyone.
+    splitting: true,
     external: ['../../../generated/smufl/*'],
     plugins: [tailwind],
   })
