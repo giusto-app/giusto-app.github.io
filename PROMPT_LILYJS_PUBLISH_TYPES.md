@@ -1,5 +1,10 @@
 # Prompt for the lilyJS project — ship type declarations with the lilyjs bundle
 
+> **ANSWERED 2026-08-10 — lilyJS shipped this (commit `09b43281`, "build:lilyjs
+> publishes type declarations"). The prompt below is kept as the record of what
+> was asked; the answer and the resulting Giusto work are at the bottom under
+> [What lilyJS did](#what-lilyjs-did).**
+
 Written 2026-08-09. **This is work for the lilyJS repo, not for Giusto** — paste the fenced
 block below into a session in `../lilyJS`. Companion to
 `PROMPT_LILYJS_RETIRE_LEGACY_PARSER.md`; the two are independent and can be done in either
@@ -107,11 +112,91 @@ them.
 
 ---
 
-## After lilyJS answers
+## What lilyJS did
 
-- Declarations published → add the copy to `scripts/sync-lilyjs.sh`, delete
-  `packages/lilyjs/index.d.ts` and the "hand-maintained" warning, and rename any Giusto types
-  that were structural stand-ins for real lilyJS names.
-- Declined or deferred → add a drift test on this side instead: assert every value declared in
-  `packages/lilyjs/index.d.ts` is actually exported by `packages/lilyjs/lilyjs.esm.js`, so a
-  rename upstream fails a test here rather than in someone's browser.
+Answered 2026-08-10, commit `09b43281`. Declarations are **published**, so the first
+branch below applies.
+
+### The decision: curated, and it was measured rather than assumed
+
+lilyJS chose a curated single file over `tsc --emitDeclarationOnly`, but not for the
+reason this prompt guessed. `src/lilyjs.ts` is **not** a tight re-export list: two
+`export *` wildcards (`./music-playback`, `./music-tools/generators/arpeggiator`) put
+**83 values** on the bundle.
+
+They tested generated emit rather than reasoning about it: `tsc --emitDeclarationOnly`
+over the entry produces **418 `.d.ts` files / 1.8 MB**, and the same over a deliberately
+narrow public entry produces 418 as well, because tsc emits for every file in the
+*program* rather than the reachable types, and there is no `.d.ts` bundler in that
+toolchain.
+
+Worth noting: the "Not proposed" paragraph above predicted exactly this — "would emit the
+whole internal type graph — hundreds of types". That was right, and it turns out to be
+true on lilyJS's side too, not just ours.
+
+### What ships
+
+| Artifact | Notes |
+|---|---|
+| `dist/index.d.ts` | curated, from `tools/build/lilyjs-package.d.ts` |
+| `dist/package.json` | `"types": "./index.d.ts"` |
+
+Our vendored `packages/lilyjs/package.json` **already** declares
+`"types": "./index.d.ts"`, so no metadata change is needed here — the sync just has to
+copy the file next to the bundle.
+
+### Renames — three of our stand-ins were real names all along
+
+Nine of the thirteen types we listed were already correct. Four to change:
+
+| Our name | Real lilyJS name | Was it published before? |
+|---|---|---|
+| `ScoreLike` | `Score` | yes, we were approximating unnecessarily |
+| `MeasureLike` | `Measure` | yes, same |
+| `MusicalEventLike` | `MusicalEvent` | **no — added 2026-08-10** |
+| `TempoMarkLike` | `TempoMark` | **no — added 2026-08-10** |
+
+`MusicDocumentBlock`, `Rational`, `SvgPlaybackBinding`, `SpelledPitchClass`,
+`ArpeggioPlan`, `ArpeggiatorOptions`, `ConductorMap`, `PlaybackTimeline` and
+`NormalizedHarmonyEvent` are all real names already. `MusicDocumentBlock` simply was not
+exported from the lilyjs entry either. All three missing types were already exported by
+`music-model`; only the entry omitted them, which is why we ended up approximating.
+
+**`TempoMark` is the type carrying `beatUnitDots`** — the field the retired lily-parser
+declaration dropped. lilyJS added a dedicated guard line that fails if it disappears again.
+
+### The guarantee, and its limit
+
+Two guards run in lilyJS on every build, both mutation-verified there:
+
+1. Every value the declaration exports is exported by the built `dist/lilyjs.esm.js`, and
+   the published surface can never shrink below the value list we gave them.
+2. Every published name still resolves from `src/lilyjs`, checked by `tsc`.
+
+**Shapes are not mechanically checked.** lilyJS tried and reported why: function
+parameters are contravariant, so asserting the implementation satisfies the curated types
+only holds if the curated file mirrors the implementation exactly — the 418-file tree the
+design avoids. It fails on `Score` alone, which really carries `annotations` / `info` /
+`directives` / `lyrics` and more than the published subset names.
+
+So a **renamed or removed** export now fails upstream before it can reach us; a
+**materially changed signature** still will not. That is a real improvement over the
+status quo, not a complete one — worth keeping in mind before deleting every check on
+this side.
+
+## Giusto follow-up
+
+- [ ] `scripts/sync-lilyjs.sh` — copy `dist/index.d.ts` to `packages/lilyjs/index.d.ts`
+      alongside the bundle.
+- [ ] Delete the hand-written 411-line `packages/lilyjs/index.d.ts` (the copy replaces it)
+      and the "hand-maintained — update it if the API surface you use changed" warning that
+      `bun run sync:lilyjs` prints.
+- [ ] Rename the four stand-ins per the table above: `ScoreLike` → `Score`,
+      `MeasureLike` → `Measure`, `MusicalEventLike` → `MusicalEvent`,
+      `TempoMarkLike` → `TempoMark`.
+- [ ] Check whether anything here derives a BPM from a tempo mark without reading
+      `beatUnitDots`; a dotted `\tempo 4. = 84` is 1.5x what an undotted reading gives.
+- [ ] Consider keeping a light drift test on this side anyway, given the shape limit above
+      — the "declined or deferred" fallback from the original plan is still cheap insurance:
+      assert every value declared in `packages/lilyjs/index.d.ts` is exported by
+      `packages/lilyjs/lilyjs.esm.js`.
