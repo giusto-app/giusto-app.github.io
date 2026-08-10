@@ -162,6 +162,11 @@ export default function PracticePlayback({
   const [parkedMeasure, setParkedMeasure] = useState<number | null>(null)
   /** Bumped on every score re-render, so the parked marker can be re-stamped. */
   const [scoreRenderNonce, setScoreRenderNonce] = useState(0)
+  /**
+   * The selected passage in MEASURES, mirroring sectionRef for rendering — refs
+   * don't re-render. `end` is null while a selection is armed but not closed.
+   */
+  const [sectionSpan, setSectionSpan] = useState<{ start: number; end: number | null } | null>(null)
   const [isCountingIn, setIsCountingIn] = useState(false)
   const [shareStatus, setShareStatus] = useState('')
   const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
@@ -374,16 +379,32 @@ export default function PracticePlayback({
   }, [])
 
   /**
+   * The only writer of the section, so the ref the transport reads and the wash
+   * the score shows cannot drift apart.
+   */
+  const applySection = useCallback((section: Section | null) => {
+    sectionRef.current = section
+    setSectionSpan(section
+      ? {
+          start: measureAtBeat(section.startBeat),
+          // endBeat is EXCLUSIVE, so step just inside it to name the LAST bar
+          // rather than the one after the section.
+          end: section.endBeat === null ? null : measureAtBeat(section.endBeat - 1e-6),
+        }
+      : null)
+  }, [measureAtBeat])
+
+  /**
    * Back to the top. The one escape hatch that forgets EVERYTHING — section,
    * pause point, parked marker — which is what makes a sticky section safe to
    * have: there is always one obvious way out of it.
    */
   const rewind = useCallback(() => {
     stopPlayback()
-    sectionRef.current = null
+    applySection(null)
     pauseBeatRef.current = null
     parkAtMeasure(null)
-  }, [stopPlayback, parkAtMeasure])
+  }, [stopPlayback, parkAtMeasure, applySection])
 
   /**
    * Stop, but keep BOTH the pause point and the on-screen position.
@@ -686,11 +707,11 @@ export default function PracticePlayback({
   // bar you left the OLD one on — or past the end entirely, when the new tune
   // is shorter. Bars mean nothing across tunes, so the section goes too.
   useEffect(() => {
-    sectionRef.current = null
+    applySection(null)
     pauseBeatRef.current = null
     noteBindingRef.current?.setActiveMeasure(null)
     setParkedMeasure(null)
-  }, [exercise.id])
+  }, [exercise.id, applySection])
 
   const handlePick = useCallback((entry: ExerciseCatalogEntry) => {
     stopPlayback()
@@ -803,7 +824,7 @@ export default function PracticePlayback({
     const measure = Number(raw)
     if (!Number.isFinite(measure)) return
     const section = nextSection(sectionRef.current, beatAtMeasure(measure), beatAtMeasure(measure + 1))
-    sectionRef.current = section
+    applySection(section)
     // An explicit aim outranks wherever you happened to pause — otherwise
     // clicking bar 5 and pressing play would still resume at bar 7.
     pauseBeatRef.current = null
@@ -811,7 +832,7 @@ export default function PracticePlayback({
     setActiveChordIndex(section
       ? printedChordIndexAtBeat(printedOnsetsRef.current, section.startBeat)
       : -1)
-  }, [isPlaying, beatAtMeasure, measureAtBeat, parkAtMeasure])
+  }, [isPlaying, beatAtMeasure, measureAtBeat, parkAtMeasure, applySection])
 
   const handleRendered = useCallback((container: HTMLDivElement) => {
     scoreContainerRef.current = container
@@ -837,6 +858,48 @@ export default function PracticePlayback({
     }
     noteBindingRef.current?.setActiveMeasure(parkedMeasure)
   }, [parkedMeasure, scoreRenderNonce])
+
+  /**
+   * Tint every bar of the selected passage.
+   *
+   * lilyjs already draws a `measure-area` rect behind each bar and tints THAT
+   * for its own parked-measure marker — notes are small and mostly whitespace,
+   * so a "selected bar" has to be a selected AREA. We stamp our own attribute
+   * on the same rects and let CSS do the rest (see index.css).
+   *
+   * Re-runs on the render nonce because a resize or font swap rebuilds the SVG
+   * and takes the wash with it, exactly like the parked marker above.
+   */
+  useEffect(() => {
+    const container = scoreContainerRef.current
+    if (!container) return
+    const areas = container.querySelectorAll<SVGElement>('[data-lily-element="measure-area"][data-lily-measure]')
+    for (const area of areas) {
+      const measure = Number(area.getAttribute('data-lily-measure'))
+      // An armed selection has no end yet — tint just its start bar, so a
+      // half-made selection still reads as "something is set".
+      const inSection = sectionSpan !== null && Number.isFinite(measure) &&
+        measure >= sectionSpan.start && measure <= (sectionSpan.end ?? sectionSpan.start)
+      if (inSection) area.setAttribute('data-giusto-section', 'true')
+      else area.removeAttribute('data-giusto-section')
+    }
+  }, [sectionSpan, scoreRenderNonce])
+
+  /**
+   * What the transport reads before the tempo: the passage, then where inside
+   * it you stopped. A section is sticky, so it has to be named — otherwise play
+   * "refuses" to start at the top and nothing says why.
+   */
+  const transportPosition = (() => {
+    if (sectionSpan === null) return parkedMeasure !== null ? `bar ${parkedMeasure} · ` : ''
+    const span = sectionSpan.end === null
+      ? `from bar ${sectionSpan.start}`          // armed, no end yet
+      : `bars ${sectionSpan.start}–${sectionSpan.end}`
+    // Only say "at N" when it adds something — parking on the section's own
+    // first bar is where a take starts anyway.
+    const inside = parkedMeasure !== null && parkedMeasure !== sectionSpan.start
+    return inside ? `${span} · at ${parkedMeasure} · ` : `${span} · `
+  })()
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
@@ -889,9 +952,7 @@ export default function PracticePlayback({
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>Tempo</span>
               <span className="tabular-nums">
-                {isCountingIn ? 'count-in…'
-                  : parkedMeasure !== null ? `bar ${parkedMeasure} · ♩ = ${bpm}`
-                  : `♩ = ${bpm}`}
+                {isCountingIn ? 'count-in…' : `${transportPosition}♩ = ${bpm}`}
               </span>
             </div>
             <input

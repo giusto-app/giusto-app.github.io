@@ -28,12 +28,13 @@ state machine, and test plan: `PLAN_PLAYBACK_START_POINT.md`.
 - [ ] **QA by ear** — the only way to confirm any of this: section + Loop wraps cleanly
       (chords and note cursor across the seam, no click), section + Loop off stops after the
       last bar, per-loop trainer steps once per pass including on a 6/8 or 9/8 tune
-- [ ] Section UI — **decided 2026-08-09: tint the whole span.** Every bar 5→12 gets a
-      background wash, the paused bar keeps the existing solid marker painted over it, readout
-      becomes `bars 5–12 · ♩ = 120` (`· at 7` while paused inside). Must re-apply on the
-      score-render nonce like the parked marker, or a resize drops the wash. An armed
-      selection with no end yet tints just its start bar. Details:
-      `PLAN_PLAYBACK_START_POINT.md`.
+- [x] Section UI — tint the whole span (2026-08-09). lilyjs already draws a `measure-area`
+      rect behind each bar and tints THAT for its own parked marker, so the wash stamps
+      `data-giusto-section` on the same rects and CSS does the rest. The selector excludes
+      `[data-lily-measure-active]`, so the paused bar keeps lilyjs's blue whatever order the
+      two stylesheets load in. Re-applies on the score-render nonce; an armed selection tints
+      just its start bar; readout reads `bars 5–12 · ♩ = 120`, or `· at 7` when paused
+      somewhere other than the section's own first bar.
 
 ---
 

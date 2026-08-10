@@ -134,6 +134,23 @@ body.light .text-emerald-400 { color: #059669 !important; }
   height: auto;
 }
 
+/* ── Play-Along section (the bars a take drills) ─────────────────────────── */
+/* lilyjs draws a `measure-area` rect behind each bar and tints THAT rather than
+   the glyphs — notes are small and mostly whitespace, so a tinted bar has to be
+   a tinted area. We reuse the same element for the section wash.
+
+   The `:not(...)` matters: lilyjs paints the parked bar with its own
+   --lily-measure-active blue on this very element, and the bar you stopped in
+   has to stay distinguishable from the passage you selected. Excluding the
+   active bar means the pause marker always wins, whatever order the two
+   stylesheets happen to load in. */
+[data-lily-element='measure-area'][data-giusto-section='true']:not([data-lily-measure-active='true']) {
+  fill: rgba(251, 191, 36, 0.16);
+}
+body.light [data-lily-element='measure-area'][data-giusto-section='true']:not([data-lily-measure-active='true']) {
+  fill: rgba(217, 119, 6, 0.14);
+}
+
 /* ── Light-mode badge background flips ───────────────────────────────────── */
 /* Guide temperament badge backgrounds: dark in dark-mode, light in light-mode */
 body.light .badge-blue   { background: rgba(219, 234, 254, 0.9) !important; }

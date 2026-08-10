@@ -322,7 +322,9 @@ Not blocking, decide later: whether a section persists per exercise across sessi
 5. Trainer: window-relative step boundary and pause-point exception (S12).
 6. Transpose → `pausePlayback` when playing (S11).
 7. Marker re-stamp nonce; `parkedMeasure` derived from the resolution (S13).
-8. Section UI per the open decision (S14).
+8. ~~Section UI~~ — DONE 2026-08-09. Stamps `data-giusto-section` on lilyjs's own
+   `measure-area` rects; CSS in `index.css` excludes the active measure so the pause marker
+   always wins. All eight steps are built; what remains is QA by ear.
 
 Steps 1–2 are safe to land alone: with no section ever set, every function above reduces to
 current behaviour.
