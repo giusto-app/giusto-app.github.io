@@ -19,7 +19,7 @@ import {
   type ConductorMap,
   type NormalizedHarmonyEvent,
   type PlaybackTimeline,
-  type ScoreLike,
+  type Score,
   type SpelledPitchClass,
 } from 'lilyjs'
 import {
@@ -151,7 +151,7 @@ export function buildArpeggioAir(
 ): AccompanimentIR {
   const parsed = parseSource(source, options.format ? { format: options.format } : undefined)
   const scoreBlock = parsed.document?.blocks.find((block) => block.type === 'score') as
-    | { type: 'score'; score: ScoreLike }
+    | { type: 'score'; score: Score }
     | undefined
   if (!scoreBlock) throw new Error('buildArpeggioAir: source has no \\score block')
 
@@ -160,11 +160,11 @@ export function buildArpeggioAir(
 
 /**
  * Build AIR from an already-parsed score (no re-parse). Use this when the caller
- * already holds a `ScoreLike` — e.g. a UI that parsed the source to render it —
+ * already holds a `Score` — e.g. a UI that parsed the source to render it —
  * so the timeline is built once.
  */
 export function arpeggioAirFromScore(
-  score: ScoreLike,
+  score: Score,
   arpeggiator: ArpeggiatorOptions,
   options: ArpeggioPlanToAirOptions = {},
 ): AccompanimentIR {

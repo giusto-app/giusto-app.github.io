@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSource, type ScoreLike } from 'lilyjs'
+import { parseSource, type Score } from 'lilyjs'
 import {
   allBackingMidis,
   backingNotesInWindow,
@@ -8,7 +8,7 @@ import {
   prepareMidisByInstrument,
 } from './backingStyles'
 
-function witness(): ScoreLike {
+function witness(): Score {
   const src = `\\language "english"
     chordNames = \\chordmode { g1:m c1:m f1 bf1 }
     \\score {
@@ -18,7 +18,7 @@ function witness(): ScoreLike {
       >>
     }`
   const doc = parseSource(src).document
-  const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
+  const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: Score } | undefined
   if (!block) throw new Error('no score block')
   return block.score
 }
@@ -55,7 +55,7 @@ describe('buildBackingSchedule', () => {
         >>
       }`
     const doc = parseSource(src).document
-    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
+    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: Score } | undefined
     const layers = buildEnsembleArrangement(block!.score, 'orchestra', 3)
     expect(layers.map((l) => l.instrument)).toEqual(['bass', 'pizzicato', 'strings'])
 
@@ -169,7 +169,7 @@ describe('gypsy in 3/4 (valse musette)', () => {
         >>
       }`
     const doc = parseSource(src).document
-    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
+    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: Score } | undefined
     const layers = buildEnsembleArrangement(block!.score, 'gypsy', 3)
     const bass = layers.find((l) => l.instrument === 'bass')!.notes
     const guitar = layers.find((l) => l.instrument === 'guitarJazz')!.notes

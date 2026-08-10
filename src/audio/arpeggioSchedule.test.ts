@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSource, type ScoreLike } from 'lilyjs'
+import { parseSource, type Score } from 'lilyjs'
 import { arpNotesInWindow, buildArpeggioSchedule } from './arpeggioSchedule'
 
 const WITNESS = `\\language "english"
@@ -11,10 +11,10 @@ const WITNESS = `\\language "english"
     >>
   }`
 
-function witnessScore(): ScoreLike {
+function witnessScore(): Score {
   const doc = parseSource(WITNESS).document
   const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as
-    | { score: ScoreLike }
+    | { score: Score }
     | undefined
   if (!block) throw new Error('no score block')
   return block.score
@@ -54,7 +54,7 @@ describe('buildArpeggioSchedule', () => {
 
   test('no chord track → empty schedule', () => {
     const doc = parseSource('\\score { \\relative c\' { c4 d e f } }').document
-    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike }
+    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: Score }
     expect(buildArpeggioSchedule(block.score, { pattern: 'up', rhythm: 'eighth', octaves: 1 })).toEqual([])
   })
 })

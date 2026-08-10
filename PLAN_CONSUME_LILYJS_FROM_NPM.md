@@ -1,12 +1,22 @@
 # PLAN — consume `lilyjs` from GitHub Packages instead of vendoring it
 
+> **DONE 2026-08-10.** Giusto now depends on `@marcmouries/lilyjs@^0.15.1` from
+> GitHub Packages; `packages/lilyjs` and the whole sync machinery are gone.
+> Build and 188 tests pass against the published package. Remaining by hand:
+> grant this repo access under the package's "Manage Actions access" (CI cannot
+> install a private package from another repo without it), and add a
+> `DEPENDABOT_PACKAGES_TOKEN` secret so update PRs actually open.
+
 **Goal:** stop vendoring the lilyJS bundle. Depend on a published package and let
 an automated bump PR bring in each new version, so getting the latest lilyJS
 costs a review rather than a local checkout and a hand-run script.
 
 **Constraint (2026-08-10):** `lilyjs` is taken on public npm and lilyJS stays
 PRIVATE for now, so it publishes as **`@marcmouries/lilyjs` to GitHub
-Packages**. That is free and fits the existing GitHub remote, but it carries one
+Packages**. Verified: `MarcMouries/lilyJS` is a private repository, and a
+GitHub Packages npm package inherits the visibility of the repository it is
+published from — so the package is private and only principals with read access
+can install it. That is free and fits the existing GitHub remote, but it carries one
 real cost this plan has to absorb: **GitHub Packages requires authentication for
 every install**, including CI and every developer machine. See Task 1.
 
@@ -47,9 +57,20 @@ Vendoring needed no credentials. GitHub Packages does, for every install.
       @marcmouries:registry=https://npm.pkg.github.com
       //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 
-- [ ] **CI**: add `permissions: { packages: read }` to the workflow and pass
-      `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` to the install step. No PAT
-      needed as long as both repos are under the same owner.
+- [ ] **CI — the cross-repo catch.** `permissions: { packages: read }` plus
+      `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` is NOT automatically
+      sufficient here. A workflow's `GITHUB_TOKEN` is scoped to the repository
+      it runs in, and the package lives in a DIFFERENT (private) repository,
+      `MarcMouries/lilyJS`. Same owner does not by itself grant access.
+      Two ways to resolve it, in preference order:
+      1. In the package's settings on GitHub, grant the Giusto repository read
+         access ("Manage Actions access"). Then Giusto's own `GITHUB_TOKEN`
+         works and no secret has to be created or rotated.
+      2. Failing that, a PAT with `read:packages` stored as a repository secret
+         — simpler to set up, but it is a credential someone has to own,
+         rotate, and remember to renew when it expires.
+      Verify this on a real CI run before deleting the vendored package; a 401
+      here is the difference between "installs locally" and "deploys".
 - [ ] **Local dev**: each developer needs a classic PAT with `read:packages` in
       their environment. Document it in README — an unset token fails install
       with a 401 that does not obviously say "you need a token".

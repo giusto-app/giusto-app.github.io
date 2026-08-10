@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { parseSource } from 'lilyjs'
 import { buildNoteSchedule, noteEventIdsAtBeat } from './noteSchedule'
-import type { ScoreLike } from 'lilyjs'
+import type { Score } from 'lilyjs'
 
 // Mixed rhythm: quarter, two eighths (sub-beat starts), rest, quarter | whole.
 const WITNESS = `\\version "2.26.0"
@@ -11,10 +11,10 @@ const WITNESS = `\\version "2.26.0"
 }
 `
 
-function parseScore(source: string): ScoreLike {
+function parseScore(source: string): Score {
   const result = parseSource(source)
   const block = result.document?.blocks.find((b: { type: string }) => b.type === 'score') as
-    | { score: ScoreLike }
+    | { score: Score }
     | undefined
   if (!block) throw new Error('source did not parse to a score')
   return block.score

@@ -5,7 +5,7 @@ import {
   parseSource,
   type ArpeggiatorOptions,
   type PlaybackTimeline,
-  type ScoreLike,
+  type Score,
 } from 'lilyjs'
 import { arpeggioPlanToAir, buildArpeggioAir } from './arpeggioPlanToAir'
 
@@ -31,7 +31,7 @@ const UP_QUARTERS: ArpeggiatorOptions = {
 function timelineFor(chordmode: string, staff?: string): PlaybackTimeline {
   const parsed = parseSource(scoreWith(chordmode, staff))
   const block = parsed.document?.blocks.find((b: { type: string }) => b.type === 'score') as
-    | { score: ScoreLike }
+    | { score: Score }
     | undefined
   if (!block) throw new Error('no score block')
   return buildPlaybackTimelineFromScore(block.score)

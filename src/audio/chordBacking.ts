@@ -4,7 +4,7 @@
 //
 // Positions are quarter-note beats from score start, matching the PlaybackClock.
 
-import { buildPlaybackTimelineFromScore, rationalToNumber, type ScoreLike } from 'lilyjs'
+import { buildPlaybackTimelineFromScore, rationalToNumber, type Score } from 'lilyjs'
 
 export interface ChordBlock {
   /** 0-based start position in quarter-note beats from score start. */
@@ -41,7 +41,7 @@ export function voiceChord(pitchClasses: number[], baseMidi = VOICING_BASE_MIDI)
  * No-chord / empty spans are skipped (silence). Empty when the score has no
  * chord track.
  */
-export function buildChordBackingSchedule(score: ScoreLike): ChordBlock[] {
+export function buildChordBackingSchedule(score: Score): ChordBlock[] {
   const timeline = buildPlaybackTimelineFromScore(score)
   const blocks: ChordBlock[] = []
   for (const harmony of timeline.harmony) {

@@ -8,7 +8,7 @@ import {
   resolveSelection,
   transpose,
   type MusicDocumentBlock,
-  type ScoreLike,
+  type Score,
   type SvgPlaybackBinding,
 } from 'lilyjs'
 import LilyScore from './LilyScore'
@@ -69,7 +69,7 @@ interface PracticePlaybackProps {
 
 const DEFAULT_BPM = 80
 
-function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: ScoreLike } {
+function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score } {
   return b.type === 'score' && 'score' in b
 }
 

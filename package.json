@@ -1,15 +1,14 @@
 {
   "name": "giusto",
   "private": true,
-  "workspaces": ["packages/*"],
   "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "build": "tsc -b && bun run scripts/build.ts",
+    "sync:fonts": "bun run scripts/syncLilyjsFonts.ts",
+    "build": "bun run sync:fonts && tsc -b && bun run scripts/build.ts",
     "hooks:install": "bash scripts/install-git-hooks.sh",
     "preview": "bun run scripts/preview.ts",
-    "sync:lilyjs": "bash scripts/sync-lilyjs-release.sh",
     "test": "bun test"
   },
   "dependencies": {
@@ -17,7 +16,7 @@
     "pitchy": "^4.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "lilyjs": "workspace:*",
+    "lilyjs": "npm:@marcmouries/lilyjs@^0.15.1",
     "vexflow": "^5.0.0"
   },
   "devDependencies": {

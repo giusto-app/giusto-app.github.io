@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { parseSource } from 'lilyjs'
 import { buildChordSchedule, chordStartingAtBeat, parseChordLabel } from './chordSchedule'
-import type { ScoreLike } from 'lilyjs'
+import type { Score } from 'lilyjs'
 
 const WITNESS = `\\version "2.26.0"
 \\language "english"
@@ -30,16 +30,16 @@ simple_Arpeggios = \\relative c'' {
 }
 `
 
-function parseWitness(src: string): ScoreLike {
+function parseWitness(src: string): Score {
   const result = parseSource(src)
   const block = result.document?.blocks.find((b: { type: string }) => b.type === 'score') as
-    | { score: ScoreLike }
+    | { score: Score }
     | undefined
   if (!block) throw new Error('witness did not parse to a score')
   return block.score
 }
 
-function witnessScore(): ScoreLike {
+function witnessScore(): Score {
   return parseWitness(WITNESS)
 }
 
@@ -95,7 +95,7 @@ describe('buildChordSchedule (synthetic edge cases)', () => {
   })
 
   test('mid-measure chord change uses the offset', () => {
-    const score: ScoreLike = {
+    const score: Score = {
       parts: [{ id: 'p', measures: [measure([{ text: 'C' }, { text: 'G7', offsetQN: 2 }])] }],
     }
     const { events } = buildChordSchedule(score)
@@ -148,7 +148,7 @@ describe('buildChordSchedule (synthetic edge cases)', () => {
   })
 
   test('note-attached chord symbols (eventId set) are ignored', () => {
-    const score: ScoreLike = {
+    const score: Score = {
       parts: [
         {
           id: 'p',

@@ -4,7 +4,7 @@
 // matches the rendered SVG's `data-lily-event-id`, so the playback UI can
 // highlight the sounding note via the lilyjs SVG playback binding.
 
-import type { MeasureLike, MusicalEventLike, ScoreLike } from 'lilyjs'
+import type { Measure, MusicalEvent, Score } from 'lilyjs'
 
 export interface NotePlaybackEvent {
   /** Matches `data-lily-event-id` on the rendered SVG elements. */
@@ -15,7 +15,7 @@ export interface NotePlaybackEvent {
   isRest: boolean
 }
 
-function measureDurationQN(measure: MeasureLike): number {
+function measureDurationQN(measure: Measure): number {
   if (typeof measure.expectedDurationQN === 'number' && measure.expectedDurationQN > 0) {
     return measure.expectedDurationQN
   }
@@ -24,12 +24,12 @@ function measureDurationQN(measure: MeasureLike): number {
   return 4
 }
 
-function eventDurationBeats(event: MusicalEventLike): number {
+function eventDurationBeats(event: MusicalEvent): number {
   const { num, den } = event.duration.sounding
   return den > 0 ? (num / den) * 4 : 0 // whole-note fraction → quarter-note beats
 }
 
-function isRestEvent(event: MusicalEventLike): boolean {
+function isRestEvent(event: MusicalEvent): boolean {
   return event.pitch === undefined && event.pitches === undefined
 }
 
@@ -39,7 +39,7 @@ function isRestEvent(event: MusicalEventLike): boolean {
  * anchored to the time signature (like chordSchedule), so a short measure
  * never shifts the ones after it.
  */
-export function buildNoteSchedule(score: ScoreLike): NotePlaybackEvent[] {
+export function buildNoteSchedule(score: Score): NotePlaybackEvent[] {
   const measures = score.parts[0]?.measures ?? []
   const events: NotePlaybackEvent[] = []
   let measureStart = 0

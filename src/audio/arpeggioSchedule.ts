@@ -6,7 +6,7 @@
 // All positions are in quarter-note beats ("QN beats") from score start, so the
 // PlaybackClock (whose beats are quarter notes) can schedule each note directly.
 
-import { rationalToNumber, type ScoreLike } from 'lilyjs'
+import { rationalToNumber, type Score } from 'lilyjs'
 import { arpeggioAirFromScore } from '../accompaniment/arpeggioPlanToAir'
 
 /** UI-exposed arpeggio patterns (a subset of the lilyJS arpeggiator's). */
@@ -44,7 +44,7 @@ const RHYTHM_SUBDIVISION_QN: Record<ArpeggioRhythm, { num: number; den: number }
  * Build the arpeggio backing as a sorted numeric schedule. Empty when the score
  * has no chord track (the arpeggiator generates nothing from no harmony).
  */
-export function buildArpeggioSchedule(score: ScoreLike, config: ArpeggioConfig): ArpNote[] {
+export function buildArpeggioSchedule(score: Score, config: ArpeggioConfig): ArpNote[] {
   const air = arpeggioAirFromScore(score, {
     pattern: config.pattern,
     subdivisionQN: RHYTHM_SUBDIVISION_QN[config.rhythm],

@@ -4,7 +4,7 @@
 // strings instrument plays. All are meter-agnostic (built from beats), so they
 // work in any time signature. Pure data — no audio, no React.
 
-import { type ScoreLike } from 'lilyjs'
+import { type Score } from 'lilyjs'
 import { buildArpeggioSchedule } from './arpeggioSchedule'
 import { buildChordBackingSchedule, type ChordBlock } from './chordBacking'
 import type { InstrumentId } from './sampledInstrument'
@@ -80,7 +80,7 @@ function pulse(blocks: ChordBlock[]): TimedNote[] {
 }
 
 /** Build the note schedule for a single-instrument (strings) style. */
-export function buildBackingSchedule(score: ScoreLike, style: StringsStyle): TimedNote[] {
+export function buildBackingSchedule(score: Score, style: StringsStyle): TimedNote[] {
   if (style === 'arpeggio') {
     return buildArpeggioSchedule(score, ARP_CONFIG).map((n) => ({
       startBeat: n.startBeat,
@@ -103,7 +103,7 @@ export function backingNotesInWindow(notes: TimedNote[], fromBeat: number, toBea
  * All MIDI notes any style could play — used to preload the string samples once
  * so switching styles mid-playback never falls back to the synth.
  */
-export function allBackingMidis(score: ScoreLike): number[] {
+export function allBackingMidis(score: Score): number[] {
   const midis = new Set<number>()
   for (const b of buildChordBackingSchedule(score)) for (const m of b.midis) midis.add(m)
   for (const n of buildArpeggioSchedule(score, ARP_CONFIG)) midis.add(n.midi)
@@ -137,7 +137,7 @@ function placePc(pc: number, floorMidi: number): number {
  * chords in a waltz change on downbeats, so a block's first beat IS a bar
  * start (same bar convention the gypsy pompe uses for 4/4).
  */
-function waltz(score: ScoreLike): BackingLayer[] {
+function waltz(score: Score): BackingLayer[] {
   const bass: TimedNote[] = []
   const pizzicato: TimedNote[] = []
   const pad: TimedNote[] = []
@@ -180,7 +180,7 @@ function waltz(score: ScoreLike): BackingLayer[] {
  * the off) under two rhythm guitars chopping the chord — beats 2 & 4 accented
  * and short. The two guitars come from the guitar instrument's ensemble voices.
  */
-function gypsy(score: ScoreLike, meterNumerator = 4): BackingLayer[] {
+function gypsy(score: Score, meterNumerator = 4): BackingLayer[] {
   const bass: TimedNote[] = []
   const guitar: TimedNote[] = []
   const triple = meterNumerator === 3
@@ -223,7 +223,7 @@ function gypsy(score: ScoreLike, meterNumerator = 4): BackingLayer[] {
  * "In the Mood for Love" texture. Same skeleton as the waltz but the pad is
  * dropped and the plucks carry the beat in any meter.
  */
-function pizzicatoEnsemble(score: ScoreLike, meterNumerator: number): BackingLayer[] {
+function pizzicatoEnsemble(score: Score, meterNumerator: number): BackingLayer[] {
   const bass: TimedNote[] = []
   const pizz: TimedNote[] = []
   for (const b of buildChordBackingSchedule(score)) {
@@ -254,7 +254,7 @@ function pizzicatoEnsemble(score: ScoreLike, meterNumerator: number): BackingLay
 }
 
 /** Piano comp — chord on the downbeat, lighter answers on the other beats. */
-function pianoEnsemble(score: ScoreLike, meterNumerator: number): BackingLayer[] {
+function pianoEnsemble(score: Score, meterNumerator: number): BackingLayer[] {
   const bass: TimedNote[] = []
   const piano: TimedNote[] = []
   for (const b of buildChordBackingSchedule(score)) {
@@ -289,7 +289,7 @@ function pianoEnsemble(score: ScoreLike, meterNumerator: number): BackingLayer[]
  * what the UI selects — see BackingEnsemble.
  */
 export function buildEnsembleArrangement(
-  score: ScoreLike,
+  score: Score,
   ensemble: BackingEnsemble,
   meterNumerator = 4,
 ): BackingLayer[] {
@@ -306,7 +306,7 @@ export function buildEnsembleArrangement(
 }
 
 /** MIDI notes to preload per instrument so any ensemble plays gaplessly. */
-export function prepareMidisByInstrument(score: ScoreLike): Record<InstrumentId, number[]> {
+export function prepareMidisByInstrument(score: Score): Record<InstrumentId, number[]> {
   // Both meters for every ensemble: the user can switch mid-piece, and the
   // groove (and so the register) differs between triple and duple.
   const layers: BackingLayer[] = (['orchestra', 'pizzicato', 'piano', 'gypsy'] as BackingEnsemble[])

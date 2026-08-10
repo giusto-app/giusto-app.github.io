@@ -7,7 +7,7 @@
 // BPM is quarter = N, which matches simple meters (4/4, 3/4, 2/4). Compound
 // meters (6/8 dotted-quarter beats) are out of scope for now.
 
-import type { MeasureLike, ScoreLike, TempoMarkLike } from 'lilyjs'
+import type { Measure, Score, TempoMark } from 'lilyjs'
 import { pulseFromTimeSignature } from './meter'
 
 export type ChordQuality = 'maj' | 'min' | 'dom7' | 'other'
@@ -55,7 +55,7 @@ export function parseChordLabel(name: string): { rootPc: number; quality: ChordQ
   return { rootPc, quality }
 }
 
-function measureDurationQN(measure: MeasureLike): number {
+function measureDurationQN(measure: Measure): number {
   if (typeof measure.expectedDurationQN === 'number' && measure.expectedDurationQN > 0) {
     return measure.expectedDurationQN
   }
@@ -84,7 +84,7 @@ const TEMPO_UNIT_QN: Record<string, number> = {
   whole: 4, half: 2, quarter: 1, eighth: 0.5, '16th': 0.25, '32nd': 0.125, '64th': 0.0625,
 }
 
-function tempoMarkToQuarterBpm(mark: TempoMarkLike): number | undefined {
+function tempoMarkToQuarterBpm(mark: TempoMark): number | undefined {
   if (typeof mark.bpm !== 'number') return undefined
   const unitQN = TEMPO_UNIT_QN[mark.beatUnit ?? 'quarter'] ?? 1
   const dotFactor = 2 - Math.pow(2, -(mark.beatUnitDots ?? 0))
@@ -96,7 +96,7 @@ function tempoMarkToQuarterBpm(mark: TempoMarkLike): number | undefined {
  * merged timeline. Consecutive identical chords (| g1:m | g1:m |) merge into
  * one event so the drone never re-articulates on a repeated chord.
  */
-export function buildChordSchedule(score: ScoreLike): ChordScheduleResult {
+export function buildChordSchedule(score: Score): ChordScheduleResult {
   const measures = score.parts[0]?.measures ?? []
   const raw: Array<Omit<ChordEvent, 'durationBeats'>> = []
   let cursorQN = 0
@@ -160,7 +160,7 @@ export function buildChordSchedule(score: ScoreLike): ChordScheduleResult {
  * The UI highlight needs the printed sequence, or it cannot tell which "Gm"
  * is currently sounding.
  */
-export function printedChordOnsets(score: ScoreLike): number[] {
+export function printedChordOnsets(score: Score): number[] {
   const measures = score.parts[0]?.measures ?? []
   const onsets: number[] = []
   let cursorQN = 0

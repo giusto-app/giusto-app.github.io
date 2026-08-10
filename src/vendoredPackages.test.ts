@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 // through Bun workspaces. The legacy lily-parser block was removed when lilyJS
 // retired that API surface (2026-08-10, a473c5a3) and the package was deleted.
 import { parseSource } from 'lilyjs'
-import type { ScoreLike } from 'lilyjs'
+import type { Score } from 'lilyjs'
 
 const exercise = readFileSync(
   new URL('../public/exercises/practice-arpeggios-Gm-Cm-F-Bb.ly', import.meta.url),
@@ -15,7 +15,7 @@ describe('vendored lilyjs (modern music-model API)', () => {
   test('parses the Play-Along exercise into measures with offset chord symbols', () => {
     const doc = parseSource(exercise).document
     const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as
-      | { score: ScoreLike }
+      | { score: Score }
       | undefined
     expect(block).toBeDefined()
     const measures = block!.score.parts[0].measures

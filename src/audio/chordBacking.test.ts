@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSource, type ScoreLike } from 'lilyjs'
+import { parseSource, type Score } from 'lilyjs'
 import { buildChordBackingSchedule, chordBlocksInWindow, voiceChord } from './chordBacking'
 
-function scoreOf(chordmode: string, staff = 'c1 c1 c1 c1'): ScoreLike {
+function scoreOf(chordmode: string, staff = 'c1 c1 c1 c1'): Score {
   const src = `\\language "english"
     chordNames = \\chordmode { ${chordmode} }
     \\score {
@@ -12,7 +12,7 @@ function scoreOf(chordmode: string, staff = 'c1 c1 c1 c1'): ScoreLike {
       >>
     }`
   const doc = parseSource(src).document
-  const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike } | undefined
+  const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: Score } | undefined
   if (!block) throw new Error('no score block')
   return block.score
 }
@@ -43,7 +43,7 @@ describe('buildChordBackingSchedule', () => {
 
   test('no chord track → empty', () => {
     const doc = parseSource('\\score { \\relative c\' { c4 d e f } }').document
-    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: ScoreLike }
+    const block = doc?.blocks.find((b: { type: string }) => b.type === 'score') as { score: Score }
     expect(buildChordBackingSchedule(block.score)).toEqual([])
   })
 })
