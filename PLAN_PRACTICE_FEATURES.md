@@ -71,19 +71,56 @@ the FSRS-style scheduler (`src/utils/spaceRepetition.ts`), Learn queue + storage
 
 ## Phase 3 — Tune memorization (Anki-style, Learn tab)
 
+**Audited against the code 2026-08-09.** Phase 3 proper is still open — all of it. What
+the Learn tab has today is a *within-session* sectioned practice run (`PracticeView`
+walks `groupIntoSections(notes)`, records each section, scores it, suggests a grade).
+Useful, and it delivered the follow-up below, but it is not segment cards: nothing is
+scheduled per segment, and `addTune(selectedTune)` is called with no label, so every
+card in the queue is "Full tune".
+
 - [ ] **Pipeline**: generate_tune_catalog pipeline also publishes each tune's `.ly`.
+      (violin-music_private — not verifiable from this repo.)
 - [ ] **Data**: extend `LearnCard` with `segment?: { startMeasure, endMeasure }`
       (backward compatible — existing cards mean "full tune"). Card generation on
       add-to-queue: 4-bar phrases + chained ranges; parse measure count from `.ly`.
+      → *Segment planning is done*: `src/utils/tuneSegments.ts` (`planSegments`,
+      13 tests) turns a measure count into the confirmed phrase + seam + whole-tune
+      ranges. *Measure derivation is done too*: `src/utils/tuneMeasures.ts` (16 tests)
+      gets bars out of notes.json by accumulating each note's `d` against the meter
+      from the catalog's `time_sig` — so segmentation does NOT have to wait for the
+      `.ly` pipeline. Still to do: the `LearnCard` field and card generation on
+      add-to-queue. Neither module is imported yet.
+
+      **Caveat that decides how much the `.ly` pipeline still matters:** notes.json
+      has no barlines, so deriving them assumes the tune starts on a downbeat. A
+      pickup shifts every bar, and a card labelled "bars 5–8" would drill bars 4–7.
+      `tuneMeasures` takes `pickupBeats` as an explicit parameter rather than
+      assuming zero, and a test pins the failure mode — but nothing can supply the
+      true value until the `.ly` ships. Options: publish the `.ly` (item 1), add a
+      pickup field to the tune catalog, or accept the error on pickup tunes.
 - [ ] **Review flow** (extends Learn tab's PracticeView):
       prompt (tune title + segment label + first measure or chords as recall cue) →
       reveal (`LilyScore` with `measureRange`) → grade (Again/Hard/Good/Easy →
       existing `scheduleNext`); Again → intra-session re-queue after 2–3 other cards
       (learning steps; the day-granularity scheduler stays untouched).
+      → Correcting what this said on 2026-08-09: `ScoreDisplay` is the DTW *score*
+      panel, not a notation renderer, so "the reveal shows the whole tune" was wrong.
+      The reveal renders `StaffView` over a slice of notes.json, and it already shows
+      a SECTION — but `groupIntoSections` chunks every 12 NOTES, which is not musical
+      and is the actual gap: phrases must be bars. `measureRange` on `LilyScore` is
+      one way in; slicing the notes with `notesInMeasureRange` is another, and works
+      without the `.ly`. "Again" is still only a grade label, with no intra-session
+      re-queue.
 - [ ] **Synergy**: reveal screen offers "practice this segment" → Play-Along loop of
       that range + Tempo Trainer.
-- [ ] Follow-up (TODO.md): mic-assisted grading — record the attempt, score with
+      → **Now unblocked.** This needed Play-Along to be able to loop a bar range, which
+      it can as of the section work (`src/audio/section.ts`, 2026-08-09). What remains
+      is a link from the Learn tab that opens Play-Along with the section preset.
+- [x] Follow-up (TODO.md): mic-assisted grading — record the attempt, score with
       pitch-detection + DTW vs notes.json, pre-select the suggested grade.
+      DONE (verified 2026-08-09): `PracticeView` runs `dtw` over the detected vs
+      expected MIDI and calls `onGrade(suggested, avg)` with the suggestion
+      pre-selected; `handleGradeOverride` lets the player disagree.
 
 ## Order
 
