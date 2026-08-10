@@ -4,18 +4,32 @@ Goal: Help violinists and bowed string players improve their intonation.
 
 ---
 
-## ❓ Open decision — Play-Along start point (2026-08-09)
+## 🔴 Next Up — Play-Along section looping (specced 2026-08-09)
 
-Raised while fixing the stale resume point on tune change (`PracticePlayback.tsx`,
-`playFromResumePoint`). Full spec — state machine, the three bugs it also fixes, and
-three decisions that need Marc: `PLAN_PLAYBACK_START_POINT.md`.
+Select bars 5–12 on the score and drill them: takes begin at the section, Loop repeats it,
+the Tempo Trainer ramps per section pass. Grew out of "should a clicked bar be sticky?" while
+fixing the stale resume point on tune change (`93b53d2`). Decisions made, 18 user stories,
+state machine, and test plan: `PLAN_PLAYBACK_START_POINT.md`.
 
-- [ ] clearing on start is what the space bar already did, and it means a take that plays
-      through to the end leaves you back at the top rather than at the bar you once paused
-      on. If you'd rather a bar you clicked on the score be sticky — so repeated plays keep
-      restarting from bar 5 until you rewind — that's a different rule and I'd implement it
-      by distinguishing a user-chosen start point from a pause point. Say the word if that's
-      the feel you want.
+- [x] `src/audio/section.ts` + test — `nextSection` · `resolveStartBeat` · `takeWindow` ·
+      `beatInTake`, all pure, 20 tests (2026-08-09)
+- [x] Split `resumeBeatRef` into `sectionRef` + `pauseBeatRef`, starts resolved through
+      `resolveStartBeat` (2026-08-09 — no behaviour change: nothing sets a section yet)
+- [x] Bar-range selection on score click (`nextSection`) + the take window driving the clock
+      bounds and all four `% total` sites; marker re-parked when a take ends so a sticky
+      section stays visible (2026-08-09 — **the feature is on; needs a human ear**)
+- [x] Trainer per-loop stepping counts passes with `passIndex` (floor division). The old
+      `beat % total === 0` never fired in compound meters, where a bar is a fractional
+      number of quarter notes — a 9/8 per-loop ramp stepped exactly never (2026-08-09)
+- [x] Trainer takes always begin at the section so the ramp lines up with the music;
+      transpose pauses instead of stopping (it saved nothing, so transposing mid-take
+      dropped you at the top while transposing while paused kept your place); parked marker
+      re-stamped after a score re-render (2026-08-09 — all three spec bugs closed)
+- [ ] **QA by ear** — the only way to confirm any of this: section + Loop wraps cleanly
+      (chords and note cursor across the seam, no click), section + Loop off stops after the
+      last bar, per-loop trainer steps once per pass including on a 6/8 or 9/8 tune
+- [ ] **Needs Marc:** how a section looks — span vs end bars only, section vs pause marks,
+      and the `bars 5–12 · ♩ = 120` readout. Blocks the UI step only.
 
 ---
 
@@ -44,15 +58,54 @@ Full decisions + phases: `PLAN_PRACTICE_FEATURES.md`.
 - [x] Phase 1: exercises-catalog.json pipeline (violin-music_private → violin-music.github.io) + Play-Along exercise picker (2026-07-15 — public-site push pending Marc's review)
 - [x] Phase 1b: curated existing Practice/*.ly + authored 6 new standards — Major/Minor Arpeggios & Major Scales (circle of fifths), Dominant 7ths (circle of fourths), Minuet in G (Petzold), Ode to Joy; catalog now 33 entries (2026-07-15 — public-site push pending Marc's review)
 - [x] Phase 2: Tempo Trainer — step-per-loop AND timed ramp, stepped-bars progress viz (2026-07-15)
-- [ ] Phase 3: Anki-style tune memorization in Learn tab — segment cards (4-bar + chained), self-graded, publish tune .ly in catalog
-- [ ] Follow-up: mic-assisted review grading — record the attempt, score vs notes.json with pitch detection + DTW, pre-select the suggested grade
+- [ ] Phase 3: Anki-style tune memorization in Learn tab — segment cards (4-bar + chained),
+      self-graded, publish tune .ly in catalog. **Audited 2026-08-09: genuinely open.** The
+      Learn tab's sectioned practice run is a within-session walkthrough, not segment cards —
+      `addTune` is called with no label so every queued card is "Full tune", `LearnCard` has
+      no measure range, and `PracticeView`'s sections are chunks of 12 NOTES rather than bars.
+      Remaining sub-items and their status: `PLAN_PRACTICE_FEATURES.md`.
+  - [x] Segment planning: `src/utils/tuneSegments.ts` — `planSegments(measures)` produces the
+        confirmed phrases + seams + whole-tune ranges (1–4, 5–8, 9–12, 1–8, 5–12, 1–12),
+        13 tests. Pure and unwired (2026-08-09)
+  - [x] Measure derivation: `src/utils/tuneMeasures.ts` — bars out of notes.json by
+        accumulating each note's `d` against the meter from `time_sig`, 16 tests. Means
+        segmentation does NOT need the `.ly` pipeline first. Pure and unwired (2026-08-09)
+  - [ ] **Needs Marc — pickup bars.** notes.json has no barlines, so derived bars assume the
+        tune starts on a downbeat; a pickup shifts every bar and "bars 5–8" would drill 4–7.
+        `pickupBeats` is an explicit parameter and a test pins the failure, but nothing can
+        supply the true value yet. Publish the `.ly` (Phase 3 item 1), add a pickup field to
+        the tune catalog, or accept the error on pickup tunes?
+  - [ ] Wire it: `LearnCard.segment`, card generation on add-to-queue, bar-based sections in
+        `PracticeView` (replacing the 12-note chunks), intra-session re-queue for "Again"
+  - [ ] Synergy — now unblocked by Play-Along section looping: a "practice this segment" link
+        from the reveal into Play-Along with the bar range preset
+- [x] Follow-up: mic-assisted review grading — record the attempt, score vs notes.json with
+      pitch detection + DTW, pre-select the suggested grade (DONE — verified 2026-08-09:
+      `PracticeView` runs `dtw`, calls `onGrade(suggested, avg)`, and lets the player
+      override. The box was never ticked)
 - [ ] Follow-up: Tempo Trainer saved sessions (named presets with last-practiced dates, like the reference metronome app)
 - [x] Push violin-music.github.io exercise assets (or just push violin-music_private and let CI regenerate) so the catalog goes live (2026-07-15)
 - [x] ExercisePicker: search box across titles/keys/categories + subtitle, key, meter, bars and chord-drone badges (verified 2026-08-09)
 - [ ] Exercise curation leftovers: Violin-Harmonics.ly (nine 1-bar score blocks — needs per-entry titles), Gypsy-scales.ly (WIP placeholders), Practice_All.ly (include-based aggregator); give Jig-Pulse/Practice_Shifts explicit per-score titles instead of auto "Part N"
 - [x] Compound meter: metronome now clicks the meter's felt pulse via `src/audio/meter.ts` — dotted quarters for 6/8–12/8 (2 per jig bar, count-in included), halves for 2/2; also fixed \tempo unit conversion (\tempo 8 = 120 → ♩ = 60) in chordSchedule AND the catalog generator (2026-07-15)
-- [ ] lilyJS parser: dotted tempo units lose their dot (\tempo 4. = 120 parses as quarter = 120, \tempo 1. = 84 as whole → Jig-Pulse part 4 shows bpm 336) — fix in ../lilyJS emit phase, re-vendor, then drop the workaround notes in chordSchedule.ts / generate-exercises-catalog.mjs
-- [ ] ChordDrone.setVolume during an in-progress crossfade appends a ramp that can bend the fade curve — harden (re-anchor or cancel-and-hold)
+- [x] lilyJS parser: dotted tempo units lose their dot — FIXED upstream and already vendored
+      (verified 2026-08-09 against `packages/lilyjs` v0.14.0: `\tempo 4. = 84` parses as
+      `{beatUnit: 'quarter', beatUnitDots: 1}`, `\tempo 1. = 84` as `{whole, dots: 1}`).
+      `chordSchedule.tempoMarkToQuarterBpm` reads `beatUnitDots` and applies the
+      n-dots → ×(2−2⁻ⁿ) factor, so ♩. = 84 converts to ♩ = 126. No workaround notes remain.
+- [ ] Leftover from the above: `\tempo 1. = 84` in Jig-Pulse part 4 now converts to 504
+      (84 × 4 × 1.5) instead of the old 336 — both are outside the 40–208 tempo slider, so
+      the marking in the source .ly is likely wrong rather than the conversion. Content fix
+      in violin-music_private, not here.
+- [x] ChordDrone.setVolume during an in-progress crossfade appended a ramp that the timeline
+      sorted INTO the fade — re-anchors now (2026-08-09). Each branch tracks the linear
+      segment it has scheduled (`from`/`to`), so setVolume can cancel from `now`, re-anchor at
+      the level actually reached, and rewrite the rest. Two audible failures are gone: called
+      before the window opened the next chord bled in early over the one still playing; called
+      during it the gain raced to the new level then drifted back to the volume captured when
+      the chord was scheduled. `setChord`'s hand-off and `stop()` now fade from the branch's
+      real level too, which matters when a change lands inside the previous fade-in.
+      5 tests, 3 of which fail against the old implementation.
 - [ ] QA (human ear): new circle-of-fifths exercises in flat keys (Gb/Db/Ab), Minuet 3/4 downbeat accent, Ode to Joy mid-bar A→D drone change lands on beat 3
 
 ### Practice Programs
@@ -95,7 +148,26 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
 ## 🟡 In Progress / Pending
 
 ### Staff Rendering Comparison (`/?compare`)
-- [ ] **Verify Option C — lily-viewer (LilyPond parser)**: confirm notation renders correctly at full width, intonation colors match Options A and B, and the parser handles bare `\relative` source without requiring a `\score` wrapper
+- [x] **Verify Option C — moot, the comparison already resolved (audited 2026-08-09).** The
+      production app renders through `lilyjs` everywhere (`LilyScore`, `PracticePlayback`).
+      Option C's `StaffViewLilyPond` is the last consumer of the PRE-lilyjs `lily-parser` and
+      the frozen `lily-viewer`, and it is reachable only from this dev page. There is no live
+      decision left for it to inform.
+- [x] **What the audit did turn up: the dev page was 56% of the production bundle.**
+      `main.tsx` static-imported `StaffComparison`, so VexFlow + lily-viewer + legacy
+      lily-parser shipped to every user for a page behind `?compare`. Measured by building
+      with and without it: 3,648,667 → 1,590,831 bytes. Fixed 2026-08-09 with a dynamic
+      import plus `splitting: true` in `scripts/buildApp.ts` (Bun inlines dynamic imports
+      without it — the import alone changed nothing, measured). Initial JS is now
+      1,585,108 bytes in two chunks and the 2,054,305-byte compare chunk loads only on
+      `?compare`. Verified: the compare code is absent from the entry chunk, the dev build
+      splits too, and `sw.js` caches scripts on fetch with no precache manifest to update.
+- [ ] **Needs Marc — delete it?** If the renderer question is settled, `StaffComparison`,
+      `StaffViewLilyPond`, `StaffViewVexFlow`, `src/vendoredPackages.test.ts` and the
+      `lily-parser` / `lily-viewer` vendored packages could all go, along with the vexflow
+      dependency. That removes the 2 MB chunk entirely rather than deferring it, and drops
+      two frozen vendored builds. Destructive and yours to call — the lazy-load above is the
+      safe half.
 
 ---
 
