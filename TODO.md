@@ -183,6 +183,12 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
       1,585,108 bytes in two chunks and the 2,054,305-byte compare chunk loads only on
       `?compare`. Verified: the compare code is absent from the entry chunk, the dev build
       splits too, and `sw.js` caches scripts on fetch with no precache manifest to update.
+- [ ] **Blocked on lilyJS:** `packages/lilyjs/index.d.ts` is 411 hand-written lines because
+      `build:lilyjs` emits no declarations (the deprecated `build:lily-parser` does — it
+      copies a curated `.d.ts`). Nothing verifies the two agree, so a renamed export
+      type-checks fine here and fails at runtime. Prompt: `PROMPT_LILYJS_PUBLISH_TYPES.md`.
+      If lilyJS declines, add a drift test here instead: every value declared in the `.d.ts`
+      must actually be exported by `lilyjs.esm.js`.
 - [ ] **Blocked on lilyJS:** deleting the vendored `lily-parser` / `lily-viewer` needs the
       legacy surface retired upstream, or it returns on the next sync. Prompt ready to paste
       into a session in `../lilyJS`: `PROMPT_LILYJS_RETIRE_LEGACY_PARSER.md`. It asks for a

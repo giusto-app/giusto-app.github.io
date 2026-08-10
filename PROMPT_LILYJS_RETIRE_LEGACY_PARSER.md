@@ -4,6 +4,9 @@ Written 2026-08-09. **This is work for the lilyJS repo, not for Giusto** — pas
 block below into a session in `../lilyJS`. Giusto never edits lilyJS build tooling; it only
 vendors the built artifacts.
 
+Companion prompt: `PROMPT_LILYJS_PUBLISH_TYPES.md` asks lilyJS to ship declarations with the
+modern bundle. Independent of this one, and doable in either order.
+
 ## Why this exists
 
 Giusto vendors three packages built from lilyJS:
