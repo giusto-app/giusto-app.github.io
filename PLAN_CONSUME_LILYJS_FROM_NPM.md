@@ -32,8 +32,7 @@ missing effort:
 
 ## Prerequisite from lilyJS
 
-Wait for: the published scope and version, confirmation of whether the `npm:`
-alias works (it decides whether our imports change), fonts either inside the
+Wait for: the published scope and version, fonts either inside the
 package or with a documented copy step, and `exports["./style.css"]` repointed
 at `dist/` (it currently points into `src/`, which will not exist in a tarball).
 See the companion plan.
@@ -60,15 +59,21 @@ Vendoring needed no credentials. GitHub Packages does, for every install.
 
 ## Task 2 — swap the dependency
 
-- [ ] `package.json`: replace `"lilyjs": "workspace:*"` with either the alias
-      `"lilyjs": "npm:@marcmouries/lilyjs@^0.15.0"` — which keeps every
-      `import … from 'lilyjs'` unchanged — or, if lilyJS reports the alias does
-      not resolve under Bun, `"@marcmouries/lilyjs": "^0.15.0"` plus a
-      mechanical import rewrite across `src/`.
-- [ ] `bun install`, then confirm `src/pages/practice/LilyScore.tsx` and
-      `PracticePlayback` type-check and render unchanged.
-- [ ] Confirm the types resolve from the package rather than a local file —
-      the published `package.json` carries `"types": "./index.d.ts"`.
+- [ ] `package.json`: replace `"lilyjs": "workspace:*"` with the alias
+      `"lilyjs": "npm:@marcmouries/lilyjs@^0.15.0"`. **Every `import … from
+      'lilyjs'` stays unchanged** — no import rewrite anywhere in `src/`.
+
+      Tested 2026-08-10 with the real lilyJS 0.14.0 build under Bun 1.3.14:
+      `dist/` packed as `@marcmouries/lilyjs@0.14.0` and installed under the
+      bare key `lilyjs`. `node_modules/lilyjs` reported the scoped name, the
+      runtime import parsed a score, and `TempoMark` / `Rational` /
+      `PlaybackTimeline` resolved from the real `dist/index.d.ts` — a deliberate
+      wrong annotation failed with TS2322 while the rest passed, so the types
+      are real and not `any`.
+
+      Caveat: that test installed a packed tarball via `file:`, which proves the
+      name-mismatch resolution but not the `npm:` registry fetch. Confirm on the
+      first real install from GitHub Packages.
 
 ## Task 3 — delete the vendoring machinery
 
