@@ -28,6 +28,12 @@ export class FakeAudioParam {
     this.events.push({ type: 'exponentialRamp', value, time })
     return this
   }
+  /** Drops every event scheduled at or after `time`, as the real API does, so
+   *  `events` always reads as the timeline that would actually play. */
+  cancelScheduledValues(time: number): FakeAudioParam {
+    this.events = this.events.filter(e => e.time < time)
+    return this
+  }
 }
 
 export class FakeAudioNode {

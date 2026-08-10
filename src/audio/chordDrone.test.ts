@@ -128,6 +128,99 @@ describe('ChordDrone (sawtooth voicing)', () => {
     expect(fade.time).toBeCloseTo(2.1, 9)
   })
 
+  test('setVolume BEFORE the fade window opens keeps the branch silent until the change lands', () => {
+    // Regression: setVolume used to append linearRamp(v, now + 0.05). Sorted
+    // into the timeline that lands BEFORE the silent anchor at fadeStart, so
+    // the next chord faded in early — audible over the chord still playing.
+    const fake = new FakeAudioContext()
+    fake.currentTime = 0.5
+    const drone = makeDrone(fake)
+    drone.setChord(7, 'min', 1.0) // fade window [0.94, 1.06]
+    const branch = fake.gains.find(g => g.connections.includes(fake.destination))!
+
+    drone.setVolume(0.8)
+
+    for (const e of branch.gain.events) {
+      if (e.time < 0.94) expect(e.value).toBe(0)
+    }
+    const last = branch.gain.events[branch.gain.events.length - 1]
+    expect(last).toMatchObject({ type: 'linearRamp', value: 0.8 })
+    expect(last.time).toBeCloseTo(1.06, 9) // window END preserved, not now + 0.05
+  })
+
+  test('setVolume DURING the fade re-anchors at the level reached and still lands on time', () => {
+    // Regression: the appended ramp raced to the new level early, then the
+    // already-scheduled ramp pulled the gain back to the volume captured when
+    // the chord was scheduled — leaving the drone at the wrong level.
+    const fake = new FakeAudioContext()
+    fake.currentTime = 0.5
+    const drone = makeDrone(fake)
+    drone.setChord(7, 'min', 1.0) // fade window [0.94, 1.06], 0 -> 0.4
+    const branch = fake.gains.find(g => g.connections.includes(fake.destination))!
+
+    fake.currentTime = 1.0 // halfway through the fade: level is 0.2
+    drone.setVolume(0.8)
+
+    const events = branch.gain.events
+    const anchor = events.find(e => e.time === 1.0)!
+    expect(anchor).toMatchObject({ type: 'set' })
+    expect(anchor.value).toBeCloseTo(0.2, 9)
+
+    const last = events[events.length - 1]
+    expect(last).toMatchObject({ type: 'linearRamp', value: 0.8 })
+    expect(last.time).toBeCloseTo(1.06, 9)
+    // Nothing is left holding the stale 0.4 target.
+    expect(events.filter(e => e.value === 0.4)).toHaveLength(0)
+  })
+
+  test('setVolume after the fade has finished uses its own short ramp', () => {
+    const fake = new FakeAudioContext()
+    fake.currentTime = 0.5
+    const drone = makeDrone(fake)
+    drone.setChord(7, 'min', 1.0)
+    const branch = fake.gains.find(g => g.connections.includes(fake.destination))!
+
+    fake.currentTime = 2.0 // long past fadeEnd
+    drone.setVolume(0.1)
+
+    const last = branch.gain.events[branch.gain.events.length - 1]
+    expect(last).toMatchObject({ type: 'linearRamp', value: 0.1 })
+    expect(last.time).toBeCloseTo(2.05, 9)
+  })
+
+  test('automation never runs backwards after a volume change', () => {
+    const fake = new FakeAudioContext()
+    fake.currentTime = 0.5
+    const drone = makeDrone(fake)
+    drone.setChord(7, 'min', 1.0)
+    const branch = fake.gains.find(g => g.connections.includes(fake.destination))!
+
+    fake.currentTime = 1.0
+    drone.setVolume(0.8)
+    fake.currentTime = 1.02
+    drone.setVolume(0.05)
+
+    const times = branch.gain.events.map(e => e.time)
+    expect(times).toEqual([...times].sort((a, b) => a - b))
+  })
+
+  test('the outgoing branch fades from where it actually is, not from this.volume', () => {
+    // A chord change landing inside the previous chord's own fade-in: the old
+    // branch is only part way up, so starting its fade-out at this.volume would
+    // jump it to full level first — a step right at the change.
+    const fake = new FakeAudioContext()
+    fake.currentTime = 1.0
+    const drone = makeDrone(fake)
+    drone.setChord(7, 'min', 1.0) // fade window [1.0, 1.12], 0 -> 0.4
+    const oldBranch = fake.gains.find(g => g.connections.includes(fake.destination))!
+
+    fake.currentTime = 1.04 // old branch is a third of the way up: 0.1333
+    drone.setChord(0, 'maj', 1.1) // new window [1.04, 1.16]
+
+    const handover = oldBranch.gain.events.find(e => e.type === 'set' && e.time === 1.04)!
+    expect(handover.value).toBeCloseTo(0.4 / 3, 6)
+  })
+
   test('a change scheduled in the past clamps into the immediate future (no backwards automation)', () => {
     const fake = new FakeAudioContext()
     fake.currentTime = 10

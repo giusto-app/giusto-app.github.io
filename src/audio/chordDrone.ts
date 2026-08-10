@@ -36,10 +36,34 @@ export interface ChordDroneOptions {
 const ROOT_OCTAVE = 3
 const CROSSFADE_S = 0.12
 const STOP_FADE_S = 0.1
+const VOLUME_RAMP_S = 0.05
+
+interface FadeAnchor {
+  time: number
+  value: number
+}
 
 interface ChordBranch {
   gain: GainNode
   sources: DroneSource[]
+  /**
+   * The linear segment currently scheduled on `gain.gain`: it holds `from.value`
+   * until `from.time`, ramps to `to.value` by `to.time`, and holds after.
+   *
+   * Tracked because a GainNode cannot be asked what it is *scheduled* to do.
+   * Without it, setVolume can only append — and an appended ramp is sorted into
+   * the middle of a crossfade rather than replacing it.
+   */
+  from: FadeAnchor
+  to: FadeAnchor
+}
+
+/** The level a branch's scheduled automation reaches at `t`. */
+function levelAt(branch: ChordBranch, t: number): number {
+  const { from, to } = branch
+  if (t <= from.time) return from.value
+  if (t >= to.time) return to.value
+  return from.value + (to.value - from.value) * ((t - from.time) / (to.time - from.time))
 }
 
 function rootMidi(rootPc: number): number {
@@ -101,12 +125,20 @@ export class ChordDrone {
     gain.gain.linearRampToValueAtTime(this.volume, fadeEnd)
     gain.connect(this.ctx.destination)
     const sources = this.buildVoices(gain, rootPc, fadeStart)
-    const next: ChordBranch = { gain, sources }
+    const next: ChordBranch = {
+      gain,
+      sources,
+      from: { time: fadeStart, value: 0 },
+      to: { time: fadeEnd, value: this.volume },
+    }
 
     // Fade the old branch out across the same window, then release it.
     const old = this.current
     if (old) {
-      old.gain.gain.setValueAtTime(this.volume, fadeStart)
+      // Start from where the old branch actually IS, not from this.volume: on a
+      // chord change that lands inside its own fade-in, or after a volume
+      // change, those differ and the difference is an audible step.
+      old.gain.gain.setValueAtTime(levelAt(old, fadeStart), fadeStart)
       old.gain.gain.linearRampToValueAtTime(0, fadeEnd)
       const releaseDelayMs = (fadeEnd - now) * 1000 + 60
       setTimeout(() => {
@@ -118,11 +150,42 @@ export class ChordDrone {
     this.current = next
   }
 
+  /**
+   * Retarget the live branch. Safe to call at any point in a crossfade — the
+   * backing-volume slider fires this on every drag, which lands mid-fade often
+   * enough to matter.
+   *
+   * The old implementation appended a ramp, which the automation timeline sorts
+   * INTO the crossfade rather than replacing it. Two audible failures came out
+   * of that: called before the fade window opened, the branch faded in early and
+   * the next chord bled over the current one; called during the window, the gain
+   * raced to the new level and then drifted back to the level captured when the
+   * chord was scheduled, leaving the drone at the wrong volume until the next
+   * chord change. So: re-anchor at the level actually reached now, and rewrite
+   * the rest of the segment.
+   */
   setVolume(volume: number): void {
     this.volume = volume
-    if (this.current) {
-      this.current.gain.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + 0.05)
+    const branch = this.current
+    if (!branch) return
+
+    const now = this.ctx.currentTime
+    const param = branch.gain.gain
+    const held = levelAt(branch, now)
+    // An in-flight crossfade keeps its END time — the window exists so the
+    // change lands with the chord. Afterwards, a short ramp of its own.
+    const endTime = now < branch.to.time ? branch.to.time : now + VOLUME_RAMP_S
+
+    param.cancelScheduledValues(now)
+    param.setValueAtTime(held, now)
+    if (now < branch.from.time) {
+      // The window has not opened yet: stay silent until it does.
+      param.setValueAtTime(branch.from.value, branch.from.time)
+    } else {
+      branch.from = { time: now, value: held }
     }
+    param.linearRampToValueAtTime(volume, endTime)
+    branch.to = { time: endTime, value: volume }
   }
 
   /** Fade out and release the current chord. The drone can be restarted with setChord. */
@@ -132,7 +195,9 @@ export class ChordDrone {
     this.current = null
     this.currentChord = null
     const start = Math.max(this.ctx.currentTime, atTime ?? this.ctx.currentTime)
-    branch.gain.gain.setValueAtTime(this.volume, start)
+    // Same reasoning as the crossfade: fade from where the branch is, which is
+    // not this.volume if we are stopping partway through a fade-in.
+    branch.gain.gain.setValueAtTime(levelAt(branch, start), start)
     branch.gain.gain.linearRampToValueAtTime(0, start + STOP_FADE_S)
     const releaseDelayMs = (start + STOP_FADE_S - this.ctx.currentTime) * 1000 + 60
     setTimeout(() => {
