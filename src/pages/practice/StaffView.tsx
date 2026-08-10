@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { centsToHsl } from '../../utils/colorUtils'
 import { formatCents } from '../../utils/noteUtils'
+import { ensureMusicFont } from '../../musicFont'
 import type { NoteEvent } from '../../utils/sessions'
 
 // ── Staff geometry ────────────────────────────────────────────────────────────
@@ -84,20 +85,21 @@ interface StaffViewProps {
 }
 
 export default function StaffView({ noteEvents, showCentsLabels = true, showNoteLabels = true, noteColor }: StaffViewProps) {
-  // VexFlow injects Bravura as a data-URI font.  Poll until it's available,
-  // then switch from fallback ellipses to the real Bravura glyphs.
+  // ASK for the font rather than waiting to see whether something else loads
+  // it. The comment here used to credit VexFlow with injecting Bravura; that
+  // stopped being true when the app moved to lilyjs, and the 100 ms poll it
+  // justified ran forever on any page where the font never arrived — which,
+  // on the Learn tab, was every page. See src/musicFont.ts.
   const [bravuraReady, setBravuraReady] = useState(() =>
     typeof document !== 'undefined' && document.fonts.check('1em Bravura')
   )
   useEffect(() => {
     if (bravuraReady) return
-    const id = setInterval(() => {
-      if (document.fonts.check('1em Bravura')) {
-        setBravuraReady(true)
-        clearInterval(id)
-      }
-    }, 100)
-    return () => clearInterval(id)
+    let cancelled = false
+    void ensureMusicFont().then(ok => {
+      if (ok && !cancelled) setBravuraReady(true)
+    })
+    return () => { cancelled = true }
   }, [bravuraReady])
 
   if (noteEvents.length === 0) {

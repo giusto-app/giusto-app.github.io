@@ -153,6 +153,21 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
 
 ## 🟡 In Progress / Pending
 
+### Music font (Bravura)
+- [x] **StaffView's noteheads depended on a side effect and were probably never arriving**
+      (fixed 2026-08-09). Nothing in the app loaded Bravura: it appeared only when lilyjs
+      rendered a score, and lilyjs doesn't export its loader. The Learn tab's practice view
+      uses `StaffView`, not lilyjs, and Practice defaults to pitch mode — so a player going
+      straight to Learn never triggered a lilyjs render, never got the glyphs, and sat on
+      fallback ellipses while a 100 ms poll ran forever. `src/musicFont.ts` now registers the
+      face explicitly from `/lilyjs/fonts/Bravura.woff2`. The stale comment crediting VexFlow
+      is gone with it.
+      Note for whoever tries the obvious fix: an `@font-face` in `index.css` FAILS THE BUILD —
+      Bun's CSS bundler resolves `url()` at build time and the font is a copied public asset,
+      not a module. Registering the face from JS is what works.
+- [ ] Eye check: Learn → practice a tune. Noteheads should be proper Bravura glyphs, not
+      plain ellipses. This is the one place the bug was visible.
+
 ### Staff Rendering Comparison (`/?compare`)
 - [x] **Verify Option C — moot, the comparison already resolved (audited 2026-08-09).** The
       production app renders through `lilyjs` everywhere (`LilyScore`, `PracticePlayback`).
