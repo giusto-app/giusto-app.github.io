@@ -1,0 +1,41 @@
+# Automatic dependency updates — the step that makes "get the latest lilyJS"
+# cost a review instead of a local checkout and a hand-run sync script.
+#
+# @marcmouries/lilyjs lives on GitHub Packages, not the public registry, so the
+# registry and its credentials have to be declared here explicitly. A bot that
+# cannot authenticate opens no PRs, which is indistinguishable from "no updates
+# available" — so verify it actually fires after the next lilyJS release rather
+# than assuming silence means up to date.
+#
+# Requires a repository secret DEPENDABOT_PACKAGES_TOKEN: a PAT with
+# read:packages. Dependabot does not have access to secrets.GITHUB_TOKEN.
+version: 2
+
+registries:
+  github-packages:
+    type: npm-registry
+    url: https://npm.pkg.github.com
+    token: ${{ secrets.DEPENDABOT_PACKAGES_TOKEN }}
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    registries:
+      - github-packages
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for routine bumps; lilyJS is deliberately excluded so its
+      # updates arrive on their own and get read.
+      minor-and-patch:
+        patterns: ['*']
+        exclude-patterns: ['@marcmouries/lilyjs']
+        update-types: [minor, patch]
+    ignore:
+      # lilyJS is pre-1.0, so a MINOR version can carry breaking changes
+      # (0.15.0 removed the legacy parser surface). Patch updates are safe to
+      # review quickly; minors deserve a real look, and majors will not exist
+      # until 1.0.
+      - dependency-name: '@marcmouries/lilyjs'
+        update-types: [version-update:semver-major]

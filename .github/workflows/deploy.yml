@@ -8,6 +8,12 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # @marcmouries/lilyjs is a PRIVATE package on GitHub Packages. Installing it
+  # needs this scope plus NODE_AUTH_TOKEN below. Note the package itself must
+  # also grant this repository access ("Manage Actions access"), since
+  # GITHUB_TOKEN is scoped to the repo running the workflow and lilyJS is a
+  # different repository.
+  packages: read
 
 concurrency:
   group: pages
@@ -26,6 +32,8 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test
         run: bun test
