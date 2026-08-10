@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadSessions, type PracticeSession } from '../../utils/sessions'
+import { csvFilename, sessionsToCsv } from '../../utils/sessionsCsv'
 import SessionBarChart from './SessionBarChart'
 import SessionHistoryList from './SessionHistoryList'
 
@@ -39,10 +40,17 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
 
   return (
     <div className="min-h-full px-4 md:px-8 py-6 flex flex-col gap-5">
-      <header>
+      <header className="flex items-center justify-between gap-3">
         <h1 className="text-xs font-semibold tracking-[0.2em] uppercase text-gray-500">
           Progress
         </h1>
+        <button
+          onClick={() => downloadSessionsCsv(sessions)}
+          className="neu-btn rounded-lg px-3 py-1.5 text-xs font-medium text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)] transition-colors"
+          title="Download your practice history as a spreadsheet"
+        >
+          Export CSV
+        </button>
       </header>
 
       {/* Summary stats */}
@@ -75,6 +83,32 @@ export default function ProgressTab({ refreshKey }: ProgressTabProps) {
       </div>
     </div>
   )
+}
+
+/**
+ * Hand the CSV to the browser as a download.
+ *
+ * The leading BOM is for Excel: without it Excel reads the file as the local
+ * 8-bit codepage and mangles any non-ASCII, which is a silent, confusing
+ * failure for anyone outside an ASCII locale.
+ *
+ * The anchor goes into the document before it is clicked and the object URL is
+ * revoked on the next tick — Firefox ignores a click on a detached node, and
+ * revoking synchronously can cancel the download before it starts.
+ */
+function downloadSessionsCsv(sessions: PracticeSession[]): void {
+  // Written as an escape, not a literal BOM: an invisible character in source
+  // is one stray editor setting away from vanishing, and nobody reviewing the
+  // diff would see it go.
+  const blob = new Blob(['\uFEFF', sessionsToCsv(sessions)], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = csvFilename(new Date())
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function StatCard({ label, value, positive }: { label: string; value: string; positive?: boolean }) {

@@ -243,7 +243,11 @@ Full research and implementation plan in `LEARN-TAB-RESEARCH.md`.
 
 ### Progress Tab Improvements
 - [ ] **Per-note trend**: track intonation tendency per pitch class over time (e.g. "your F# is consistently 12¢ sharp")
-- [ ] **Export**: export session history as CSV
+- [x] **Export**: session history as CSV (2026-08-09). `src/utils/sessionsCsv.ts` +
+      10 tests; button in the Progress header. One row per session, oldest first so a
+      spreadsheet chart reads left to right, RFC 4180 quoting (a comma in a field would
+      otherwise shift every column after it, silently), CRLF line endings and a UTF-8 BOM
+      for Excel. Per-NOTE export would be a separate, much larger file — not done.
 
 ### Guide Tab
 - [ ] **Practice program guide**: explain what each practice program trains and why
