@@ -1,8 +1,14 @@
-# PLAN — consume `lilyjs` from npm instead of vendoring it
+# PLAN — consume `lilyjs` from GitHub Packages instead of vendoring it
 
 **Goal:** stop vendoring the lilyJS bundle. Depend on a published package and let
 an automated bump PR bring in each new version, so getting the latest lilyJS
 costs a review rather than a local checkout and a hand-run script.
+
+**Constraint (2026-08-10):** `lilyjs` is taken on public npm and lilyJS stays
+PRIVATE for now, so it publishes as **`@marcmouries/lilyjs` to GitHub
+Packages**. That is free and fits the existing GitHub remote, but it carries one
+real cost this plan has to absorb: **GitHub Packages requires authentication for
+every install**, including CI and every developer machine. See Task 1.
 
 Companion: `../lilyJS/PLAN_PUBLISH_TO_NPM.md` is the publishing half. **That side
 must land first** — nothing here can start until a version is on npm. The
@@ -26,21 +32,45 @@ missing effort:
 
 ## Prerequisite from lilyJS
 
-Wait for: a published package name and version, fonts either inside the package
-or with a documented copy step, and `exports["./style.css"]` repointed at
-`dist/` (it currently points into `src/`, which will not exist in a tarball).
+Wait for: the published scope and version, confirmation of whether the `npm:`
+alias works (it decides whether our imports change), fonts either inside the
+package or with a documented copy step, and `exports["./style.css"]` repointed
+at `dist/` (it currently points into `src/`, which will not exist in a tarball).
 See the companion plan.
 
-## Task 1 — swap the dependency
+## Task 1 — registry auth, the new cost
 
-- [ ] `package.json`: replace `"lilyjs": "workspace:*"` with the published
-      version, e.g. `"lilyjs": "^0.15.0"`.
+Vendoring needed no credentials. GitHub Packages does, for every install.
+
+- [ ] `.npmrc` in the repo, committed, with the scope mapping only — never a
+      token:
+
+      @marcmouries:registry=https://npm.pkg.github.com
+      //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+
+- [ ] **CI**: add `permissions: { packages: read }` to the workflow and pass
+      `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` to the install step. No PAT
+      needed as long as both repos are under the same owner.
+- [ ] **Local dev**: each developer needs a classic PAT with `read:packages` in
+      their environment. Document it in README — an unset token fails install
+      with a 401 that does not obviously say "you need a token".
+- [ ] **GitHub Pages deploy**: confirm the deploy workflow installs dependencies
+      too, and give it the same permission. This is the step most likely to be
+      missed, because it works locally and fails only on deploy.
+
+## Task 2 — swap the dependency
+
+- [ ] `package.json`: replace `"lilyjs": "workspace:*"` with either the alias
+      `"lilyjs": "npm:@marcmouries/lilyjs@^0.15.0"` — which keeps every
+      `import … from 'lilyjs'` unchanged — or, if lilyJS reports the alias does
+      not resolve under Bun, `"@marcmouries/lilyjs": "^0.15.0"` plus a
+      mechanical import rewrite across `src/`.
 - [ ] `bun install`, then confirm `src/pages/practice/LilyScore.tsx` and
       `PracticePlayback` type-check and render unchanged.
 - [ ] Confirm the types resolve from the package rather than a local file —
       the published `package.json` carries `"types": "./index.d.ts"`.
 
-## Task 2 — delete the vendoring machinery
+## Task 3 — delete the vendoring machinery
 
 All of this exists only to move the bundle across by hand:
 
@@ -57,7 +87,7 @@ Note `workspaces` is `packages/*`. After the legacy packages were deleted
 (`66cc5f6`) and `lilyjs` goes, `packages/` is empty — drop the `workspaces`
 field entirely rather than leaving it pointing at nothing.
 
-## Task 3 — fonts
+## Task 4 — fonts
 
 `sync-lilyjs.sh` copies 6 `.woff2` from lilyJS `src/` into
 `public/lilyjs/fonts/`. Whichever way the companion plan lands:
@@ -70,12 +100,17 @@ field entirely rather than leaving it pointing at nothing.
 
 Either way the sibling-clone dependency disappears, which is the point.
 
-## Task 4 — automatic updates
+## Task 5 — automatic updates
 
 This is the step that actually delivers "no manual work". Everything above just
 removes obstacles.
 
-- [ ] Add **Renovate** or **Dependabot** for npm dependencies.
+- [ ] Add **Renovate** or **Dependabot** for npm dependencies. Both support
+      GitHub Packages, but each needs the registry and credentials declared in
+      its own config — Dependabot via `registries:` in
+      `.github/dependabot.yml` plus a `packages: read` token secret. A bot that
+      cannot authenticate silently opens no PRs, which looks identical to "no
+      updates available", so verify it actually fires on the first release.
 - [ ] Confirm CI runs `bun run build` and `bun test` on the bump PR, so a
       breaking lilyJS change fails the PR rather than production.
 - [ ] Decide the update policy: auto-merge patch, review minor. lilyJS is
@@ -98,7 +133,15 @@ catches the class of break that types cannot.
 ## Order of work
 
 1. lilyJS publishes (companion plan).
-2. Task 1, on a branch — prove the app builds and renders against the package.
-3. Tasks 2 and 3 in the same branch, so `packages/` and the sync scripts go
+2. Task 1 first and on its own — auth is the step that can fail in three places
+   (local, CI, deploy) and is easiest to debug before anything else moves.
+3. Task 2 on a branch: prove the app builds and renders against the package.
+4. Tasks 3 and 4 in the same branch, so `packages/` and the sync scripts go
    together and nothing is left half-vendored.
-4. Task 4 last, once the dependency is real and CI is green on it.
+5. Task 5 last, once the dependency is real and CI is green on it.
+
+If auth turns out to be more friction than it is worth — three token setups for
+one dependency — the honest fallback is keeping the vendored bundle and
+automating the sync with a scheduled Action that opens a PR. It keeps 2.4 MB in
+git history, which is the thing this plan set out to remove, but it needs no
+credentials on any developer machine.
