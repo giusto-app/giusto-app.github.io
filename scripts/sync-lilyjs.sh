@@ -21,9 +21,28 @@ fi
 echo "Building lilyjs bundle in $LILYJS_DIR ..."
 (cd "$LILYJS_DIR" && bun run build:lilyjs)
 
-echo "Copying bundle into packages/lilyjs/ ..."
+# Check EVERYTHING the sync needs before copying anything. A partial sync is the
+# worst outcome available here: a new bundle sitting next to a stale declaration
+# type-checks cleanly and fails in the browser, which is the exact failure the
+# published declarations exist to end.
+#
+# Declarations ship with the bundle as of lilyJS 09b43281 (2026-08-10). Note that
+# sync-lilyjs-release.sh builds from the newest RELEASE TAG, so this also fails
+# when the declarations exist upstream but have not been tagged yet — which is a
+# real state, not a hypothetical.
+for required in dist/lilyjs.esm.js dist/index.d.ts; do
+  if [ ! -f "$LILYJS_DIR/$required" ]; then
+    echo "lilyJS built no $required." >&2
+    echo "Declarations have shipped since 09b43281; if that commit is not in the tag being" >&2
+    echo "built, cut a lilyJS release first. Refusing to sync a bundle without its types." >&2
+    exit 1
+  fi
+done
+
+echo "Copying bundle and declarations into packages/lilyjs/ ..."
 mkdir -p "$GIUSTO_DIR/packages/lilyjs"
 cp "$LILYJS_DIR/dist/lilyjs.esm.js" "$GIUSTO_DIR/packages/lilyjs/lilyjs.esm.js"
+cp "$LILYJS_DIR/dist/index.d.ts" "$GIUSTO_DIR/packages/lilyjs/index.d.ts"
 
 LILYJS_COMMIT="$(git -C "$LILYJS_DIR" rev-parse HEAD)"
 LILYJS_TAG="${LILYJS_TAG:-$(git -C "$LILYJS_DIR" describe --tags --exact-match 2>/dev/null || true)}"
@@ -43,5 +62,4 @@ cp "$LILYJS_DIR/src/music-rendering/fonts/Bravura.woff2" \
    "$LILYJS_DIR/src/music-rendering/fonts/TeXGyreSchola-BoldItalic.woff2" \
    "$GIUSTO_DIR/public/lilyjs/fonts/"
 
-echo "Synced lilyJS ${LILYJS_TAG:-$LILYJS_COMMIT}."
-echo "packages/lilyjs/index.d.ts is hand-maintained — update it if the API surface you use changed."
+echo "Synced lilyJS ${LILYJS_TAG:-$LILYJS_COMMIT} (bundle + declarations)."

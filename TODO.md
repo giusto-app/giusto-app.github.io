@@ -183,15 +183,23 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
       1,585,108 bytes in two chunks and the 2,054,305-byte compare chunk loads only on
       `?compare`. Verified: the compare code is absent from the entry chunk, the dev build
       splits too, and `sw.js` caches scripts on fetch with no precache manifest to update.
-- [ ] **Blocked on lilyJS:** `packages/lilyjs/index.d.ts` is 411 hand-written lines because
-      `build:lilyjs` emits no declarations. Nothing verifies the two agree, so a renamed
-      export type-checks fine here and fails at runtime — and that is not theoretical: the
-      legacy parser's own shipped `.d.ts` had drifted from its runtime over `beatUnitDots`,
-      hiding dotted tempo marks from every TypeScript consumer. Same setup, nobody tripped
-      over it yet. Prompt: `PROMPT_LILYJS_PUBLISH_TYPES.md` (reworded 2026-08-10 — it used to
-      cite `build:lily-parser` as precedent, and that script no longer exists).
-      If lilyJS declines, add a drift test here instead: every value declared in the `.d.ts`
-      must actually be exported by `lilyjs.esm.js`.
+- [ ] **lilyJS published declarations — BLOCKED ON A RELEASE TAG.** lilyJS shipped
+      `dist/index.d.ts` in `09b43281` (2026-08-10), curated rather than generated because
+      `tsc --emitDeclarationOnly` produces 418 files / 1.8 MB even off a narrow entry.
+      `scripts/sync-lilyjs.sh` now copies it and refuses to sync a bundle without it —
+      but **`09b43281` is not in any tag**, and `sync-lilyjs-release.sh` builds from the
+      newest release tag (v0.14.0). So `bun run sync:lilyjs` cannot pick the types up until
+      lilyJS cuts a release. Everything below waits on that tag:
+  - [ ] Delete the hand-written 411-line `packages/lilyjs/index.d.ts` (the copy replaces it)
+  - [ ] Rename four stand-ins that were real names all along: `ScoreLike` → `Score`,
+        `MeasureLike` → `Measure`, `MusicalEventLike` → `MusicalEvent`,
+        `TempoMarkLike` → `TempoMark`. Cannot be done before the sync — the vendored
+        declaration still declares the old names, so renaming now breaks the build.
+  - [ ] Consider keeping a light drift test anyway. lilyJS's guards catch a renamed or
+        removed export but **not a changed shape** — they showed that asserting shapes needs
+        the 418-file tree the design avoids, and that it already fails on `Score`, which
+        really carries `annotations` / `info` / `directives` / `lyrics` beyond the published
+        subset. So the upstream guarantee is real but partial.
 - [x] **Vendored `lily-parser` / `lily-viewer` deleted** (2026-08-10). lilyJS retired the
       legacy surface in `a473c5a3`, so neither can be rebuilt or return on a sync. Removed
       here: both packages, their `workspace:*` deps, `StaffViewLilyPond.tsx`, the legacy

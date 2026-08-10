@@ -1,6 +1,49 @@
 import StaffView from './StaffView'
 import StaffViewVexFlow from './StaffViewVexFlow'
+import LilyScore from './LilyScore'
+import { centsToHsl } from '../../utils/colorUtils'
+import { formatCents } from '../../utils/noteUtils'
 import type { NoteEvent } from '../../utils/sessions'
+
+// Option C's sample, in LilyPond. The old third panel rendered this through the
+// frozen lily-viewer; it now goes through LilyScore, so the page compares the
+// two hand-rolled options against the renderer production actually uses.
+const LILY_SOURCE = `\\relative g' {
+  \\key g \\minor
+  \\time 4/4
+  \\tempo "Andante" 4=80
+  g4 a bf c d e fs g
+  f ef d c bf a g2
+}`
+
+/**
+ * Per-note intonation readout under a staff, in the format Options A and B use.
+ *
+ * It lives here rather than in LilyScore because LilyScore is a production
+ * component with no business knowing about intonation — this panel is the only
+ * caller that wants the labels, so it owns them. Carried over from the deleted
+ * StaffViewLilyPond, which is where they used to live.
+ */
+function IntonationLabels({ noteEvents }: { noteEvents: NoteEvent[] }) {
+  if (noteEvents.length === 0) return null
+  return (
+    <div className="flex mt-1" style={{ gap: 0 }}>
+      {noteEvents.map((event, idx) => (
+        <div key={idx} className="flex flex-col items-center text-center" style={{ flex: 1 }}>
+          <span className="text-[9px] text-gray-400 leading-tight">
+            {event.noteName}{event.octave}
+          </span>
+          <span
+            className="text-[9px] font-semibold font-mono leading-tight"
+            style={{ color: centsToHsl(event.absCentsAvg) }}
+          >
+            {formatCents(event.avgCents)}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // G Melodic Minor scale fed to both renderers:
 // Ascending: G – A – Bb – C – D – E♮ – F# – G
@@ -79,11 +122,19 @@ export default function StaffComparison() {
           <StaffViewVexFlow noteEvents={SAMPLE} />
         </OptionCard>
 
-        {/* Option C (lily-viewer) is gone. lilyJS retired the legacy API on
-            2026-08-10 (a473c5a3) and lily-viewer turned out to be a pre-rename
-            build of lilyJS itself, so the panel was comparing the current
-            renderer against its own ancestor. Production renders through lilyjs
-            everywhere; the question this panel existed to answer is settled. */}
+        {/* Was lily-viewer, which turned out to be a pre-rename build of lilyJS
+            itself — so this panel had been comparing the current renderer
+            against its own ancestor. Repointed at LilyScore on 2026-08-10 so it
+            compares against what production actually renders with. */}
+        <OptionCard
+          tag="Option C"
+          tagColor="bg-violet-900 text-violet-300"
+          label="lilyjs (current renderer)"
+          meta="vendored bundle · Bravura SMuFL font · used in production"
+        >
+          <LilyScore source={LILY_SOURCE} />
+          <IntonationLabels noteEvents={SAMPLE} />
+        </OptionCard>
 
       </div>
 
