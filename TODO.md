@@ -7,7 +7,8 @@ Goal: Help violinists and bowed string players improve their intonation.
 ## ❓ Open decision — Play-Along start point (2026-08-09)
 
 Raised while fixing the stale resume point on tune change (`PracticePlayback.tsx`,
-`playFromResumePoint`):
+`playFromResumePoint`). Full spec — state machine, the three bugs it also fixes, and
+three decisions that need Marc: `PLAN_PLAYBACK_START_POINT.md`.
 
 - [ ] clearing on start is what the space bar already did, and it means a take that plays
       through to the end leaves you back at the top rather than at the bar you once paused

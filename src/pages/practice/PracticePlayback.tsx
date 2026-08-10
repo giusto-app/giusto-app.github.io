@@ -25,6 +25,7 @@ import {
 } from './playAlongLinks'
 import { resumeAudioContext } from '../../audio/audioContext'
 import { PlaybackClock } from '../../audio/playbackClock'
+import { beatInTake, nextSection, passIndex, resolveStartBeat, takeWindow, type Section } from '../../audio/section'
 import { playWoodblock } from '../../audio/woodblock'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
@@ -159,6 +160,8 @@ export default function PracticePlayback({
   const [activeChordIndex, setActiveChordIndex] = useState<number>(-1)
   /** Bar the transport is parked on (1-based), or null at the top. */
   const [parkedMeasure, setParkedMeasure] = useState<number | null>(null)
+  /** Bumped on every score re-render, so the parked marker can be re-stamped. */
+  const [scoreRenderNonce, setScoreRenderNonce] = useState(0)
   const [isCountingIn, setIsCountingIn] = useState(false)
   const [shareStatus, setShareStatus] = useState('')
   const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
@@ -309,7 +312,16 @@ export default function PracticePlayback({
   }, [])
 
   // ── Transport ───────────────────────────────────────────────────────────────
-  const resumeBeatRef = useRef<number | null>(null)
+  /**
+   * The passage to play (STICKY — survives takes) and where the last take was
+   * interrupted (CONSUMED by the next start). See PLAN_PLAYBACK_START_POINT.md.
+   *
+   * Nothing sets a section yet: bar-range selection lands in step 3, and until
+   * then `sectionRef` stays null and every path below reduces to the behaviour
+   * that shipped in 93b53d2.
+   */
+  const sectionRef   = useRef<Section | null>(null)
+  const pauseBeatRef = useRef<number | null>(null)
 
   const stopPlayback = useCallback(() => {
     clockRef.current?.stop()
@@ -361,15 +373,20 @@ export default function PracticePlayback({
     noteBindingRef.current?.setActiveMeasure(measure)
   }, [])
 
-  /** Back to the top: clear the resume point and the parked marker. */
+  /**
+   * Back to the top. The one escape hatch that forgets EVERYTHING — section,
+   * pause point, parked marker — which is what makes a sticky section safe to
+   * have: there is always one obvious way out of it.
+   */
   const rewind = useCallback(() => {
     stopPlayback()
-    resumeBeatRef.current = null
+    sectionRef.current = null
+    pauseBeatRef.current = null
     parkAtMeasure(null)
   }, [stopPlayback, parkAtMeasure])
 
   /**
-   * Stop, but keep BOTH the resume point and the on-screen position.
+   * Stop, but keep BOTH the pause point and the on-screen position.
    *
    * stopPlayback() clears the chord and note highlights because ending a take
    * should leave a clean score — but a pause must show where you stopped, or
@@ -381,7 +398,7 @@ export default function PracticePlayback({
     const beat = heard != null && heard > 0 ? heard : scheduled
     stopPlayback()
     const at = beat != null && beat > 0 ? beat : null
-    resumeBeatRef.current = at
+    pauseBeatRef.current = at
     if (at !== null) {
       setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, at))
       applyNoteHighlight(noteEventIdsAtBeat(noteEventsRef.current, at))
@@ -432,7 +449,11 @@ export default function PracticePlayback({
     const shouldLoop = loop || plan !== null
     const startBpm = plan ? plan.startBpm : bpm
     if (plan) setBpm(startBpm)
-    const total = schedule.totalBeats
+    // The span this take covers: the selected section, or the whole tune when
+    // there is none — which is why nothing below needs a sectionless special
+    // case. `takeEnd` is absolute, matching PlaybackClock's totalBeats.
+    const take = takeWindow(sectionRef.current, schedule.totalBeats)
+    const takeEnd = take.startBeat + take.lengthBeats
     const clock = new PlaybackClock(ctx, {
       bpm: startBpm,
       beatsPerMeasure: schedule.beatsPerBar,
@@ -440,12 +461,18 @@ export default function PracticePlayback({
       countInBeats: countIn ? Math.ceil(schedule.beatsPerBar) : 0,
       // A zero-span trainer still plays one complete target repetition.
       totalBeats: plan && plan.startBpm === plan.endBpm
-        ? total
-        : shouldLoop ? undefined : total,
+        ? takeEnd
+        : shouldLoop ? undefined : takeEnd,
     })
 
     // Trainer ramp state. Timed offset re-anchors the ramp after a manual
     // slider drag: the drag shifts the whole remaining ramp, it doesn't fight it.
+    // `lastPass` counts completed passes of the take by floor division rather
+    // than testing the boundary for equality: a bar is a fractional number of
+    // quarter notes in compound meters (9/8 = 4.5), so an exact `% === 0` test
+    // lands on nothing and the tempo never steps. Seeded from the first beat so
+    // it holds wherever the take begins.
+    let lastPass: number | null = null
     let rampStartTime: number | null = null
     let timedOffset = 0
     let lastTimedBpm: number | null = null
@@ -472,12 +499,18 @@ export default function PracticePlayback({
         if (rampStartTime === null) rampStartTime = e.time
         let next: number | null = null
         if (plan.mode === 'perLoop') {
-          // Step FROM the current value (bpmRef) so slider drags re-anchor.
-          if (e.beat > 0 && e.beat % total === 0) {
+          // A "loop" is one pass of the TAKE, so drilling bars 5–12 steps the
+          // tempo every eight bars, not every time the whole tune would end.
+          const pass = passIndex(e.beat, take)
+          if (lastPass === null) {
+            lastPass = pass
+          } else if (pass > lastPass) {
+            lastPass = pass
+            // Step FROM the current value (bpmRef) so slider drags re-anchor.
             next = bpmForLoop({ ...plan, startBpm: bpmRef.current }, 1)
             // Once the target tempo is set, play that repetition in full and
             // let the clock end naturally at its final boundary.
-            if (next === plan.endBpm) clock.setTotalBeats(e.beat + total)
+            if (next === plan.endBpm) clock.setTotalBeats(e.beat + take.lengthBeats)
           }
         } else if (e.isDownbeat) {
           const raw = bpmAtElapsed(plan, e.time - rampStartTime)
@@ -501,7 +534,7 @@ export default function PracticePlayback({
         }
       }
 
-      const beat = shouldLoop ? e.beat % total : e.beat
+      const beat = beatInTake(e.beat, take, shouldLoop)
       const secondsPer = 60 / clock.bpm
       const selection = backingSelectionRef.current
 
@@ -531,7 +564,7 @@ export default function PracticePlayback({
       // Anchor for the sub-beat note cursor: this beat became audible ~now.
       noteAnchorRef.current = { beat: rawBeat, time: ctx.currentTime }
       if (rawBeat < 0) return
-      const beat = shouldLoop ? rawBeat % total : rawBeat
+      const beat = beatInTake(rawBeat, take, shouldLoop)
       setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, beat))
     })
 
@@ -544,7 +577,7 @@ export default function PracticePlayback({
       } else {
         const secondsPer = 60 / clock.bpm
         const frac = Math.min(0.999, Math.max(0, (ctx.currentTime - anchor.time) / secondsPer))
-        const beat = (shouldLoop ? anchor.beat % total : anchor.beat) + frac
+        const beat = beatInTake(anchor.beat, take, shouldLoop) + frac
         soundingBeatRef.current = beat
         applyNoteHighlight(noteEventIdsAtBeat(noteEvents, beat))
       }
@@ -557,6 +590,11 @@ export default function PracticePlayback({
       for (const inst of Object.values(instruments)) inst.stop()
       if (plan) setTrainerCompleted(true)
       stopPlayback()
+      // stopPlayback leaves a clean score, but a section outlives the take —
+      // re-mark it, or a sticky selection would vanish the first time you
+      // played it and the next take would start "somewhere" for no visible reason.
+      const held = sectionRef.current
+      parkAtMeasure(held ? measureAtBeat(held.startBeat) : null)
     })
 
     clockRef.current = clock
@@ -566,7 +604,7 @@ export default function PracticePlayback({
     setParkedMeasure(null)
     clock.start(resumeFromBeat)
     setIsPlaying(true)
-  }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight])
+  }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight, parkAtMeasure, measureAtBeat])
 
   /**
    * Start from the resume point and CONSUME it — both transport entry points
@@ -575,12 +613,21 @@ export default function PracticePlayback({
    * Consuming matters because a take that runs to the end calls stopPlayback(),
    * which leaves the ref untouched: without this, the next start would jump
    * back to the bar you once paused on instead of the top.
+   *
+   * The SECTION is deliberately left alone — that is the difference between the
+   * two, and what lets a take end and the next one begin at the same passage.
+   *
+   * A TRAINER take is the exception: it ignores the pause point and always
+   * begins at the section (or the top), because a tempo ramp that starts
+   * somewhere the music doesn't isn't training anything.
    */
   const playFromResumePoint = useCallback(() => {
-    const from = resumeBeatRef.current
-    resumeBeatRef.current = null
-    void startPlayback(from ?? undefined)
-  }, [startPlayback])
+    const from = trainerPlan
+      ? sectionRef.current?.startBeat
+      : resolveStartBeat(pauseBeatRef.current, sectionRef.current)
+    pauseBeatRef.current = null
+    void startPlayback(from)
+  }, [startPlayback, trainerPlan])
 
   // Live control forwarding
   useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
@@ -634,12 +681,13 @@ export default function PracticePlayback({
   useEffect(() => { setTransposeSemitones(0) }, [exercise.id])
 
   // ...and at its own bar 1. This component is never remounted between
-  // exercises (PracticeTab renders it without a `key`), so the resume point
-  // survives in its ref: without this, picking a new tune after pausing
-  // mid-take started it at the bar you left the OLD one on — or past the end
-  // entirely, when the new tune is shorter.
+  // exercises (PracticeTab renders it without a `key`), so both refs survive:
+  // without this, picking a new tune after pausing mid-take started it at the
+  // bar you left the OLD one on — or past the end entirely, when the new tune
+  // is shorter. Bars mean nothing across tunes, so the section goes too.
   useEffect(() => {
-    resumeBeatRef.current = null
+    sectionRef.current = null
+    pauseBeatRef.current = null
     noteBindingRef.current?.setActiveMeasure(null)
     setParkedMeasure(null)
   }, [exercise.id])
@@ -754,10 +802,16 @@ export default function PracticePlayback({
     if (!raw) return
     const measure = Number(raw)
     if (!Number.isFinite(measure)) return
-    resumeBeatRef.current = beatAtMeasure(measure)
-    parkAtMeasure(measure)
-    setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, beatAtMeasure(measure)))
-  }, [isPlaying, beatAtMeasure, parkAtMeasure])
+    const section = nextSection(sectionRef.current, beatAtMeasure(measure), beatAtMeasure(measure + 1))
+    sectionRef.current = section
+    // An explicit aim outranks wherever you happened to pause — otherwise
+    // clicking bar 5 and pressing play would still resume at bar 7.
+    pauseBeatRef.current = null
+    parkAtMeasure(section ? measureAtBeat(section.startBeat) : null)
+    setActiveChordIndex(section
+      ? printedChordIndexAtBeat(printedOnsetsRef.current, section.startBeat)
+      : -1)
+  }, [isPlaying, beatAtMeasure, measureAtBeat, parkAtMeasure])
 
   const handleRendered = useCallback((container: HTMLDivElement) => {
     scoreContainerRef.current = container
@@ -765,7 +819,24 @@ export default function PracticePlayback({
     // elements. Drop it; the note-cursor loop recreates and re-stamps it.
     noteBindingRef.current = null
     noteKeyRef.current = ''
+    setScoreRenderNonce(n => n + 1)
   }, [])
+
+  /**
+   * Re-mark the parked bar after the SVG is rebuilt.
+   *
+   * The note-cursor loop only recreates the binding WHILE PLAYING, so a resize
+   * or font swap while stopped left the readout naming a bar that nothing on the
+   * score highlighted.
+   */
+  useEffect(() => {
+    if (parkedMeasure === null) return
+    const container = scoreContainerRef.current
+    if (!noteBindingRef.current && container) {
+      noteBindingRef.current = createSvgPlaybackBinding(container)
+    }
+    noteBindingRef.current?.setActiveMeasure(parkedMeasure)
+  }, [parkedMeasure, scoreRenderNonce])
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
@@ -932,7 +1003,11 @@ export default function PracticePlayback({
           <label className="text-xs text-gray-500 mb-1 block">Key</label>
           <select
             value={transposeSemitones}
-            onChange={e => { setTransposeSemitones(Number(e.target.value)); stopPlayback() }}
+            // Pause rather than stop: the schedule is about to change under a
+            // running take, but the bar you were on is still the bar you want.
+            // stopPlayback() saved nothing, so transposing mid-take used to
+            // drop you at the top while transposing while paused kept your place.
+            onChange={e => { setTransposeSemitones(Number(e.target.value)); if (isPlaying) pausePlayback() }}
             className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1.5 text-sm text-gray-200"
           >
             {keyOptions.map(o => (
