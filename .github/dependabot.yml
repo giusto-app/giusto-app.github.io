@@ -7,8 +7,12 @@
 # available" — so verify it actually fires after the next lilyJS release rather
 # than assuming silence means up to date.
 #
-# Requires a repository secret DEPENDABOT_PACKAGES_TOKEN: a PAT with
-# read:packages. Dependabot does not have access to secrets.GITHUB_TOKEN.
+# Requires a Dependabot secret DEPENDABOT_PACKAGES_TOKEN: a classic PAT with
+# read:packages, created on the account that OWNS the package (MarcMouries).
+# Dependabot cannot use secrets.GITHUB_TOKEN, and the package belongs to a
+# different owner than this repository, so no workflow token would work either.
+# Note Dependabot secrets are a SEPARATE store from Actions secrets: add it
+# under Settings > Secrets and variables > Dependabot, not Actions.
 version: 2
 
 registries:
