@@ -2,6 +2,8 @@
 // Content is grounded in peer-reviewed research and the consensus of major
 // violin pedagogues (Galamian, Flesch, Fischer, Suzuki, Rolland).
 
+import { APP_VERSION } from '../../appVersion'
+
 export default function GuideTab() {
   return (
     <div className="min-h-full overflow-y-auto px-4 md:px-10 py-6">
@@ -17,7 +19,13 @@ export default function GuideTab() {
           </svg>
         </div>
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Giusto</h1>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h1 className="text-xl font-bold text-white tracking-tight">Giusto</h1>
+            {/* Worth showing: this is a PWA, so a stale service worker can leave
+                someone on an old build, and "which version are you on?" is the
+                first question when a bug report won't reproduce. */}
+            <span className="text-xs text-gray-500 tabular-nums">v{APP_VERSION}</span>
+          </div>
           <p className="text-sm text-gray-400">Practice & Intonation trainer for bowed string players</p>
         </div>
       </div>
