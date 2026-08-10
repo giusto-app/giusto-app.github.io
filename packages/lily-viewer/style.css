@@ -1,9 +1,0 @@
-/* lily-viewer/src/style.css — import this once in your consuming app */
-:root {
-  --lv-note:  #e5e7eb;   /* notes, stems, beams, clef, key sig, barlines (dark default) */
-  --lv-staff: #e5e7eb;   /* staff lines */
-}
-.light {
-  --lv-note:  #111827;
-  --lv-staff: #111827;
-}

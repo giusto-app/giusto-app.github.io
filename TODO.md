@@ -184,22 +184,28 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
       `?compare`. Verified: the compare code is absent from the entry chunk, the dev build
       splits too, and `sw.js` caches scripts on fetch with no precache manifest to update.
 - [ ] **Blocked on lilyJS:** `packages/lilyjs/index.d.ts` is 411 hand-written lines because
-      `build:lilyjs` emits no declarations (the deprecated `build:lily-parser` does — it
-      copies a curated `.d.ts`). Nothing verifies the two agree, so a renamed export
-      type-checks fine here and fails at runtime. Prompt: `PROMPT_LILYJS_PUBLISH_TYPES.md`.
+      `build:lilyjs` emits no declarations. Nothing verifies the two agree, so a renamed
+      export type-checks fine here and fails at runtime — and that is not theoretical: the
+      legacy parser's own shipped `.d.ts` had drifted from its runtime over `beatUnitDots`,
+      hiding dotted tempo marks from every TypeScript consumer. Same setup, nobody tripped
+      over it yet. Prompt: `PROMPT_LILYJS_PUBLISH_TYPES.md` (reworded 2026-08-10 — it used to
+      cite `build:lily-parser` as precedent, and that script no longer exists).
       If lilyJS declines, add a drift test here instead: every value declared in the `.d.ts`
       must actually be exported by `lilyjs.esm.js`.
-- [ ] **Blocked on lilyJS:** deleting the vendored `lily-parser` / `lily-viewer` needs the
-      legacy surface retired upstream, or it returns on the next sync. Prompt ready to paste
-      into a session in `../lilyJS`: `PROMPT_LILYJS_RETIRE_LEGACY_PARSER.md`. It asks for a
-      consumer audit first, then removal (or an adapter over `parseSource` if something still
-      needs `parseDocument`), plus whether lilyjs's renderer fully supersedes `lily-viewer`.
-- [ ] **Needs Marc — delete it?** If the renderer question is settled, `StaffComparison`,
-      `StaffViewLilyPond`, `StaffViewVexFlow`, `src/vendoredPackages.test.ts` and the
-      `lily-parser` / `lily-viewer` vendored packages could all go, along with the vexflow
-      dependency. That removes the 2 MB chunk entirely rather than deferring it, and drops
-      two frozen vendored builds. Destructive and yours to call — the lazy-load above is the
-      safe half.
+- [x] **Vendored `lily-parser` / `lily-viewer` deleted** (2026-08-10). lilyJS retired the
+      legacy surface in `a473c5a3`, so neither can be rebuilt or return on a sync. Removed
+      here: both packages, their `workspace:*` deps, `StaffViewLilyPond.tsx`, the legacy
+      block in `vendoredPackages.test.ts`, and the comparison page's third panel.
+      `lily-viewer` turned out to be a pre-rename build of lilyJS itself — the panel was
+      comparing the current renderer against its own ancestor.
+      Measured, and it is NOT a main-bundle win: initial JS 1,585,108 → 1,592,350 bytes
+      (+0.5%, chunking rearranged), while the lazy `?compare` chunk fell 2,054,305 →
+      1,134,887 (−919 KB). The saving is in the lazy chunk and the repo.
+- [ ] **Needs Marc — what is the comparison page for now?** It currently compares Custom SVG
+      vs VexFlow 4. Either repoint the third panel at `LilyScore` so it compares against the
+      CURRENT renderer (more useful; `LilyScore` takes no `noteEvents`, so the per-note
+      intonation labels would need porting), or delete the page — which is the only way to
+      drop VexFlow, the last 1.13 MB in that chunk.
 
 ---
 

@@ -6,8 +6,6 @@
       "name": "app-violin",
       "dependencies": {
         "abcjs": "^6.6.2",
-        "lily-parser": "workspace:*",
-        "lily-viewer": "workspace:*",
         "lilyjs": "workspace:*",
         "pitchy": "^4.1.0",
         "react": "^18.3.1",
@@ -23,14 +21,6 @@
         "tailwindcss": "^4.1.3",
         "typescript": "~5.7.2",
       },
-    },
-    "packages/lily-parser": {
-      "name": "lily-parser",
-      "version": "0.1.0-vendored",
-    },
-    "packages/lily-viewer": {
-      "name": "lily-viewer",
-      "version": "0.1.0-vendored",
     },
     "packages/lilyjs": {
       "name": "lilyjs",
@@ -93,10 +83,6 @@
     "fft.js": ["fft.js@4.0.4", "", {}, "sha512-f9c00hphOgeQTlDyavwTtu6RiK8AIFjD6+jvXkNkpeQ7rirK3uFWVpalkoS4LAwbdX7mfZ8aoBfFVQX1Re/8aw=="],
 
     "js-tokens": ["js-tokens@4.0.0", "", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
-
-    "lily-parser": ["lily-parser@workspace:packages/lily-parser"],
-
-    "lily-viewer": ["lily-viewer@workspace:packages/lily-viewer"],
 
     "lilyjs": ["lilyjs@workspace:packages/lilyjs"],
 

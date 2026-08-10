@@ -1,20 +1,8 @@
 import StaffView from './StaffView'
 import StaffViewVexFlow from './StaffViewVexFlow'
-import StaffViewLilyPond from './StaffViewLilyPond'
 import type { NoteEvent } from '../../utils/sessions'
 
-// G Melodic Minor scale in LilyPond (for Option C)
-// Ascending: G A Bb C D E♮ F# G  (melodic minor raised 6th+7th)
-// Descending: F♮ Eb D C Bb A G   (natural minor)
-const LILY_SOURCE = `\\relative g' {
-  \\key g \\minor
-  \\time 4/4
-  \\tempo "Andante" 4=80
-  g4 a bf c d e fs g
-  f ef d c bf a g2
-}`
-
-// G Melodic Minor scale fed to all three renderers:
+// G Melodic Minor scale fed to both renderers:
 // Ascending: G – A – Bb – C – D – E♮ – F# – G
 // Descending: F♮ – Eb – D – C – Bb – A – G
 const SAMPLE: NoteEvent[] = [
@@ -91,14 +79,11 @@ export default function StaffComparison() {
           <StaffViewVexFlow noteEvents={SAMPLE} />
         </OptionCard>
 
-        <OptionCard
-          tag="Option C"
-          tagColor="bg-violet-900 text-violet-300"
-          label="lily-viewer (LilyPond parser)"
-          meta="local library · Bravura SMuFL font"
-        >
-          <StaffViewLilyPond source={LILY_SOURCE} noteEvents={SAMPLE} />
-        </OptionCard>
+        {/* Option C (lily-viewer) is gone. lilyJS retired the legacy API on
+            2026-08-10 (a473c5a3) and lily-viewer turned out to be a pre-rename
+            build of lilyJS itself, so the panel was comparing the current
+            renderer against its own ancestor. Production renders through lilyjs
+            everywhere; the question this panel existed to answer is settled. */}
 
       </div>
 

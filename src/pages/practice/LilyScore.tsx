@@ -2,9 +2,10 @@ import { useEffect, useRef } from 'react'
 import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
-// Unlike StaffViewLilyPond (legacy lily-parser + frozen lily-viewer), this
-// renders with the CURRENT lilyJS engraving engine — titles, chord symbols,
-// beams, and spacing match the lilyJS reference output.
+// Renders with the current lilyJS engraving engine, so titles, chord symbols,
+// beams and spacing match the lilyJS reference output. This is now the only
+// notation renderer in the production path — the older vendored viewer and its
+// pre-lilyjs parser were retired upstream and deleted on 2026-08-10.
 //
 // Sizing model (same as the lilyJS editor): the score is engraved at a fixed
 // page width and the resulting SVG is scaled to fill the container via CSS —

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-// Regression tests for the two vendored lilyJS artifacts. These import the
-// workspace packages by package name now that Bun workspaces are configured.
-import { parseDocument } from 'lily-parser'
+// Regression test for the vendored lilyjs bundle, imported by package name
+// through Bun workspaces. The legacy lily-parser block was removed when lilyJS
+// retired that API surface (2026-08-10, a473c5a3) and the package was deleted.
 import { parseSource } from 'lilyjs'
 import type { ScoreLike } from 'lilyjs'
 
@@ -10,25 +10,6 @@ const exercise = readFileSync(
   new URL('../public/exercises/practice-arpeggios-Gm-Cm-F-Bb.ly', import.meta.url),
   'utf8',
 )
-
-describe('vendored lily-parser (legacy ParsedTune API)', () => {
-  test('parses the Play-Along exercise with chord names from \\new ChordNames { \\chordNames }', () => {
-    const blocks = parseDocument(exercise)
-    const score = blocks.find((b: { type: string }) => b.type === 'score') as
-      | { tune: { title?: string; timeSig: string; notes: unknown[]; chordNames?: Array<{ name: string; duration: number }> } }
-      | undefined
-    expect(score).toBeDefined()
-    const tune = score!.tune
-    expect(tune.title).toBe('Practice Arpeggios')
-    expect(tune.timeSig).toBe('4/4')
-    expect(tune.notes).toHaveLength(32)
-    expect(tune.chordNames?.map(c => c.name)).toEqual([
-      'Gm', 'Gm', 'Cm', 'Cm', 'F', 'F', 'Bb', 'Bb',
-    ])
-    // Duration unit contract: quarter-note beats (whole note = 4).
-    expect(tune.chordNames?.every(c => c.duration === 4)).toBe(true)
-  })
-})
 
 describe('vendored lilyjs (modern music-model API)', () => {
   test('parses the Play-Along exercise into measures with offset chord symbols', () => {

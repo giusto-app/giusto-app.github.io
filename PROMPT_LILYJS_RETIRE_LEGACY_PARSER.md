@@ -1,4 +1,38 @@
-# Prompt for the lilyJS project — retire the legacy `lily-parser` surface
+# ✅ DONE — Prompt for the lilyJS project — retire the legacy `lily-parser` surface
+
+**Resolved 2026-08-10.** lilyJS retired the legacy surface in `a473c5a3`, removing
+`src/lily-parser.entry.ts`, `tools/build/build-lily-parser.ts`, its curated
+`lily-parser-package.d.ts` and the `build:lily-parser` script. `packages/lily-parser` and
+`packages/lily-viewer` are deleted from Giusto and cannot come back on a sync.
+
+`lily-viewer`'s provenance turned out to be the interesting part: it is a **pre-rename build
+of lilyJS itself** — the vendored bundle carries lilyJS's `[lily-viewer]` log prefix, and
+lilyJS's `src/appMeta.ts` still defaults `APP_NAME` to `'lily-viewer'`. No source survived
+under that name because the source *is* lilyJS. So the comparison page's third panel was
+comparing the current renderer against its own ancestor.
+
+**One correction to lilyJS's correction.** Their report says the legacy runtime always
+emitted the tempo dot and only the shipped declaration dropped it. That is true of lilyJS's
+current source; it is **not** true of the build Giusto had vendored. Verified by running the
+vendored package before deleting it:
+
+```
+parseDocument('\tempo 4. = 84')  ->  { noteIndex: 0, bpm: 84, beatUnitDenominator: 4 }
+```
+
+No `beatUnitDots` at runtime, and the vendored `index.d.ts` declared the same five fields
+without it. So in *this* artifact the declaration and the runtime agreed — both simply
+predated dot support. Both statements are true of different builds.
+
+Blast radius: none. Nothing in Giusto ever computed a BPM from the legacy type —
+`chordSchedule.ts` imports `TempoMarkLike` from **lilyjs**, which does carry `beatUnitDots`,
+and that is where the dot factor is applied.
+
+Kept as a record of the ask and its outcome. The original prompt follows.
+
+---
+
+## Original prompt
 
 Written 2026-08-09. **This is work for the lilyJS repo, not for Giusto** — paste the fenced
 block below into a session in `../lilyJS`. Giusto never edits lilyJS build tooling; it only

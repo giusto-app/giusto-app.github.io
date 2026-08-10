@@ -6,10 +6,11 @@ import App from './App.tsx'
 const root = createRoot(document.getElementById('root')!)
 
 // `?compare` opens the staff-renderer comparison — a development page, as its
-// own footer says. It is imported DYNAMICALLY because its three renderers drag
-// in VexFlow, the frozen lily-viewer and the pre-lilyjs lily-parser: 2.0 MB of
-// what was a 3.6 MB bundle, downloaded by every user for a page almost none of
-// them open. Static-importing it here was costing 56% of the JavaScript.
+// own footer says. It is imported DYNAMICALLY because its renderers are heavy:
+// static-importing it here cost 2.0 MB of a 3.6 MB bundle, 56% of the
+// JavaScript, downloaded by every user for a page almost none of them open.
+// VexFlow is what remains of that weight; the two retired lilyJS packages that
+// made up the rest were deleted on 2026-08-10.
 if (new URLSearchParams(window.location.search).has('compare')) {
   void import('./pages/practice/StaffComparison.tsx').then(({ default: StaffComparison }) => {
     root.render(

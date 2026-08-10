@@ -15,10 +15,9 @@ Verified in `../lilyJS` on 2026-08-09 (read-only):
 
 - `tools/build/build-lilyjs.ts` emits **only** `dist/lilyjs.esm.js`. No `--declaration`, no
   `emitDeclarationOnly`, no `.d.ts` step — so `sync-lilyjs.sh` has nothing to copy.
-- The **legacy** `tools/build/build-lily-parser.ts` *does* ship types, and not generated ones
-  either: it copies a curated `tools/build/lily-parser-package.d.ts` to
-  `dist/lily-parser/index.d.ts`. The deprecated artifact has a type story; the modern one
-  does not.
+- ~~The legacy `build:lily-parser` ships curated types~~ — **that script was deleted on
+  2026-08-10 (`a473c5a3`)**, so it is no longer available as precedent. Do not cite it.
+  The stronger argument is now the tempo-dot episode below.
 - Giusto therefore hand-writes `packages/lilyjs/index.d.ts` — 411 lines of structural
   approximations (`ScoreLike`, `MeasureLike`, `TempoMarkLike`; the `Like` suffix is the tell).
   Its own header already names the fix: *"publish lilyjs to npm with generated declarations
@@ -40,22 +39,25 @@ script. Worse than what exists.
 ## The prompt
 
 ```
-`build:lilyjs` publishes a bundle with no type declarations, and I want it to
-ship types the way `build:lily-parser` already does.
+`build:lilyjs` publishes a bundle with no type declarations, and I would like it
+to ship them.
 
-Current state:
+`tools/build/build-lilyjs.ts` emits only `dist/lilyjs.esm.js` — no
+`--declaration`, no `emitDeclarationOnly`, no `.d.ts` step. So Giusto
+hand-maintains a 411-line `packages/lilyjs/index.d.ts` of structural
+approximations, and its sync script prints a warning telling whoever ran it to
+update that file by hand if the API changed. Nothing verifies the two agree, so
+a renamed or removed export type-checks fine downstream and fails at runtime in
+the browser.
 
-- `tools/build/build-lilyjs.ts` emits only `dist/lilyjs.esm.js`. There is no
-  `--declaration`, no `emitDeclarationOnly`, no `.d.ts` step.
-- `tools/build/build-lily-parser.ts` writes `dist/lily-parser/index.d.ts` by
-  copying the curated `tools/build/lily-parser-package.d.ts`.
-
-So the deprecated artifact has a type story and the modern one does not. The
-downstream consequence is that Giusto hand-maintains a 411-line
-`packages/lilyjs/index.d.ts` of structural approximations, and its sync script
-prints a warning telling whoever ran it to update that file by hand if the API
-changed. Nothing verifies the two agree, so a renamed or removed export
-type-checks fine downstream and fails at runtime in the browser.
+We already know that failure is real rather than theoretical, because it
+happened. When you retired the legacy parser you found that its shipped
+declaration listed only noteIndex / text / bpm / beatUnitDenominator /
+isExpression while the runtime also returned beatUnitDots — a hand-maintained
+.d.ts that had drifted from its own implementation and quietly told every
+TypeScript consumer that dotted tempo marks did not exist. That is the same
+setup `packages/lilyjs/index.d.ts` is in today, just with nobody having tripped
+over it yet.
 
 What I'd like you to do:
 
