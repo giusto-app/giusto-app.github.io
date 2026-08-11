@@ -55,6 +55,34 @@ Configurable A from 415 Hz (Baroque) to 444 Hz. Affects tuner and drone. Persist
 
 ## Running Locally
 
+### One-time setup on a new machine
+
+`@marcmouries/lilyjs` is published privately to GitHub Packages, so `bun install`
+needs a credential — without one it fails with a bare `401` on the package
+download. Add the token to your **home** `~/.npmrc` (never the project's, which
+is committed and deliberately carries the scope mapping only):
+
+```bash
+gh auth refresh -s read:packages      # only if that scope is missing
+echo "//npm.pkg.github.com/:_authToken=$(gh auth token)" >> ~/.npmrc
+```
+
+`gh auth status` must show the **MarcMouries** account — the package is owned by
+that user, not the `giusto-app` org, so a token from another account gets the
+same 401 even with the right scope. If `~/.npmrc` already has an
+`//npm.pkg.github.com/:_authToken=` line, replace it instead of appending. No
+`gh` on the machine? A classic PAT with `read:packages` goes in the same line.
+
+Verify before installing:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $(gh auth token)" \
+  https://npm.pkg.github.com/@marcmouries/lilyjs   # 200 = good, 401 = token problem
+```
+
+### Every time
+
 ```bash
 bun install
 bun run dev
