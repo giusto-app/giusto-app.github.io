@@ -14,7 +14,7 @@
   "dependencies": {
     "abcjs": "^6.6.2",
     "pitchy": "^4.1.0",
-    "react": "^18.3.1",
+    "react": "^19.2.8",
     "react-dom": "^18.3.1",
     "lilyjs": "npm:@marcmouries/lilyjs@^0.17.1",
     "vexflow": "^5.0.0"
