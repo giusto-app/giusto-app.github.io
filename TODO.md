@@ -138,16 +138,22 @@ Structured scale/exercise routines the user can run with the drone playing under
 
 ## ⚠️ Important Workflow Notes
 
-### Syncing lily-parser before committing
-`lily-parser` is vendored into `packages/` for CI (GitHub Actions only checks out this repo). Its source of truth is the **lilyJS repo** (`../lilyJS/src/music-input/lilypond/`). After changing the parser there, rebuild and re-vendor:
+### lilyJS comes from GitHub Packages — nothing is vendored (2026-08-22)
 
-```bash
-cd ../lilyJS && bun run build:lily-parser && cd -
-rm -rf packages/lily-parser
-cp -r ../lilyJS/dist/lily-parser packages/lily-parser
-```
+`packages/` is gone. lilyJS is a normal dependency,
+`"lilyjs": "npm:@marcmouries/lilyjs@^0.17.0"`, published to
+`npm.pkg.github.com`. There is no rebuild-and-re-vendor step any more: bump the
+caret and `bun install`.
 
-`lily-viewer` is a frozen vendored build (its original sibling source no longer exists); longer term rebuild it from lilyJS's renderer, or publish both packages from lilyJS CI to eliminate the manual step.
+Installing needs a `read:packages` PAT — the project `.npmrc` carries the scope
+mapping ONLY, deliberately no `_authToken` line (a project `.npmrc` shadows
+`~/.npmrc`, so an unset variable would override a real token with an empty
+string and fail 401 with no hint). See `.npmrc` for where the token goes per
+environment.
+
+Fonts are the one thing still copied: `bun run sync:fonts` (part of `build`)
+copies lilyJS's music fonts into `public/lilyjs/fonts/`, and `src/musicFont.ts`
+registers Bravura from there.
 
 ---
 
@@ -183,19 +189,15 @@ cp -r ../lilyJS/dist/lily-parser packages/lily-parser
       1,585,108 bytes in two chunks and the 2,054,305-byte compare chunk loads only on
       `?compare`. Verified: the compare code is absent from the entry chunk, the dev build
       splits too, and `sw.js` caches scripts on fetch with no precache manifest to update.
-- [ ] **lilyJS published declarations — BLOCKED ON A RELEASE TAG.** lilyJS shipped
-      `dist/index.d.ts` in `09b43281` (2026-08-10), curated rather than generated because
-      `tsc --emitDeclarationOnly` produces 418 files / 1.8 MB even off a narrow entry.
-      `scripts/sync-lilyjs.sh` now copies it and refuses to sync a bundle without it —
-      but **`09b43281` is not in any tag**, and `sync-lilyjs-release.sh` builds from the
-      newest release tag (v0.14.0). So `bun run sync:lilyjs` cannot pick the types up until
-      lilyJS cuts a release. Everything below waits on that tag:
-  - [ ] Delete the hand-written 411-line `packages/lilyjs/index.d.ts` (the copy replaces it)
-  - [ ] Rename four stand-ins that were real names all along: `ScoreLike` → `Score`,
-        `MeasureLike` → `Measure`, `MusicalEventLike` → `MusicalEvent`,
-        `TempoMarkLike` → `TempoMark`. Cannot be done before the sync — the vendored
-        declaration still declares the old names, so renaming now breaks the build.
-  - [ ] Consider keeping a light drift test anyway. lilyJS's guards catch a renamed or
+- [x] **lilyJS published declarations — UNBLOCKED and already true (2026-08-22).**
+      lilyJS v0.17.0 publishes `dist/index.d.ts` and points `types` /
+      `exports["."].types` at it, so the declarations arrive with the package.
+      The sub-tasks below are obsolete rather than done: `packages/lilyjs` no
+      longer exists, so there is no hand-written 411-line `index.d.ts` to
+      delete, and `ScoreLike` / `MeasureLike` / `MusicalEventLike` /
+      `TempoMarkLike` appear nowhere in `src/` — the code already uses the real
+      names the package exports (`Score`, `Measure`, …).
+- [ ] Consider keeping a light drift test anyway. lilyJS's guards catch a renamed or
         removed export but **not a changed shape** — they showed that asserting shapes needs
         the 418-file tree the design avoids, and that it already fails on `Score`, which
         really carries `annotations` / `info` / `directives` / `lyrics` beyond the published
