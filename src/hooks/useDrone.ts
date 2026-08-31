@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
-import { getAudioContext } from '../audio/audioContext'
+import { getAudioContext, getOutputNode, resumeAudioContext } from '../audio/audioContext'
+import { claimPlayback, releasePlayback } from '../audio/audibility'
 import {
   pitchClassOctaveToFreq,
   startCelloVoice,
@@ -51,6 +52,7 @@ export function useDrone() {
   // Stop
   // -------------------------------------------------------------------------
   const stopOscillators = useCallback(() => {
+    releasePlayback('drone')
     stopDroneSources(sourcesRef.current)
     sourcesRef.current = []
     gainRef.current?.disconnect()
@@ -70,6 +72,12 @@ export function useDrone() {
   ) => {
     // Shared app-wide context (drone + metronome + chord drone use one clock).
     const ctx = getAudioContext()
+    // Started from a tap, so this lands inside the gesture: a context left
+    // suspended by the autoplay policy would otherwise play nothing at all.
+    void resumeAudioContext()
+    // From here until stopOscillators, silence on the master bus is a fault
+    // worth telling the user about (see audio/audibility.ts).
+    claimPlayback('drone')
 
     const masterGain = ctx.createGain()
     if (soundType === 'shruti') {
@@ -79,7 +87,7 @@ export function useDrone() {
       masterGain.gain.setValueAtTime(0, ctx.currentTime)
       masterGain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.05)
     }
-    masterGain.connect(ctx.destination)
+    masterGain.connect(getOutputNode())
     gainRef.current = masterGain
 
     // Async sample voices may resolve after the user hit stop; only attach

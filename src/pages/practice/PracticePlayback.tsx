@@ -23,7 +23,8 @@ import {
   playAlongExerciseIdFromHash,
   playAlongUrl,
 } from './playAlongLinks'
-import { resumeAudioContext } from '../../audio/audioContext'
+import { getOutputNode, resumeAudioContext } from '../../audio/audioContext'
+import { claimPlayback, releasePlayback } from '../../audio/audibility'
 import { PlaybackClock } from '../../audio/playbackClock'
 import { beatInTake, nextSection, passIndex, resolveStartBeat, takeWindow, type Section } from '../../audio/section'
 import { playWoodblock } from '../../audio/woodblock'
@@ -329,6 +330,7 @@ export default function PracticePlayback({
   const pauseBeatRef = useRef<number | null>(null)
 
   const stopPlayback = useCallback(() => {
+    releasePlayback('practice')
     clockRef.current?.stop()
     clockRef.current = null
     droneRef.current?.dispose()
@@ -434,6 +436,9 @@ export default function PracticePlayback({
     stopPlayback()
     setTrainerCompleted(false)
     const ctx = await resumeAudioContext()
+    // Master bus, so the audibility monitor sees the backing, the drone and
+    // the metronome (see audio/audibility.ts).
+    const out = getOutputNode()
 
     // Both backing instruments are created up front; the active one is chosen
     // live by backingSelectionRef, each enable-gated by volume (see effects).
@@ -443,17 +448,18 @@ export default function PracticePlayback({
       soundType: DRONE_SOUND,
       concertPitchHz: concertPitch,
       volume: droneActive ? backingVol * 0.4 : 0,
+      destination: out,
     })
     await drone.prepare(schedule.events.map(e => e.rootPc))
     const instrumentVol = stringsActive ? backingVol : 0
     const prep = prepareMidisRef.current
     const instruments: Record<InstrumentId, SampledInstrument> = {
-      strings: new SampledInstrument(ctx, SAMPLE_SETS.strings, { concertPitchHz: concertPitch, volume: instrumentVol }),
-      bass: new SampledInstrument(ctx, SAMPLE_SETS.bass, { concertPitchHz: concertPitch, volume: instrumentVol }),
-      guitar: new SampledInstrument(ctx, SAMPLE_SETS.guitar, { concertPitchHz: concertPitch, volume: instrumentVol }),
-      pizzicato: new SampledInstrument(ctx, SAMPLE_SETS.pizzicato, { concertPitchHz: concertPitch, volume: instrumentVol }),
-      guitarJazz: new SampledInstrument(ctx, SAMPLE_SETS.guitarJazz, { concertPitchHz: concertPitch, volume: instrumentVol }),
-      piano: new SampledInstrument(ctx, SAMPLE_SETS.piano, { concertPitchHz: concertPitch, volume: instrumentVol }),
+      strings: new SampledInstrument(ctx, SAMPLE_SETS.strings, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
+      bass: new SampledInstrument(ctx, SAMPLE_SETS.bass, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
+      guitar: new SampledInstrument(ctx, SAMPLE_SETS.guitar, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
+      pizzicato: new SampledInstrument(ctx, SAMPLE_SETS.pizzicato, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
+      guitarJazz: new SampledInstrument(ctx, SAMPLE_SETS.guitarJazz, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
+      piano: new SampledInstrument(ctx, SAMPLE_SETS.piano, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
     }
     // Preload every instrument's notes so switching styles never falls back to synth.
     await Promise.all([
@@ -507,7 +513,7 @@ export default function PracticePlayback({
       if (metronomeOnRef.current || e.beat < 0) {
         for (const click of clicksInWindow(e.beat, e.beat + 1, schedule.pulseBeats, schedule.beatsPerBar)) {
           playWoodblock(
-            ctx, ctx.destination,
+            ctx, out,
             e.time + (click.beat - e.beat) * secondsPerQN,
             click.isDownbeat,
             metronomeVolRef.current,
@@ -624,6 +630,9 @@ export default function PracticePlayback({
     noteBindingRef.current?.setActiveMeasure(null)
     setParkedMeasure(null)
     clock.start(resumeFromBeat)
+    // Claimed here, not before the preload above: silence while samples fetch
+    // is expected, and would otherwise read as a fault.
+    claimPlayback('practice')
     setIsPlaying(true)
   }, [schedule, noteEvents, concertPitch, backingSelection, backingVol, loop, bpm, countIn, trainerPlan, stopPlayback, applyNoteHighlight, parkAtMeasure, measureAtBeat])
 

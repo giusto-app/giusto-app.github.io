@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { PitchDetector } from 'pitchy'
+import { acquireMicSession, releaseMicSession } from '../audio/audioSession'
 import { frequencyToNote, type NoteInfo, type TuningStatus } from '../utils/noteUtils'
 import { TEMPERAMENTS } from '../utils/temperaments'
 
@@ -28,6 +29,7 @@ export function usePitchDetection() {
   // Ref so the rAF loop always reads the latest temperament without restarting
   const temperamentOffsetsRef = useRef<readonly number[]>(TEMPERAMENTS.equal.offsets)
   const concertPitchRef = useRef<number>(440)
+  const micSessionRef = useRef(false)
 
   const setTemperament = useCallback((offsets: readonly number[]) => {
     temperamentOffsetsRef.current = offsets
@@ -40,6 +42,10 @@ export function usePitchDetection() {
   }, [])
 
   const stop = useCallback(() => {
+    if (micSessionRef.current) {
+      micSessionRef.current = false
+      releaseMicSession()
+    }
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
@@ -58,6 +64,13 @@ export function usePitchDetection() {
   const start = useCallback(async () => {
     try {
       setState({ note: null, listeningState: 'listening', errorMessage: null })
+
+      // iOS needs the play-and-record category for capture; without it the
+      // 'playback' category set for the drone would fight the microphone.
+      if (!micSessionRef.current) {
+        micSessionRef.current = true
+        acquireMicSession()
+      }
 
       // Must happen inside user gesture for iOS Safari
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -104,6 +117,10 @@ export function usePitchDetection() {
 
       rafRef.current = requestAnimationFrame(detect)
     } catch (err) {
+      if (micSessionRef.current) {
+        micSessionRef.current = false
+        releaseMicSession()
+      }
       const message =
         err instanceof DOMException && err.name === 'NotAllowedError'
           ? 'Microphone access was denied. Please allow microphone access and try again.'

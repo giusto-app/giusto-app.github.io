@@ -31,6 +31,12 @@ export interface ChordDroneOptions {
   concertPitchHz: number
   /** 0–1. Default 0.18 so the metronome stays perceptually in front. */
   volume?: number
+  /**
+   * Where the chord branches connect. Defaults to the raw device output; the
+   * app passes the master bus (audioContext.getOutputNode) so the audibility
+   * monitor can see this drone in the mix.
+   */
+  destination?: AudioNode
 }
 
 const ROOT_OCTAVE = 3
@@ -75,6 +81,7 @@ export class ChordDrone {
   private soundType: ChordDroneSoundType
   private concertPitchHz: number
   private volume: number
+  private destination: AudioNode
   private current: ChordBranch | null = null
   private currentChord: { rootPc: number; quality: ChordQuality } | null = null
   private disposed = false
@@ -84,6 +91,7 @@ export class ChordDrone {
     this.soundType = options.soundType
     this.concertPitchHz = options.concertPitchHz
     this.volume = options.volume ?? 0.18
+    this.destination = options.destination ?? ctx.destination
   }
 
   /**
@@ -123,7 +131,7 @@ export class ChordDrone {
     gain.gain.setValueAtTime(0, now)
     gain.gain.setValueAtTime(0, fadeStart)
     gain.gain.linearRampToValueAtTime(this.volume, fadeEnd)
-    gain.connect(this.ctx.destination)
+    gain.connect(this.destination)
     const sources = this.buildVoices(gain, rootPc, fadeStart)
     const next: ChordBranch = {
       gain,

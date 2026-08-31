@@ -121,6 +121,12 @@ export interface SampledInstrumentOptions {
   concertPitchHz: number
   /** 0–1. Default 0.6. */
   volume?: number
+  /**
+   * Where the dry and wet buses land. Defaults to the raw device output; the
+   * app passes the master bus (audioContext.getOutputNode) so the audibility
+   * monitor can see this instrument in the mix.
+   */
+  destination?: AudioNode
 }
 
 function nearestSample(set: SampleSet, midi: number): { midiNote: number; note: string } {
@@ -167,11 +173,12 @@ export class SampledInstrument {
     this.convolver = ctx.createConvolver()
     this.convolver.buffer = makeReverbIR(ctx)
 
+    const destination = options.destination ?? ctx.destination
     this.master.connect(this.dry)
-    this.dry.connect(ctx.destination)
+    this.dry.connect(destination)
     this.master.connect(this.convolver)
     this.convolver.connect(this.wet)
-    this.wet.connect(ctx.destination)
+    this.wet.connect(destination)
   }
 
   /** Preload (fetch + decode) the samples nearest the given MIDI notes. */

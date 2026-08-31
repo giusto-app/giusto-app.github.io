@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import TabBar, { type AppTab } from './components/TabBar'
 import { ActiveTabContext } from './activeTab'
 import ThemeToggle from './components/ThemeToggle'
+import SoundAlertBanner from './components/SoundAlertBanner'
 import TunerTab from './pages/tuner/TunerTab'
 import DroneTab from './pages/drone/DroneTab'
 import PracticeTab from './pages/practice/PracticeTab'
@@ -64,6 +65,9 @@ export default function App() {
   return (
     <ActiveTabContext.Provider value={activeTab}>
     <div className="h-full flex flex-col relative overflow-hidden">
+
+      {/* Speaks up when sound is playing but cannot be heard — see audio/audibility.ts */}
+      <SoundAlertBanner />
 
       {/* ── Tab content ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto relative">
