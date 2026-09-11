@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { PlaybackClock } from './PlaybackClock'
+import { PlaybackClock } from './playbackClock'
 
 /**
  * Resuming after a pause must land on the INTEGRAL beat grid.

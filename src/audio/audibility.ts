@@ -95,7 +95,9 @@ const claims = new Set<string>()
 
 let state = initialAudibilityState(0)
 let timer: ReturnType<typeof setInterval> | null = null
-let samples: Float32Array | null = null
+// Explicitly over ArrayBuffer: a bare Float32Array widens to ArrayBufferLike,
+// which getFloatTimeDomainData no longer accepts.
+let samples: Float32Array<ArrayBuffer> | null = null
 
 function emit(issue: AudibilityIssue | null): void {
   for (const listener of listeners) listener(issue)
