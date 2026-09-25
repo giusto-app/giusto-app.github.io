@@ -418,6 +418,99 @@ The structure model must represent:
 
 If a construct is parsed but not semantically expanded, return a structured diagnostic rather than a plausible but incorrect playback order.
 
+#### Prior implementation — the July 2026 branch (deleted 2026-09-25)
+
+A first `StructureGraph` was written on lilyJS branch `feat/accompaniment-timeline`
+(commit `ae2108408`, "feat(playback): expose bounded structure graph", 2026-07-18;
+331 lines in `src/music-playback/structureGraph.ts` plus a 174-line test). It never
+merged: Phases 1–3 were re-done on `main` on 2026-07-21 against a different layout,
+and the branch was deleted on 2026-09-25 after a merge check. Its design is kept here
+so the next attempt starts from it rather than from scratch.
+
+Types it settled on (as written on the branch):
+
+```ts
+export interface StructureRegion {
+  id: string
+  type: 'repeat' | 'volta'
+  /** Written measures covered by this structural region, in score order. */
+  measureIds: string[]
+  /** Number of performed passes through a repeat region. */
+  repeatCount?: number
+  /** Performed pass numbers selecting a volta region (one-based). */
+  passNumbers?: number[]
+  /** The repeat region that owns this volta region. */
+  parentRegionId?: string
+}
+
+export interface StructureEdge {
+  id: string
+  type: 'next' | 'repeat' | 'alternative' | 'end'
+  fromMeasureId: string
+  toMeasureId: string | null
+  /** One-based passes on which this navigation edge is selected. */
+  passNumbers?: number[]
+  regionId?: string
+}
+
+export interface MeasureOccurrence {
+  id: string
+  sourceMeasureId: string
+  measureIndex: number
+  /** Zero-based occurrence of this written measure in performed order. */
+  passIndex: number
+  startQN: Rational
+  endQN: Rational
+  /** Structural decisions that led to this occurrence. */
+  path: string[]
+}
+
+export interface StructureGraph {
+  /** Primary-part measure identities in written order. */
+  writtenMeasureIds: string[]
+  regions: StructureRegion[]
+  edges: StructureEdge[]
+  /** Primary-part occurrences in the timeline's selected repeat mode. */
+  performedOccurrences: MeasureOccurrence[]
+}
+
+export type TimelineDiagnosticCode =
+  | 'structure-invalid-visit-limit'
+  | 'structure-visit-limit-exceeded'
+
+export interface TimelineDiagnostic {
+  code: TimelineDiagnosticCode
+  severity: 'error'
+  message: string
+  sourceMeasureId?: string
+}
+```
+
+Behaviour it implemented and tested:
+
+- written order kept alongside exact performed repeat occurrences (`passIndex`,
+  `startQN`/`endQN` as exact `Rational`, `path` = the structural decisions taken);
+- volta regions (`parentRegionId`, one-based `passNumbers`) and the path selected
+  for each ending;
+- `repeatMode: 'written'` keeps the repeat topology but emits one occurrence per
+  measure; `'expanded'` emits every pass;
+- termination protection: `maxStructureVisits` (default 10 000) — exceeding it throws
+  `PlaybackStructureError` carrying a typed `structure-visit-limit-exceeded`
+  diagnostic; an invalid limit gives `structure-invalid-visit-limit`.
+
+What merging it needs on today's `main` (checked 2026-09-25 in a scratch worktree —
+the graph compiled apart from these):
+
+1. **Stable `Measure.id`** in `music-model` (`MeasureOptions.id`), minted by every
+   input format's emitter (LilyPond `scoreBuild`, ABC) — the graph keys regions,
+   edges and occurrences on it.
+2. **Timeline integration**: `PlaybackTimeline.structure`, `PlaybackOptions.repeatMode`
+   and `maxStructureVisits`, and the graph REPLACING `main`'s event-level repeat
+   expansion in `src/music-playback/structure.ts` (no second repeat interpreter, §4).
+3. Small pieces: `ZERO_RATIONAL` in `music-model/rational.ts`, an `occurrenceIndex`
+   on the playback measure entries, and the measure-duration helper the branch kept
+   in `writtenTiming.ts` (`main`'s `timeline.ts` computes the same exact QN).
+
 ### 5.6 Arpeggio plan semantics
 
 The arpeggiator is a derived generator over the canonical timeline, not another
@@ -673,7 +766,7 @@ Suggested initial gate: warm p95 timeline construction below 20 ms for a typical
 > silently mis-pair (audit §7.3), and D.C./D.S./Segno/Coda/Fine are absent from parser,
 > model, and playback alike.
 
-- [ ] Publish a documented `StructureGraph` representation.
+- [ ] Publish a documented `StructureGraph` representation. *(a July branch implemented it and was never merged — design, types and the merge prerequisites are recorded under §5.5 "Prior implementation")*
 - [ ] Implement written-order structure output. *(builder always expands; `repeatMode: 'written'` missing)*
 - [ ] Implement deterministic simple-repeat expansion with occurrence provenance. *(implemented + tested at event level; `MeasureOccurrence` records/paths and harmony-track expansion missing)*
 - [ ] Implement volta/alternative endings. *(implemented + tested for numbered brackets; count model gap §7.2, unparsable labels fall back silently)*
