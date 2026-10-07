@@ -36,7 +36,10 @@ describe('buildNoteSchedule', () => {
 
   test('every event carries a rendered-SVG-compatible event id', () => {
     for (const e of events) {
-      expect(e.eventId).toMatch(/^event-\d+$/)
+      // lilyJS prefixes event ids by score (`s<score>-event-<n>`) since 0.2x;
+      // its rendered SVG carries the same ids (data-lily-event-id="s0-event-0"
+      // .. "s0-event-5" for this witness, checked against lilyJS 0.30.1).
+      expect(e.eventId).toMatch(/^s\d+-event-\d+$/)
     }
     expect(new Set(events.map(e => e.eventId)).size).toBe(events.length)
   })
