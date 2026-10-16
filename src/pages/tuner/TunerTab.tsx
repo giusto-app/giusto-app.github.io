@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
 import TunerMeter from '../../components/TunerMeter'
 import NoteDisplay from '../../components/NoteDisplay'
@@ -8,14 +8,30 @@ import StartButton from '../../components/StartButton'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
 import { getResonanceString } from '../../utils/noteUtils'
+import { INSTRUMENTS, INSTRUMENT_KEYS, loadInstrument, saveInstrument, type InstrumentKey } from '../../utils/instruments'
+import OpenStringsPanel from './OpenStringsPanel'
 
 interface TunerTabProps {
   temperamentKey: TemperamentKey
   concertPitch: ConcertPitchHz
+  /** Choosing an instrument applies the temperament it plays in. */
+  onTemperamentChange: (key: TemperamentKey) => void
 }
 
-export default function TunerTab({ temperamentKey, concertPitch }: TunerTabProps) {
+type TunerMode = 'strings' | 'play'
+
+export default function TunerTab({ temperamentKey, concertPitch, onTemperamentChange }: TunerTabProps) {
   const { note, listeningState, errorMessage, start, stop, setTemperament, setConcertPitch } = usePitchDetection()
+  const [instrumentKey, setInstrumentKey] = useState<InstrumentKey>(loadInstrument)
+  const [mode, setMode] = useState<TunerMode>('strings')
+  const instrument = INSTRUMENTS[instrumentKey]
+
+  function chooseInstrument(key: InstrumentKey) {
+    setInstrumentKey(key)
+    saveInstrument(key)
+    onTemperamentChange(INSTRUMENTS[key].playTemperament)
+    setMode('strings')
+  }
 
   // Sync temperament and concert pitch into the detection hook whenever they change
   useEffect(() => {
@@ -39,6 +55,72 @@ export default function TunerTab({ temperamentKey, concertPitch }: TunerTabProps
         </span>
       </header>
 
+      {/* Instrument + mode */}
+      <div className="w-full max-w-md flex flex-col items-center gap-3 pt-3">
+        <div className="flex flex-wrap justify-center gap-2" role="radiogroup" aria-label="Instrument">
+          {INSTRUMENT_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="radio"
+              aria-checked={instrumentKey === key}
+              onClick={() => chooseInstrument(key)}
+              className={[
+                'rounded-full px-3 py-1 text-sm font-medium border transition-colors',
+                instrumentKey === key
+                  ? 'bg-gray-700 text-gray-100 border-gray-500'
+                  : 'border-gray-700 text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
+              ].join(' ')}
+            >
+              {INSTRUMENTS[key].label}
+            </button>
+          ))}
+        </div>
+        <div className="grid w-full grid-cols-2 gap-1 rounded-lg p-1 neu-inset" role="tablist" aria-label="Tuner mode">
+          {([['strings', '① Open strings'], ['play', '② Play']] as const).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => setMode(m)}
+              className={[
+                'min-h-10 rounded-md px-3 text-sm font-semibold transition-colors',
+                mode === m
+                  ? 'bg-gray-700 text-gray-100 shadow-sm'
+                  : 'text-[color:var(--neu-fg2)] hover:text-[color:var(--neu-fg)]',
+              ].join(' ')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {mode === 'play' && (
+          <p className="text-xs text-gray-500 text-center">
+            Playing in {TEMPERAMENTS[temperamentKey].label}
+            {temperamentKey === instrument.playTemperament
+              ? ` — recommended for ${instrument.label.toLowerCase()}`
+              : ''}
+          </p>
+        )}
+      </div>
+
+      {mode === 'strings' ? (
+        <main className="w-full max-w-sm md:max-w-none flex flex-col items-center gap-4 flex-1 justify-center">
+          <OpenStringsPanel
+            instrument={instrument}
+            concertPitch={concertPitch}
+            frequency={note?.frequency ?? null}
+            listening={listeningState === 'listening'}
+            onDone={() => setMode('play')}
+          />
+          {listeningState === 'error' && errorMessage && (
+            <div className="text-center text-red-400 text-base max-w-xs px-4 bg-red-950/40 rounded-xl py-3">
+              {errorMessage}
+            </div>
+          )}
+        </main>
+      ) : (
       <main className="w-full max-w-sm md:max-w-none flex flex-col items-center gap-4 flex-1 justify-center">
         {/* Note name */}
         <div className="h-32 flex items-center justify-center">
@@ -91,6 +173,7 @@ export default function TunerTab({ temperamentKey, concertPitch }: TunerTabProps
           </div>
         )}
       </main>
+      )}
 
       <footer className="w-full flex justify-center pb-2">
         <StartButton listeningState={listeningState} onStart={start} onStop={stop} />

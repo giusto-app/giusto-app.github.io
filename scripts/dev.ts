@@ -1,5 +1,5 @@
 import { buildApp } from './buildApp'
-import { watch } from 'node:fs'
+import { existsSync, watch } from 'node:fs'
 
 const port = Number(process.env.PORT ?? 5151)
 const outdir = './.bun-dev'
@@ -28,8 +28,10 @@ function scheduleRebuild() {
   }, 100)
 }
 
+// `packages/` went away when lilyJS stopped being vendored; watching a missing
+// path throws, so only the ones present are watched.
 for (const path of ['index.html', 'src', 'packages', 'public']) {
-  watch(path, { recursive: true }, scheduleRebuild)
+  if (existsSync(path)) watch(path, { recursive: true }, scheduleRebuild)
 }
 
 const server = Bun.serve({

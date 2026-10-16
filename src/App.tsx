@@ -75,6 +75,7 @@ export default function App() {
           <TunerTab
             temperamentKey={temperamentKey}
             concertPitch={concertPitch}
+            onTemperamentChange={setTemperamentKey}
           />
         </div>
         <div className={activeTab === 'drone'    ? 'block h-full' : 'hidden'}>

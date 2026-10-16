@@ -4,6 +4,50 @@ Goal: Help violinists and bowed string players improve their intonation.
 
 ---
 
+## 🔴 Next Up — Intonation practice (planned 2026-10-16)
+
+Tuner: instrument picker + open-strings mode is DONE (see below). The rest of the plan, in
+order of value:
+
+- [x] **Tuner: instrument picker + open strings** (2026-10-16). Violin / viola / cello /
+      double bass / guitar chips. Open strings are tuned in pure fifths from A (pure fourths
+      on bass, equal temperament on guitar or with the "Playing with piano" toggle). The
+      next string to tune pulses (A first, then outward), and a string is marked tuned
+      after holding ±3 ¢ for 1 s. Then "Strings tuned ✓ — start playing →" switches to
+      Play. Choosing an instrument applies its recommended playing temperament
+      (Pythagorean for bowed strings, equal for guitar). Code: `src/utils/instruments.ts`
+      (+ tests), `src/pages/tuner/OpenStringsPanel.tsx`, `TunerTab.tsx`.
+- [ ] **QA by ear** — bow each open string on a real instrument: is the detected string
+      right, does the needle settle enough for the ±3 ¢ / 1 s hold, does the guidance read
+      well (raise / lower / hold)?
+- [ ] **Key-relative Just and Pythagorean.** `src/utils/temperaments.ts` offsets are fixed
+      relative to C and never rotated. The intervals inside the table are pure, but the
+      whole table is anchored on C, not on the player's reference. Just puts A at
+      −15.6 ¢ (5:3 above C), so an open A tuned to 440 reads 15.6 ¢ sharp in Just mode,
+      and every note of a D-major scale is shifted the same way. Rotate the table so its
+      tonic sits at 0 ¢: the scale's root in Practice, the drone's pitch class when a
+      drone plays, A for the open-strings flow.
+- [ ] **Grade notes against the scale's expected notes** (Practice → Pitch Practice).
+      `NoteEvent` has no scale degree or target. Match each played note to the expected
+      scale degree, so a wrong note is reported as wrong rather than graded against the
+      nearest chromatic pitch.
+- [ ] **Attack vs settled pitch** per note: where the finger landed against where the
+      note settled. Separates "finger lands wrong" from "ear is off".
+- [ ] **Per-degree summary** in Session Results: average cents per scale degree, split
+      ascending / descending ("your 3rd is 12 ¢ flat, your 7th 9 ¢ flat — should be
+      high"), plus by string or position.
+- [ ] **Scrolling pitch trace over target lanes** while recording, instead of only the
+      needle (a glanceable line, like karaoke).
+- [ ] **Focus drills** — one tap from a weak degree to a short loop of patterns that
+      contain it (3-4-3, 6-7-8) against the drone; slow mode that waits for each note to
+      settle.
+- [ ] **Per-degree trends** in the Progress tab: average |cents| per degree across
+      sessions, as a sparkline.
+- [ ] **Fifth-beat check** in Open strings: bow two adjacent strings and show a beat-free
+      meter (needs two-pitch detection).
+
+---
+
 ## 🔴 Next Up — Play-Along section looping (specced 2026-08-09)
 
 Select bars 5–12 on the score and drill them: takes begin at the section, Loop repeats it,
