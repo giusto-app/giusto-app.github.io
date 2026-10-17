@@ -6,7 +6,7 @@
       "name": "app-violin",
       "dependencies": {
         "abcjs": "^6.7.0",
-        "lilyjs": "npm:@marcmouries/lilyjs@^0.30.1",
+        "lilyjs": "npm:@marcmouries/lilyjs@^0.40.0",
         "pitchy": "^4.1.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
@@ -90,7 +90,7 @@
 
     "js-tokens": ["js-tokens@4.0.0", "", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
 
-    "lilyjs": ["@marcmouries/lilyjs@0.30.1", "https://npm.pkg.github.com/download/@marcmouries/lilyjs/0.30.1/cfaaa3e81f8d3d1d2e287e4ed77444f865010079", { "dependencies": { "@codemirror/commands": "^6.11.0", "@codemirror/language": "^6.12.4", "@codemirror/state": "6.7.4", "@codemirror/view": "6.41.1", "react": "^18.3.1", "react-dom": "^18.3.1" } }, "sha512-C7KbzQNi0IeFE9KQk8GWhr77/xG5ZJq6Kew6W/xMDOxTEprfeCZpvxdcpI4t8jEcCvg6bj9ApbI4dNa+dRe4XA=="],
+    "lilyjs": ["@marcmouries/lilyjs@0.40.0", "https://npm.pkg.github.com/download/@marcmouries/lilyjs/0.40.0/63d1058ba1b1a94730ae2a75698f95f54a1e1f29", { "dependencies": { "@codemirror/commands": "^6.11.0", "@codemirror/language": "^6.12.4", "@codemirror/state": "6.7.4", "@codemirror/view": "6.41.1", "react": "^18.3.1", "react-dom": "^18.3.1" } }, "sha512-pap07YB2hutpOmFGWh7xbRl6Z2Evb7N2+a5k1hhy9t6r02DxCP3nVJTlepGihFiyowUXGfZdUSCz+ApAMC1BAQ=="],
 
     "loose-envify": ["loose-envify@1.4.0", "", { "dependencies": { "js-tokens": "^3.0.0 || ^4.0.0" }, "bin": { "loose-envify": "cli.js" } }, "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q=="],
 
