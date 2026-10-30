@@ -4,6 +4,30 @@ Goal: Help violinists and bowed string players improve their intonation.
 
 ---
 
+## 🔴 Next Up — Loop range on the score (planned 2026-10-30)
+
+Drag a loop range over the score and scrub a timeline, after Sightread's player.
+Plan: `PLAN_LOOP_RANGE.md` (decided: remember the range per exercise, handle drags
+apply on the next pass, fuchsia).
+
+- [x] **LR1 · Measure map** (2026-10-30): per-bar screen boxes from lilyJS's
+      `measure-area` rects, united over staves and grouped by system; range bands per
+      system; bar under a point. `src/pages/practice/measureBoxes.ts` (+ tests).
+- [ ] **LR2 · Range overlay, display only**: fuchsia wash bands + handles from the
+      current section, one band per system; retire the per-measure SVG tint.
+- [ ] **LR3 · Drag handles**: pointer capture, snap to bar lines, write `Section`;
+      one-bar sections; keyboard Left/Right; live while playing, applied on the next pass.
+- [ ] **LR4 · Drag to create** a range in one gesture (click-click stays).
+- [ ] **LR5 · Timeline strip** under the score: bar ticks, elapsed fill, range box with
+      handles, playhead; click/drag to seek.
+- [ ] **LR6 · Time readout**: elapsed / total from the conductor map, plus the bar.
+- [ ] **LR7 · Remember the range per exercise** (`localStorage`, keyed by `exercise.id`).
+- [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo.
+- [ ] **LR9 · Part focus**: solo or mute the violin line or the backing.
+- [ ] **LR10 · Wait mode**: hold on a note until the mic hears it in tune (own plan).
+- [ ] **LR11 · Long scores**: one SVG per system with `content-visibility: auto`
+      (needs a lilyJS output option first).
+
 ## 🔴 Next Up — Intonation practice (planned 2026-10-16)
 
 Tuner: instrument picker + open-strings mode is DONE (see below). The rest of the plan, in
