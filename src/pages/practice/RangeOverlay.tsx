@@ -55,7 +55,13 @@ export default function RangeOverlay({ container, span, renderNonce, binding, on
     place()
     const observer = new ResizeObserver(place)
     observer.observe(container)
-    return () => observer.disconnect()
+    // A long score's systems are skipped while off screen (LR11); re-place the
+    // handles when one comes into view. The event does not bubble: capture it.
+    container.addEventListener('contentvisibilityautostatechange', place, true)
+    return () => {
+      observer.disconnect()
+      container.removeEventListener('contentvisibilityautostatechange', place, true)
+    }
   }, [container, span, renderNonce, binding])
 
   // Drag to create (LR4), on the score itself. Native listeners on the

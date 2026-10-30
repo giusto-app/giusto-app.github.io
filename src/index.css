@@ -147,6 +147,10 @@ body.light .border-gray-700\/60,
 body.light .border-gray-500,
 body.light .border-gray-500\/60 { border-color: rgba(148, 163, 184, 0.7) !important; }
 
+/* Long scores (LR11): one wrapper per system, skipped by the browser while
+   off screen (LilyScore.tsx). */
+.giusto-system { content-visibility: auto; }
+
 /* ── Sheet music ─────────────────────────────────────────────────────────────
    Tune SVGs draw every notehead, stem, staff line and text with
    fill/stroke="currentColor" (same idea as the music-viewer's var(--lily-note),

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useLightTheme } from '../../hooks/useLightTheme'
+import { viewBoxAspectRatio } from './longScore'
 import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose, type SystemTimeMap } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
@@ -30,16 +31,45 @@ interface LilyScoreProps {
   onRendered?: (container: HTMLDivElement) => void
   /** Where musical time sits on each system, after every render (lilyjs >= 0.61). */
   onTimeMap?: (timeMap: SystemTimeMap[]) => void
+  /**
+   * Render one <svg> per system, each in a `content-visibility: auto` wrapper,
+   * for long scores (LR11, lilyjs >= 0.62). The title is drawn in the first
+   * system's <svg>, as on the page.
+   */
+  split?: boolean
 }
 
-export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered, onTimeMap }: LilyScoreProps) {
+/**
+ * Put each of lilyjs's per-system <svg>s in its own wrapper, so the browser can
+ * skip drawing the ones off screen. Each wrapper takes its system's aspect
+ * ratio up front, so an undrawn system still has its real height.
+ */
+function wrapSystems(el: HTMLElement): void {
+  for (const svg of [...el.children]) {
+    if (svg.tagName.toLowerCase() !== 'svg') continue
+    const wrap = document.createElement('div')
+    wrap.className = 'giusto-system'
+    const ratio = viewBoxAspectRatio(svg.getAttribute('viewBox'))
+    if (ratio) wrap.style.aspectRatio = ratio
+    el.insertBefore(wrap, svg)
+    wrap.appendChild(svg)
+  }
+}
+
+export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered, onTimeMap, split = false }: LilyScoreProps) {
   const ref = useRef<HTMLDivElement>(null)
   // The score is drawn in the app's theme, and redrawn when it switches.
-  const theme = useLightTheme() ? 'light' : 'dark'
+  const theme: 'light' | 'dark' = useLightTheme() ? 'light' : 'dark'
 
   useEffect(() => {
     const el = ref.current
     if (!el || !source.trim()) return
+    // lilyjs reports the time map right after it puts the SVGs in place — on the
+    // first render and on the font re-render — which is when to wrap them.
+    const timeMapped = split
+      ? (m: SystemTimeMap[]) => { wrapSystems(el); onTimeMap?.(m) }
+      : onTimeMap
+    const options = { width, theme, onTimeMap: timeMapped, ...(split ? { split: 'system' as const } : {}) }
     try {
       // Ink in the app's theme: light on the dark page, dark on the light one
       // (the containers provide the page; PLAN_LIGHT_MODE.md LM2).
@@ -55,9 +85,9 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
         }
         // The parsed doc is ours (fresh from parseSource) — safe to retitle.
         if (title) score.title = title
-        renderScore(el, score, { width, theme, onTimeMap })
+        renderScore(el, score, options)
       } else {
-        renderLily(el, source, { width, theme, onTimeMap })
+        renderLily(el, source, options)
       }
       onRendered?.(el)
       // lilyjs re-renders asynchronously once music fonts finish loading; run
@@ -68,7 +98,7 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
       console.error('lilyjs render failed', err)
       el.textContent = 'Score rendering failed'
     }
-  }, [source, scoreIndex, width, transposeSemitones, onRendered, onTimeMap, theme])
+  }, [source, scoreIndex, width, transposeSemitones, onRendered, onTimeMap, theme, split])
 
   // [&_svg]: the fill-the-container scaling must survive lilyjs's async
   // font-ready re-render (which replaces the <svg>), so it lives in CSS

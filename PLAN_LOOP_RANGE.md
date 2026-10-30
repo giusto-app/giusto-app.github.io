@@ -1,6 +1,6 @@
 # Play-Along — drag a loop range over the score, and a timeline to scrub
 
-Status: **LR1-LR7, LR9, LR10 done 2026-10-30; LR8 kept for later; LR11 waits on lilyJS.** Builds on the section model of
+Status: **LR1-LR7 and LR9-LR12 done 2026-10-30; LR8 kept for later.** Builds on the section model of
 `PLAN_PLAYBACK_START_POINT.md` (`src/audio/section.ts`, built), which already decides
 what a section *means* (sticky, Loop governs repetition, the trainer steps per pass).
 This plan changes how you **make and see** one, after studying Sightread's player
@@ -192,24 +192,17 @@ Further ideas from the same page, not part of the loop work (one line each):
       the take with the hook's message. Checked in the app with a fake microphone; the
       end-to-end advance could not run there (the automated tab is hidden, so the
       detector's rAF loop is paused) and rests on the tracker's tests.
-- [ ] **LR11 · Long scores**: one SVG per system with `content-visibility: auto`.
-      That is a lilyJS output option first (per-system SVGs), then a Giusto change.
-      **Parked — needs lilyJS (2026-10-30).** lilyJS 0.61 renders a page as one `<svg>`
-      (`renderSourceToPages` splits pages, not systems), so Giusto cannot skip drawing
-      off-screen systems. Prompt for the lilyJS developer:
-
-      > Add a per-system output option to lilyJS's render API: `renderScore` /
-      > `renderLily` / `renderMusic` take `split: 'system'` and put one `<svg>` per
-      > system in the container, in document order, each with its own viewBox cropped to
-      > that system's ink (staves, everything attached above and below), tagged
-      > `data-lily-system` / `data-lily-page`. The time map, `measure-area` rects,
-      > event ids and `createSvgPlaybackBinding` (highlights, `setActiveMeasure`,
-      > `setRange`) must work across the split SVGs as they do across pages today: a
-      > range spanning systems 3-4 draws one band in each system's `<svg>`. A render
-      > without the option stays byte-identical. Witness: a 40-bar two-staff score;
-      > test that stacking the per-system SVGs reproduces the one-page render's system
-      > positions within 0.01 user units.
-
+- [x] **LR11 · Long scores** (2026-10-30, lilyJS 0.62 `split: 'system'`): a score over
+      32 bars (`longScore.ts`, tested) renders one `<svg>` per system, each in a
+      `content-visibility: auto` wrapper whose aspect ratio comes from its viewBox, so a
+      system not drawn yet keeps its height. Wrapped in `onTimeMap`, which lilyjs calls
+      after each DOM swap, the font re-render included. The range's handles are re-placed
+      when a system comes into view (`contentvisibilityautostatechange`). Shorter
+      scores keep the one-page render. Checked in the app on a 48-bar score (six
+      systems): a 10-30 range draws one band in each of systems 1-3's `<svg>`, both
+      handles on their bands' ends to the pixel, one title (lilyjs draws it in system
+      0's `<svg>` — the 0.62 notes say the split carries none, the render does). No
+      catalog exercise is long yet: the longest has about a dozen bars.
 
 ## Decided (Marc, 2026-10-30)
 

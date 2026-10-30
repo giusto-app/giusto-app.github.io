@@ -42,7 +42,7 @@ apply on the next pass, fuchsia).
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo. *Kept for later (Marc, 2026-10-30).*
 - [x] **LR9 · Part focus** (2026-10-30): hear the backing, the violin line with it, or the violin line alone.
 - [x] **LR10 · Wait mode** (2026-10-30): the cursor holds on each note until the mic hears it in tune.
-- [ ] **LR11 · Long scores** *(waits on a lilyJS per-system output option; prompt in the plan)*: one SVG per system with `content-visibility: auto`
+- [x] **LR11 · Long scores** (2026-10-30, lilyJS 0.62): past 32 bars, one SVG per system with `content-visibility: auto`
       (needs a lilyJS output option first).
 
 ## 🔴 Next Up — Intonation practice (planned 2026-10-16)

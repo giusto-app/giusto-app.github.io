@@ -15,6 +15,7 @@ import {
 import LilyScore from './LilyScore'
 import RangeOverlay from './RangeOverlay'
 import TimelineStrip from './TimelineStrip'
+import { splitsSystems } from './longScore'
 import { loadSection, saveSection } from './sectionMemory'
 import ExercisePicker, { recordRecentExercise } from './ExercisePicker'
 import {
@@ -1286,6 +1287,7 @@ export default function PracticePlayback({
             transposeSemitones={transposeSemitones}
             onRendered={handleRendered}
             onTimeMap={handleTimeMap}
+            split={splitsSystems(barCount)}
           />
           {/* The selected passage, drawn over the score, with drag handles (LR2-LR3). */}
           <RangeOverlay
