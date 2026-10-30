@@ -23,7 +23,7 @@ apply on the next pass, fuchsia).
       mouse and pen, while touch keeps scrolling the score).
 - [ ] **LR5 · Timeline strip** under the score: bar ticks, elapsed fill, range box with
       handles, playhead; click/drag to seek.
-- [ ] **LR6 · Time readout**: elapsed / total from the conductor map, plus the bar.
+- [x] **LR6 · Time readout** (2026-10-30): elapsed / total at the transport tempo, plus the bar.
 - [x] **LR7 · Remember the range per exercise** (2026-10-30; `localStorage`, keyed by `exercise.id`, in bars).
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo.
 - [ ] **LR9 · Part focus**: solo or mute the violin line or the backing.

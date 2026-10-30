@@ -31,6 +31,7 @@ import { claimPlayback, releasePlayback } from '../../audio/audibility'
 import { PlaybackClock } from '../../audio/playbackClock'
 import { nextSection, resolveStartBeat, takeWindow, TakeTimeline, type Section } from '../../audio/section'
 import { playWoodblock } from '../../audio/woodblock'
+import { transportTime } from '../../audio/transportTime'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
 import {
@@ -172,6 +173,8 @@ export default function PracticePlayback({
    */
   const [sectionSpan, setSectionSpan] = useState<{ start: number; end: number | null } | null>(null)
   const [isCountingIn, setIsCountingIn] = useState(false)
+  /** The beat being heard, for the time readout (LR6); refreshed ~4x a second, not per frame. */
+  const [heardBeat, setHeardBeat] = useState<number | null>(null)
   const [shareStatus, setShareStatus] = useState('')
   const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
   const [trainerCompleted, setTrainerCompleted] = useState(false)
@@ -361,6 +364,7 @@ export default function PracticePlayback({
     applyNoteHighlight([])
     setIsPlaying(false)
     setIsCountingIn(false)
+    setHeardBeat(null)
     setActiveChordIndex(-1)
   }, [applyNoteHighlight])
 
@@ -625,6 +629,7 @@ export default function PracticePlayback({
 
     // Note cursor: interpolate the fraction into the current beat from the
     // audio clock, then highlight whatever note (or rest) sounds there.
+    let lastReadout = -Infinity
     const noteTick = () => {
       const anchor = noteAnchorRef.current
       if (!anchor || anchor.beat < 0) {
@@ -635,6 +640,10 @@ export default function PracticePlayback({
         const beat = timeline.tuneBeat(anchor.beat) + frac
         soundingBeatRef.current = beat
         applyNoteHighlight(noteEventIdsAtBeat(noteEvents, beat))
+        if (ctx.currentTime - lastReadout >= 0.25) {
+          lastReadout = ctx.currentTime
+          setHeardBeat(beat)
+        }
       }
       noteRafRef.current = requestAnimationFrame(noteTick)
     }
@@ -948,8 +957,10 @@ export default function PracticePlayback({
    * it you stopped. A section is sticky, so it has to be named — otherwise play
    * "refuses" to start at the top and nothing says why.
    */
+  // While playing, the bar being heard; stopped, the bar play will start in.
+  const atMeasure = isPlaying ? (heardBeat !== null ? measureAtBeat(heardBeat) : null) : parkedMeasure
   const transportPosition = (() => {
-    if (sectionSpan === null) return parkedMeasure !== null ? `bar ${parkedMeasure} · ` : ''
+    if (sectionSpan === null) return atMeasure !== null ? `bar ${atMeasure} · ` : ''
     const span = sectionSpan.end === null
       ? `from bar ${sectionSpan.start}`          // armed, no end yet
       : sectionSpan.end === sectionSpan.start
@@ -957,9 +968,22 @@ export default function PracticePlayback({
         : `bars ${sectionSpan.start}–${sectionSpan.end}`
     // Only say "at N" when it adds something — parking on the section's own
     // first bar is where a take starts anyway.
-    const inside = parkedMeasure !== null && parkedMeasure !== sectionSpan.start
-    return inside ? `${span} · at ${parkedMeasure} · ` : `${span} · `
+    const inside = atMeasure !== null && atMeasure !== sectionSpan.start
+    return inside ? `${span} · at ${atMeasure} · ` : `${span} · `
   })()
+
+  /**
+   * Elapsed / total at the transport's tempo (LR6). Stopped, the elapsed time is
+   * where play will START — the pause point, else the section start, else the
+   * top — which is the same rule the play button follows (resolveStartBeat).
+   * Refs are read here on purpose: every path that moves them also sets state.
+   */
+  const readoutBeat = isPlaying
+    ? (heardBeat ?? 0)
+    : (resolveStartBeat(pauseBeatRef.current, sectionRef.current) ?? 0)
+  const timeReadout = schedule && schedule.totalBeats > 0
+    ? `${transportTime(readoutBeat, schedule.totalBeats, bpm)} · `
+    : ''
 
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
@@ -1012,7 +1036,7 @@ export default function PracticePlayback({
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>Tempo</span>
               <span className="tabular-nums">
-                {isCountingIn ? 'count-in…' : `${transportPosition}♩ = ${bpm}`}
+                {isCountingIn ? 'count-in…' : `${timeReadout}${transportPosition}♩ = ${bpm}`}
               </span>
             </div>
             <input

@@ -149,7 +149,13 @@ Ordered so every step lands alone and is useful on its own.
       section in one gesture (click-click stays).
 - [ ] **LR5 · Timeline strip.** Ticks, elapsed fill, section box with handles,
       playhead; click/drag to seek (stopped: pause point; playing: restart there).
-- [ ] **LR6 · Time readout.** Elapsed / total from the conductor map.
+- [x] **LR6 · Time readout.** (2026-10-30: `src/audio/transportTime.ts` + tests;
+      `0:09 / 0:24 · bars 4–7 · ♩ = 80`. Not from a conductor map after all: a take
+      plays the whole score at the transport's tempo — the slider or the trainer's
+      step — and the score's `\tempo` only seeds the slider, so time is beats at
+      that tempo. Stopped, elapsed is where play will start (`resolveStartBeat`);
+      playing, the heard beat, refreshed ~4x a second, with the bar being heard.)
+      Elapsed / total from the conductor map.
 - [x] **LR7 · Remember the section per exercise** (2026-10-30: `sectionMemory.ts`
       + 4 tests; stored in bars under `giusto-loop-ranges`, so a change of key keeps
       it; written only by user actions — click, handle, drag, rewind — and restored
