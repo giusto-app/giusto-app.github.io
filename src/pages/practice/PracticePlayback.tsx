@@ -14,6 +14,7 @@ import {
 } from 'lilyjs'
 import LilyScore from './LilyScore'
 import RangeOverlay from './RangeOverlay'
+import TimelineStrip from './TimelineStrip'
 import { loadSection, saveSection } from './sectionMemory'
 import ExercisePicker, { recordRecentExercise } from './ExercisePicker'
 import {
@@ -985,6 +986,21 @@ export default function PracticePlayback({
     ? `${transportTime(readoutBeat, schedule.totalBeats, bpm)} · `
     : ''
 
+  /**
+   * Seek from the timeline (LR5). Stopped, the bar becomes the pause point, so
+   * Play starts there and the readout says so; playing, the take restarts there.
+   */
+  const handleSeek = useCallback((bar: number) => {
+    const beat = beatAtMeasure(bar)
+    if (isPlaying) { void startPlayback(beat); return }
+    pauseBeatRef.current = beat
+    parkAtMeasure(bar)
+    setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, beat))
+  }, [isPlaying, beatAtMeasure, startPlayback, parkAtMeasure])
+  const barCount = schedule && schedule.beatsPerBar > 0
+    ? Math.ceil(schedule.totalBeats / schedule.beatsPerBar - 1e-6)
+    : 0
+
   // ── UI ──────────────────────────────────────────────────────────────────────
   return (
     <div id="play-along" className="flex flex-col gap-4">
@@ -1136,6 +1152,18 @@ export default function PracticePlayback({
           />
         </div>
       </div>
+
+      {/* The whole tune: seek, and the range's second pair of handles (LR5). */}
+      {schedule && schedule.totalBeats > 0 && (
+        <TimelineStrip
+          barCount={barCount}
+          position={readoutBeat / schedule.totalBeats}
+          span={sectionSpan}
+          isPlaying={isPlaying}
+          onSeek={handleSeek}
+          onRangeChange={handleRangeChange}
+        />
+      )}
 
 
       {/* Options */}

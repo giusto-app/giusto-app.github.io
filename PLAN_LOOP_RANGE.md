@@ -147,7 +147,12 @@ Ordered so every step lands alone and is useful on its own.
       Mouse and pen only: on touch the same gesture scrolls the score, and the
       handles and click-click still work.) Press on a bar and drag across others to make a
       section in one gesture (click-click stays).
-- [ ] **LR5 · Timeline strip.** Ticks, elapsed fill, section box with handles,
+- [x] **LR5 · Timeline strip.** (2026-10-30: `TimelineStrip.tsx`, geometry in
+      `timeline.ts` + tests. A seek lands on the start of the bar under the pointer,
+      kept inside the section when one is set — a take loops its section, so a start
+      outside it would be wrapped back in. Stopped, it scrubs live and sets the pause
+      point; playing, it restarts the take once the press ends, not on every bar
+      crossed. The range's handles here edit the same section as the score's.) Ticks, elapsed fill, section box with handles,
       playhead; click/drag to seek (stopped: pause point; playing: restart there).
 - [x] **LR6 · Time readout.** (2026-10-30: `src/audio/transportTime.ts` + tests;
       `0:09 / 0:24 · bars 4–7 · ♩ = 80`. Not from a conductor map after all: a take

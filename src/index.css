@@ -184,6 +184,33 @@ body.light #play-along-score {
 }
 body.light .giusto-range-handle { background: rgb(192, 38, 211); }
 
+/* The timeline strip under the score (TimelineStrip.tsx, LR5). */
+.giusto-timeline-elapsed { background: rgba(251, 191, 36, 0.22); }
+.giusto-timeline-tick { background: rgba(255, 255, 255, 0.35); }
+.giusto-timeline-label { color: rgba(255, 255, 255, 0.6); }
+.giusto-timeline-range {
+  background: rgba(217, 70, 239, 0.22);
+  border-top: 2px solid rgba(217, 70, 239, 0.8);
+  border-bottom: 2px solid rgba(217, 70, 239, 0.8);
+}
+.giusto-timeline-playhead { background: #fbbf24; }
+.giusto-timeline-playhead-cap {
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #fbbf24;
+}
+body.light #play-along-timeline { background: rgba(203, 213, 225, 0.7); }
+body.light .giusto-timeline-elapsed { background: rgba(217, 119, 6, 0.2); }
+body.light .giusto-timeline-tick { background: rgba(15, 23, 42, 0.35); }
+body.light .giusto-timeline-label { color: rgba(15, 23, 42, 0.65); }
+body.light .giusto-timeline-range {
+  background: rgba(192, 38, 211, 0.16);
+  border-color: rgba(192, 38, 211, 0.75);
+}
+body.light .giusto-timeline-playhead { background: #b45309; }
+body.light .giusto-timeline-playhead-cap { border-top-color: #b45309; }
+
 /* ── Light-mode badge background flips ───────────────────────────────────── */
 /* Guide temperament badge backgrounds: dark in dark-mode, light in light-mode */
 body.light .badge-blue   { background: rgba(219, 234, 254, 0.9) !important; }

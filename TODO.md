@@ -21,8 +21,8 @@ apply on the next pass, fuchsia).
       applied on the next pass (`TakeTimeline`). `rangeDrag.ts` (+ tests).
 - [x] **LR4 · Drag to create** a range in one gesture (2026-10-30; click-click stays;
       mouse and pen, while touch keeps scrolling the score).
-- [ ] **LR5 · Timeline strip** under the score: bar ticks, elapsed fill, range box with
-      handles, playhead; click/drag to seek.
+- [x] **LR5 · Timeline strip** (2026-10-30) under the score: bar ticks, elapsed fill,
+      range box with its own handles, playhead; click/drag to seek.
 - [x] **LR6 · Time readout** (2026-10-30): elapsed / total at the transport tempo, plus the bar.
 - [x] **LR7 · Remember the range per exercise** (2026-10-30; `localStorage`, keyed by `exercise.id`, in bars).
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo.
