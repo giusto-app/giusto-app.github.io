@@ -1,6 +1,6 @@
 # Play-Along — drag a loop range over the score, and a timeline to scrub
 
-Status: **in progress — LR1 done 2026-10-30.** Builds on the section model of
+Status: **in progress — LR1 and LR2 done 2026-10-30.** Builds on the section model of
 `PLAN_PLAYBACK_START_POINT.md` (`src/audio/section.ts`, built), which already decides
 what a section *means* (sticky, Loop governs repetition, the trainer steps per pass).
 This plan changes how you **make and see** one, after studying Sightread's player
@@ -119,9 +119,17 @@ Ordered so every step lands alone and is useful on its own.
       `measureAtPoint`, `readMeasureRects`; 5 tests.) `src/pages/practice/measureBoxes.ts` + unit test over a
       fixture SVG (two systems, two staves): per-bar boxes, union over staves, a range
       split into per-system segments. Recomputed on render nonce and resize.
-- [ ] **LR2 · Range overlay, display only.** Draw the wash segments and handles from
+- [x] **LR2 · Range overlay, display only.** (2026-10-30: `rangeOverlayGeometry`
+      + 4 tests, `RangeOverlay.tsx` positioned over the score from the measure map,
+      re-read on section change, render nonce and resize; tint and its CSS removed.)
+      Draw the wash segments and handles from
       the current section; retire the per-measure SVG tint. No dragging yet.
       Witness: a wrapped 5-12 section draws two segments.
+      **Parked — lilyJS `setRange`.** lilyJS now draws a range itself from its time map
+      (`binding.setRange(from, to)`, RG1, lilyJS 7a3f4f48a), including bounds inside a
+      bar. It is not in a release yet (Giusto pins ^0.60.0), and the release number is
+      Marc's to pick. Once released, decide whether the wash moves to `setRange` (needed
+      for part-bar ranges) while the handles stay Giusto divs.
 - [ ] **LR3 · Drag handles.** Pointer capture, snap to bar lines, write `Section`;
       one-bar sections; keyboard: focusable handles, Left/Right move one bar.
       `touch-action: none` on the player. Disabled while playing (D2).

@@ -135,21 +135,35 @@ body.light .text-emerald-400 { color: #059669 !important; }
 }
 
 /* ── Play-Along section (the bars a take drills) ─────────────────────────── */
-/* lilyjs draws a `measure-area` rect behind each bar and tints THAT rather than
-   the glyphs — notes are small and mostly whitespace, so a tinted bar has to be
-   a tinted area. We reuse the same element for the section wash.
-
-   The `:not(...)` matters: lilyjs paints the parked bar with its own
-   --lily-measure-active blue on this very element, and the bar you stopped in
-   has to stay distinguishable from the passage you selected. Excluding the
-   active bar means the pause marker always wins, whatever order the two
-   stylesheets happen to load in. */
-[data-lily-element='measure-area'][data-giusto-section='true']:not([data-lily-measure-active='true']) {
-  fill: rgba(251, 191, 36, 0.16);
+/* The loop range is an overlay of divs over the score (RangeOverlay.tsx, LR2),
+   never a restyled SVG: one wash band per system, a grip handle on each end.
+   Fuchsia (decision D3), so it reads apart from lilyjs's own blue parked-bar
+   marker underneath, which the translucent wash leaves visible. */
+.giusto-range-band {
+  background: rgba(217, 70, 239, 0.15);
+  border-top: 2px solid rgba(217, 70, 239, 0.75);
+  border-bottom: 2px solid rgba(217, 70, 239, 0.75);
 }
-body.light [data-lily-element='measure-area'][data-giusto-section='true']:not([data-lily-measure-active='true']) {
-  fill: rgba(217, 119, 6, 0.14);
+.giusto-range-handle {
+  background: rgb(217, 70, 239);
+  border-radius: 3px;
 }
+/* The grip line in the middle of each handle. */
+.giusto-range-handle::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 30%;
+  bottom: 30%;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.85);
+}
+body.light .giusto-range-band {
+  background: rgba(192, 38, 211, 0.12);
+  border-color: rgba(192, 38, 211, 0.7);
+}
+body.light .giusto-range-handle { background: rgb(192, 38, 211); }
 
 /* ── Light-mode badge background flips ───────────────────────────────────── */
 /* Guide temperament badge backgrounds: dark in dark-mode, light in light-mode */

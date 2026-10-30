@@ -13,8 +13,9 @@ apply on the next pass, fuchsia).
 - [x] **LR1 · Measure map** (2026-10-30): per-bar screen boxes from lilyJS's
       `measure-area` rects, united over staves and grouped by system; range bands per
       system; bar under a point. `src/pages/practice/measureBoxes.ts` (+ tests).
-- [ ] **LR2 · Range overlay, display only**: fuchsia wash bands + handles from the
-      current section, one band per system; retire the per-measure SVG tint.
+- [x] **LR2 · Range overlay, display only** (2026-10-30): fuchsia wash bands + handles
+      over the score, one band per system; the per-measure SVG tint is retired.
+      `rangeOverlayGeometry.ts` (+ tests), `RangeOverlay.tsx`.
 - [ ] **LR3 · Drag handles**: pointer capture, snap to bar lines, write `Section`;
       one-bar sections; keyboard Left/Right; live while playing, applied on the next pass.
 - [ ] **LR4 · Drag to create** a range in one gesture (click-click stays).

@@ -12,6 +12,7 @@ import {
   type SvgPlaybackBinding,
 } from 'lilyjs'
 import LilyScore from './LilyScore'
+import RangeOverlay from './RangeOverlay'
 import ExercisePicker, { recordRecentExercise } from './ExercisePicker'
 import {
   exerciseUrl,
@@ -869,32 +870,6 @@ export default function PracticePlayback({
   }, [parkedMeasure, scoreRenderNonce])
 
   /**
-   * Tint every bar of the selected passage.
-   *
-   * lilyjs already draws a `measure-area` rect behind each bar and tints THAT
-   * for its own parked-measure marker — notes are small and mostly whitespace,
-   * so a "selected bar" has to be a selected AREA. We stamp our own attribute
-   * on the same rects and let CSS do the rest (see index.css).
-   *
-   * Re-runs on the render nonce because a resize or font swap rebuilds the SVG
-   * and takes the wash with it, exactly like the parked marker above.
-   */
-  useEffect(() => {
-    const container = scoreContainerRef.current
-    if (!container) return
-    const areas = container.querySelectorAll<SVGElement>('[data-lily-element="measure-area"][data-lily-measure]')
-    for (const area of areas) {
-      const measure = Number(area.getAttribute('data-lily-measure'))
-      // An armed selection has no end yet — tint just its start bar, so a
-      // half-made selection still reads as "something is set".
-      const inSection = sectionSpan !== null && Number.isFinite(measure) &&
-        measure >= sectionSpan.start && measure <= (sectionSpan.end ?? sectionSpan.start)
-      if (inSection) area.setAttribute('data-giusto-section', 'true')
-      else area.removeAttribute('data-giusto-section')
-    }
-  }, [sectionSpan, scoreRenderNonce])
-
-  /**
    * What the transport reads before the tempo: the passage, then where inside
    * it you stopped. A section is sticky, so it has to be named — otherwise play
    * "refuses" to start at the top and nothing says why.
@@ -1042,13 +1017,17 @@ export default function PracticePlayback({
         className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto"
         onClick={handleScoreClick}
       >
-        <LilyScore
-          source={source}
-          scoreIndex={parsed?.renderScoreIndex}
-          title={exercise.title}
-          transposeSemitones={transposeSemitones}
-          onRendered={handleRendered}
-        />
+        <div className="relative">
+          <LilyScore
+            source={source}
+            scoreIndex={parsed?.renderScoreIndex}
+            title={exercise.title}
+            transposeSemitones={transposeSemitones}
+            onRendered={handleRendered}
+          />
+          {/* The selected passage, drawn over the score (LR2). */}
+          <RangeOverlay container={scoreContainerRef.current} span={sectionSpan} renderNonce={scoreRenderNonce} />
+        </div>
       </div>
 
 
