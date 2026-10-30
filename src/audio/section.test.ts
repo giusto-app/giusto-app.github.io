@@ -6,38 +6,37 @@ const bar = (n: number) => ({ start: (n - 1) * 4, end: n * 4 })
 const click = (current: Section | null, n: number) => nextSection(current, bar(n).start, bar(n).end)
 
 describe('nextSection', () => {
-  test('the first click arms a section with no end — it plays to the end of the tune', () => {
-    expect(click(null, 5)).toEqual({ startBeat: 16, endBeat: null })
+  test('a click selects that bar alone — nothing waits for a second click', () => {
+    expect(click(null, 5)).toEqual({ startBeat: 16, endBeat: 20 })
   })
 
-  test('a second click forward closes the span through the end of that bar', () => {
-    // Bars 5–12 -> beats [16, 48): the end is EXCLUSIVE and covers all of bar 12.
-    expect(click(click(null, 5), 12)).toEqual({ startBeat: 16, endBeat: 48 })
+  test('a click on the bar right after or right before the selection extends it', () => {
+    expect(click(click(null, 5), 6)).toEqual({ startBeat: 16, endBeat: 24 })
+    expect(click({ startBeat: 16, endBeat: 24 }, 4)).toEqual({ startBeat: 12, endBeat: 24 })
   })
 
-  test('a second click backward means the same span — click order does not matter', () => {
-    expect(click(click(null, 12), 5)).toEqual({ startBeat: 16, endBeat: 48 })
+  test('a click on a bar that is not next to the selection starts over on that bar', () => {
+    expect(click({ startBeat: 16, endBeat: 24 }, 9)).toEqual({ startBeat: 32, endBeat: 36 })
+    expect(click({ startBeat: 16, endBeat: 24 }, 2)).toEqual({ startBeat: 4, endBeat: 8 })
   })
 
-  test('a ONE-BAR section is unreachable by clicking — the same bar clears instead', () => {
-    // Consequence of the clear-on-reclick rule, not an oversight. If drilling a
-    // single bar turns out to matter, the second click on the armed bar has to
-    // close a one-bar span and clearing has to move elsewhere.
-    expect(nextSection({ startBeat: 16, endBeat: null }, 16, 20)).toBeNull()
+  test('a click inside a selection of several bars keeps it', () => {
+    expect(click({ startBeat: 16, endBeat: 48 }, 9)).toEqual({ startBeat: 16, endBeat: 48 })
+    expect(click({ startBeat: 16, endBeat: 48 }, 5)).toEqual({ startBeat: 16, endBeat: 48 })
   })
 
-  test('clicking the start bar again clears an armed selection', () => {
+  test('a click on the one selected bar clears it', () => {
     expect(click(click(null, 5), 5)).toBeNull()
   })
 
-  test('clicking the start bar again clears a complete selection', () => {
-    expect(click({ startBeat: 16, endBeat: 48 }, 5)).toBeNull()
+  test('a section armed by an earlier version counts as its start bar', () => {
+    expect(click({ startBeat: 16, endBeat: null }, 6)).toEqual({ startBeat: 16, endBeat: 24 })
+    expect(click({ startBeat: 16, endBeat: null }, 5)).toBeNull()
   })
 
-  test('clicking elsewhere in a complete selection starts fresh, never extends it', () => {
-    // Mis-clicking an end should leave you re-aiming, not holding a wider drill.
-    expect(click({ startBeat: 16, endBeat: 48 }, 9)).toEqual({ startBeat: 32, endBeat: null })
-    expect(click({ startBeat: 16, endBeat: 48 }, 3)).toEqual({ startBeat: 8, endBeat: null })
+  test('a 9/8 bar of 4.5 quarter notes extends on its exact bounds', () => {
+    // Bars of 4.5 QN: bar 2 is [4.5, 9), bar 3 is [9, 13.5).
+    expect(nextSection({ startBeat: 4.5, endBeat: 9 }, 9, 13.5)).toEqual({ startBeat: 4.5, endBeat: 13.5 })
   })
 })
 

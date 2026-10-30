@@ -1020,7 +1020,9 @@ export default function PracticePlayback({
   }, [activeChordIndex, lightTheme, scoreRenderNonce])
 
   /**
-   * Click a bar to select it as the start point.
+   * Click a bar to select it, or extend the selection by the bar next to it;
+   * any other bar starts over there (`nextSection`, LR12). The handles stretch
+   * a selection further.
    *
    * The rendered elements carry a score-wide `data-lily-measure` (lilyJS
    * >= 0.11), so the nearest element under the pointer names the bar without

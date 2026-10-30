@@ -18,33 +18,31 @@ export interface TakeWindow {
 }
 
 /**
- * Fold a bar click into the selection. `barStart`/`barEnd` are the clicked bar's
- * own bounds — `beatAtMeasure(n)` and `beatAtMeasure(n + 1)`.
+ * Fold a bar click into the selection (PLAN_LOOP_RANGE.md, LR12, Marc
+ * 2026-10-30). `barStart`/`barEnd` are the clicked bar's own bounds —
+ * `beatAtMeasure(n)` and `beatAtMeasure(n + 1)`.
  *
- * | Current      | Click            | Result                                    |
- * | ------------ | ---------------- | ----------------------------------------- |
- * | none         | bar N            | armed at N (plays N to the end of the tune)|
- * | any          | its start bar    | cleared                                   |
- * | armed at N   | bar M            | the span N–M, in either click order       |
- * | complete     | any other bar    | a fresh armed selection there             |
+ * | Current            | Click                         | Result                          |
+ * | ------------------ | ----------------------------- | ------------------------------- |
+ * | none               | bar N                         | bar N alone (a one-bar section) |
+ * | any                | a bar right before or after it| extended to include that bar    |
+ * | several bars       | a bar inside it               | unchanged                       |
+ * | one bar            | that bar                      | cleared                         |
+ * | any                | any other bar                 | bar N alone: a fresh selection  |
  *
- * The second click is order-independent because clicking 12 then 5 plainly means
- * 5–12; rejecting it would be a puzzle rather than a safeguard. A click on a
- * COMPLETE section never extends it — after mis-clicking an end you want a fresh
- * start, not a wider drill.
+ * A click never leaves the selection waiting for a second one: it always
+ * makes a complete section, and the range's handles stretch it. A section
+ * armed by an earlier version (`endBeat` null) counts as its start bar.
  */
 export function nextSection(current: Section | null, barStart: number, barEnd: number): Section | null {
-  if (!current) return { startBeat: barStart, endBeat: null }
-  if (barStart === current.startBeat) return null
-  if (current.endBeat !== null) return { startBeat: barStart, endBeat: null }
-
-  // Armed: close the span. Bars are uniform, so the armed bar's own end is its
-  // start plus one bar — the only way to close a BACKWARDS selection, where the
-  // armed bar becomes the last one.
-  if (barStart < current.startBeat) {
-    return { startBeat: barStart, endBeat: current.startBeat + (barEnd - barStart) }
-  }
-  return { startBeat: current.startBeat, endBeat: barEnd }
+  const only: Section = { startBeat: barStart, endBeat: barEnd }
+  if (!current) return only
+  const curEnd = current.endBeat ?? current.startBeat + (barEnd - barStart)
+  if (barStart === current.startBeat && barEnd === curEnd) return null
+  if (barStart >= current.startBeat && barEnd <= curEnd) return { startBeat: current.startBeat, endBeat: curEnd }
+  if (barEnd === current.startBeat) return { startBeat: barStart, endBeat: curEnd }
+  if (barStart === curEnd) return { startBeat: current.startBeat, endBeat: barEnd }
+  return only
 }
 
 /**

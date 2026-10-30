@@ -168,6 +168,10 @@ Ordered so every step lands alone and is useful on its own.
       re-published tune is shorter.) (`localStorage`, keyed by
       `exercise.id`), if D1 says so.
 
+- [x] **LR12 · Click selects one bar; the handles stretch it** (2026-10-30, D4):
+      `nextSection` rewritten (`src/audio/section.ts`, 7 tests); checked in the app —
+      3 → bar 3, 4 → 3–4, 5 → 3–5, 4 → kept, 8 → bar 8, 8 → cleared.
+
 Further ideas from the same page, not part of the loop work (one line each):
 
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo,
@@ -208,6 +212,12 @@ Further ideas from the same page, not part of the loop work (one line each):
 
 
 ## Decided (Marc, 2026-10-30)
+
+- **D4 · A click makes a whole selection** (LR12). Clicking a bar selects that bar
+  alone and shows the handles to stretch it; nothing waits for a second click. A click
+  on the bar right before or after the selection extends it; a click on any bar not
+  next to it starts over on that bar. (Chosen here, Marc may revisit: a click inside a
+  selection of several bars keeps it, and a click on the one selected bar clears it.)
 
 - **D1 · Remember the section per exercise** across sessions (`localStorage`, keyed by
   `exercise.id`) — LR7 is in scope.
