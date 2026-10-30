@@ -1,6 +1,6 @@
 # Play-Along — drag a loop range over the score, and a timeline to scrub
 
-Status: **LR1-LR7 and LR9-LR12 done 2026-10-30; LR8 kept for later.** Builds on the section model of
+Status: **done 2026-10-30 — LR1-LR12.** Builds on the section model of
 `PLAN_PLAYBACK_START_POINT.md` (`src/audio/section.ts`, built), which already decides
 what a section *means* (sticky, Loop governs repetition, the trainer steps per pass).
 This plan changes how you **make and see** one, after studying Sightread's player
@@ -174,8 +174,11 @@ Ordered so every step lands alone and is useful on its own.
 
 Further ideas from the same page, not part of the loop work (one line each):
 
-- [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo,
-      separate from the slider and the trainer. *Kept for later (Marc, 2026-10-30).*
+- [x] **LR8 · Playback speed** (2026-10-30): a Speed menu (50-120 %) beside Key. The
+      clock runs at the transport tempo times the speed — the slider, or the trainer's
+      current step, so a ramp keeps its plan — and changes live while playing. The
+      slider keeps the tempo you set; the readout adds "· 75 %" and its times follow
+      the speed (0:24 → 0:32 at 75 %). `src/audio/playbackSpeed.ts` + tests.
 - [x] **LR9 · Part focus** (2026-10-30): a "Hear" row — Backing / Violin + backing /
       Violin only. Giusto never sounded the violin line before, so this adds a guide
       voice for it (`src/audio/melodySchedule.ts` + tests, from lilyjs's playback

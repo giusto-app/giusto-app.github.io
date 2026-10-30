@@ -34,6 +34,7 @@ import { PlaybackClock } from '../../audio/playbackClock'
 import { nextSection, resolveStartBeat, takeWindow, TakeTimeline, type Section } from '../../audio/section'
 import { playWoodblock } from '../../audio/woodblock'
 import { transportTime } from '../../audio/transportTime'
+import { effectiveBpm, PLAYBACK_SPEEDS, speedLabel } from '../../audio/playbackSpeed'
 import { melodyNotes, PART_FOCUS_OPTIONS, partGains, type PartFocus } from '../../audio/melodySchedule'
 import { WaitTracker, waitNotes, waitNotesInWindow, type WaitNote } from '../../audio/waitMode'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
@@ -167,6 +168,8 @@ export default function PracticePlayback({
   const [showPicker, setShowPicker] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [bpm, setBpm] = useState(DEFAULT_BPM)
+  /** Playback speed over the transport tempo (LR8); 1 = as set. */
+  const [speed, setSpeed] = useState(1)
   const [countIn, setCountIn] = useState(true)
   const [loop, setLoop] = useState(false)
   // The click is a reference, not the music: default it BELOW the backing so
@@ -253,6 +256,8 @@ export default function PracticePlayback({
   // drag instead of snapping back (the ramp steps FROM the latest value).
   const bpmRef = useRef(bpm)
   bpmRef.current = bpm
+  const speedRef = useRef(speed)
+  speedRef.current = speed
   const scoreContainerRef = useRef<HTMLDivElement | null>(null)
   /** The current render's time map (lilyjs `onTimeMap`). */
   const timeMapRef = useRef<SystemTimeMap[]>([])
@@ -555,7 +560,7 @@ export default function PracticePlayback({
     // applies from the next pass on (D2, PLAN_LOOP_RANGE.md).
     const timeline = new TakeTimeline(take, shouldLoop, () => takeWindow(sectionRef.current, schedule.totalBeats))
     const clock = new PlaybackClock(ctx, {
-      bpm: startBpm,
+      bpm: effectiveBpm(startBpm, speedRef.current),
       beatsPerMeasure: schedule.beatsPerBar,
       // Whole clock beats only (9/8 bars are 4.5 QN — round up).
       countInBeats: countIn ? Math.ceil(schedule.beatsPerBar) : 0,
@@ -627,8 +632,9 @@ export default function PracticePlayback({
           }
           lastTimedBpm = next
         }
-        if (next !== null && next !== clock.bpm) {
-          clock.setBpm(next)
+        // `next` is a transport tempo; the clock runs it at the playback speed.
+        if (next !== null && next !== bpmRef.current) {
+          clock.setBpm(effectiveBpm(next, speedRef.current))
           setBpm(next)
           bpmRef.current = next
         }
@@ -838,7 +844,7 @@ export default function PracticePlayback({
   }, [waitMode, isWaiting, isPlaying, stopWaiting, startWaiting, pausePlayback, playFromResumePoint])
 
   // Live control forwarding
-  useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
+  useEffect(() => { clockRef.current?.setBpm(effectiveBpm(bpm, speed)) }, [bpm, speed])
   // Backing selection/volume are volume-gated (gapless): the inactive instrument
   // is silenced but keeps running, so switching needs no restart.
   useEffect(() => {
@@ -1129,7 +1135,7 @@ export default function PracticePlayback({
     ? (heardBeat ?? takeStartBeatRef.current)
     : (resolveStartBeat(pauseBeatRef.current, sectionRef.current) ?? 0)
   const timeReadout = schedule && schedule.totalBeats > 0
-    ? `${transportTime(readoutBeat, schedule.totalBeats, bpm)} · `
+    ? `${transportTime(readoutBeat, schedule.totalBeats, effectiveBpm(bpm, speed))} · `
     : ''
 
   /**
@@ -1198,7 +1204,7 @@ export default function PracticePlayback({
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>Tempo</span>
               <span className="tabular-nums">
-                {isCountingIn ? 'count-in…' : waitNote ? waitReadout(waitNote, waitHolding) : `${timeReadout}${transportPosition}♩ = ${bpm}`}
+                {isCountingIn ? 'count-in…' : waitNote ? waitReadout(waitNote, waitHolding) : `${timeReadout}${transportPosition}♩ = ${bpm}${speed !== 1 ? ` · ${speedLabel(speed)}` : ''}`}
               </span>
             </div>
             <input
@@ -1329,6 +1335,20 @@ export default function PracticePlayback({
             className="accent-amber-400" />
           Loop
         </label>
+
+        <div>
+          <label htmlFor="play-along-speed" className="text-xs text-gray-500 mb-1 block">Speed</label>
+          <select
+            id="play-along-speed"
+            value={speed}
+            onChange={e => setSpeed(Number(e.target.value))}
+            className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1.5 text-sm text-gray-200"
+          >
+            {PLAYBACK_SPEEDS.map(v => (
+              <option key={v} value={v}>{v === 1 ? '100 % (as set)' : speedLabel(v)}</option>
+            ))}
+          </select>
+        </div>
 
         <div>
           <label className="text-xs text-gray-500 mb-1 block">Key</label>

@@ -39,7 +39,7 @@ apply on the next pass, fuchsia).
 - [x] **LR7 · Remember the range per exercise** (2026-10-30; `localStorage`, keyed by `exercise.id`, in bars).
 - [x] **LR12 · Click selects one bar** (2026-10-30): the handles stretch it; a bar next
       to the selection extends it, any other bar starts over there.
-- [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo. *Kept for later (Marc, 2026-10-30).*
+- [x] **LR8 · Playback speed** (2026-10-30): 50-120 % over the transport tempo (slider or trainer step).
 - [x] **LR9 · Part focus** (2026-10-30): hear the backing, the violin line with it, or the violin line alone.
 - [x] **LR10 · Wait mode** (2026-10-30): the cursor holds on each note until the mic hears it in tune.
 - [x] **LR11 · Long scores** (2026-10-30, lilyJS 0.62): past 32 bars, one SVG per system with `content-visibility: auto`
