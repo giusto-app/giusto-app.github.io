@@ -150,7 +150,11 @@ Ordered so every step lands alone and is useful on its own.
 - [ ] **LR5 · Timeline strip.** Ticks, elapsed fill, section box with handles,
       playhead; click/drag to seek (stopped: pause point; playing: restart there).
 - [ ] **LR6 · Time readout.** Elapsed / total from the conductor map.
-- [ ] **LR7 · Remember the section per exercise** (`localStorage`, keyed by
+- [x] **LR7 · Remember the section per exercise** (2026-10-30: `sectionMemory.ts`
+      + 4 tests; stored in bars under `giusto-loop-ranges`, so a change of key keeps
+      it; written only by user actions — click, handle, drag, rewind — and restored
+      on the exercise's first parsed schedule, dropped or trimmed when a
+      re-published tune is shorter.) (`localStorage`, keyed by
       `exercise.id`), if D1 says so.
 
 Further ideas from the same page, not part of the loop work (one line each):

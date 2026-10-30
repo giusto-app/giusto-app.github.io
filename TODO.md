@@ -24,7 +24,7 @@ apply on the next pass, fuchsia).
 - [ ] **LR5 · Timeline strip** under the score: bar ticks, elapsed fill, range box with
       handles, playhead; click/drag to seek.
 - [ ] **LR6 · Time readout**: elapsed / total from the conductor map, plus the bar.
-- [ ] **LR7 · Remember the range per exercise** (`localStorage`, keyed by `exercise.id`).
+- [x] **LR7 · Remember the range per exercise** (2026-10-30; `localStorage`, keyed by `exercise.id`, in bars).
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo.
 - [ ] **LR9 · Part focus**: solo or mute the violin line or the backing.
 - [ ] **LR10 · Wait mode**: hold on a note until the mic hears it in tune (own plan).

@@ -14,6 +14,7 @@ import {
 } from 'lilyjs'
 import LilyScore from './LilyScore'
 import RangeOverlay from './RangeOverlay'
+import { loadSection, saveSection } from './sectionMemory'
 import ExercisePicker, { recordRecentExercise } from './ExercisePicker'
 import {
   exerciseUrl,
@@ -407,16 +408,30 @@ export default function PracticePlayback({
   }, [measureAtBeat])
 
   /**
+   * A section the USER set (click, handle, drag, rewind): applied, and
+   * remembered for this exercise (LR7). The reset on changing exercise goes
+   * through applySection alone, or it would forget the range it should keep.
+   */
+  const exerciseIdRef = useRef(exercise.id)
+  exerciseIdRef.current = exercise.id
+  const chooseSection = useCallback((section: Section | null) => {
+    applySection(section)
+    saveSection(localStorage, exerciseIdRef.current, section
+      ? { start: measureAtBeat(section.startBeat), end: section.endBeat === null ? null : measureAtBeat(section.endBeat - 1e-6) }
+      : null)
+  }, [applySection, measureAtBeat])
+
+  /**
    * Back to the top. The one escape hatch that forgets EVERYTHING — section,
    * pause point, parked marker — which is what makes a sticky section safe to
    * have: there is always one obvious way out of it.
    */
   const rewind = useCallback(() => {
     stopPlayback()
-    applySection(null)
+    chooseSection(null)
     pauseBeatRef.current = null
     parkAtMeasure(null)
-  }, [stopPlayback, parkAtMeasure, applySection])
+  }, [stopPlayback, parkAtMeasure, chooseSection])
 
   /**
    * Stop, but keep BOTH the pause point and the on-screen position.
@@ -735,6 +750,27 @@ export default function PracticePlayback({
     setParkedMeasure(null)
   }, [exercise.id, applySection])
 
+  /**
+   * ...and then its remembered range, if it has one (LR7). Runs on the parsed
+   * SCHEDULE rather than on the exercise id: bar -> beat needs this tune's
+   * meter, and in the commit where the id changes the schedule is still the
+   * previous tune's. Once per exercise, so a re-parse (a new key) keeps
+   * whatever the range has become since.
+   */
+  const restoredForRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!schedule || restoredForRef.current === exerciseIdRef.current) return
+    restoredForRef.current = exerciseIdRef.current
+    const barCount = Math.ceil(schedule.totalBeats / schedule.beatsPerBar - 1e-6)
+    const span = loadSection(localStorage, exerciseIdRef.current, barCount)
+    if (!span) return
+    applySection({
+      startBeat: beatAtMeasure(span.start),
+      endBeat: span.end === null ? null : beatAtMeasure(span.end + 1),
+    })
+    parkAtMeasure(span.start)
+  }, [schedule, applySection, beatAtMeasure, parkAtMeasure])
+
   const handlePick = useCallback((entry: ExerciseCatalogEntry) => {
     stopPlayback()
     recordRecentExercise(entry.id)
@@ -846,7 +882,7 @@ export default function PracticePlayback({
     const measure = Number(raw)
     if (!Number.isFinite(measure)) return
     const section = nextSection(sectionRef.current, beatAtMeasure(measure), beatAtMeasure(measure + 1))
-    applySection(section)
+    chooseSection(section)
     // An explicit aim outranks wherever you happened to pause — otherwise
     // clicking bar 5 and pressing play would still resume at bar 7.
     pauseBeatRef.current = null
@@ -854,7 +890,7 @@ export default function PracticePlayback({
     setActiveChordIndex(section
       ? printedChordIndexAtBeat(printedOnsetsRef.current, section.startBeat)
       : -1)
-  }, [isPlaying, beatAtMeasure, measureAtBeat, parkAtMeasure, applySection])
+  }, [isPlaying, beatAtMeasure, measureAtBeat, parkAtMeasure, chooseSection])
 
   /**
    * A range handle moved (LR3). Same effect as clicking the bars, but live
@@ -867,12 +903,12 @@ export default function PracticePlayback({
       startBeat: beatAtMeasure(span.start),
       endBeat: span.end === null ? null : beatAtMeasure(span.end + 1),
     }
-    applySection(section)
+    chooseSection(section)
     if (isPlaying) return
     pauseBeatRef.current = null
     parkAtMeasure(span.start)
     setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, section.startBeat))
-  }, [isPlaying, beatAtMeasure, parkAtMeasure, applySection])
+  }, [isPlaying, beatAtMeasure, parkAtMeasure, chooseSection])
 
   const handleRendered = useCallback((container: HTMLDivElement) => {
     scoreContainerRef.current = container
