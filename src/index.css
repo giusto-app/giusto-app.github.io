@@ -135,14 +135,17 @@ body.light .text-emerald-400 { color: #059669 !important; }
 }
 
 /* ── Play-Along section (the bars a take drills) ─────────────────────────── */
-/* The loop range is an overlay of divs over the score (RangeOverlay.tsx, LR2-3),
-   never a restyled SVG: one wash band per system, a grip handle on each end.
-   Fuchsia (decision D3), so it reads apart from lilyjs's own blue parked-bar
-   marker underneath, which the translucent wash leaves visible. */
-.giusto-range-band {
-  background: rgba(217, 70, 239, 0.15);
-  border-top: 2px solid rgba(217, 70, 239, 0.75);
-  border-bottom: 2px solid rgba(217, 70, 239, 0.75);
+/* The loop range (RangeOverlay.tsx, LR2-3): lilyjs draws the wash, one band per
+   system behind the notation (`setRange`), coloured by its --lily-range-*
+   variables; the grip handles are our divs on the bands' ends. Fuchsia
+   (decision D3), so it reads apart from lilyjs's own blue parked-bar marker. */
+#play-along-score {
+  --lily-range-fill: rgba(217, 70, 239, 0.18);
+  --lily-range-stroke: rgba(217, 70, 239, 0.75);
+}
+body.light #play-along-score {
+  --lily-range-fill: rgba(192, 38, 211, 0.14);
+  --lily-range-stroke: rgba(192, 38, 211, 0.7);
 }
 .giusto-range-handle {
   background: rgb(217, 70, 239);
@@ -178,10 +181,6 @@ body.light .text-emerald-400 { color: #059669 !important; }
   width: 2px;
   border-radius: 1px;
   background: rgba(255, 255, 255, 0.85);
-}
-body.light .giusto-range-band {
-  background: rgba(192, 38, 211, 0.12);
-  border-color: rgba(192, 38, 211, 0.7);
 }
 body.light .giusto-range-handle { background: rgb(192, 38, 211); }
 

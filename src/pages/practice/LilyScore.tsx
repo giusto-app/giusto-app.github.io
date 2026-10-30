@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose } from 'lilyjs'
+import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose, type SystemTimeMap } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
 // Renders with the current lilyJS engraving engine, so titles, chord symbols,
@@ -27,9 +27,11 @@ interface LilyScoreProps {
   className?: string
   /** Called after each render with the container (for overlays/highlights). */
   onRendered?: (container: HTMLDivElement) => void
+  /** Where musical time sits on each system, after every render (lilyjs >= 0.61). */
+  onTimeMap?: (timeMap: SystemTimeMap[]) => void
 }
 
-export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered }: LilyScoreProps) {
+export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered, onTimeMap }: LilyScoreProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -50,9 +52,9 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
         }
         // The parsed doc is ours (fresh from parseSource) — safe to retitle.
         if (title) score.title = title
-        renderScore(el, score, { width, theme: 'dark' })
+        renderScore(el, score, { width, theme: 'dark', onTimeMap })
       } else {
-        renderLily(el, source, { width, theme: 'dark' })
+        renderLily(el, source, { width, theme: 'dark', onTimeMap })
       }
       onRendered?.(el)
       // lilyjs re-renders asynchronously once music fonts finish loading; run
@@ -63,7 +65,7 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
       console.error('lilyjs render failed', err)
       el.textContent = 'Score rendering failed'
     }
-  }, [source, scoreIndex, width, transposeSemitones, onRendered])
+  }, [source, scoreIndex, width, transposeSemitones, onRendered, onTimeMap])
 
   // [&_svg]: the fill-the-container scaling must survive lilyjs's async
   // font-ready re-render (which replaces the <svg>), so it lives in CSS

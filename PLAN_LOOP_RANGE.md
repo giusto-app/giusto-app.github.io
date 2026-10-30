@@ -125,11 +125,11 @@ Ordered so every step lands alone and is useful on its own.
       Draw the wash segments and handles from
       the current section; retire the per-measure SVG tint. No dragging yet.
       Witness: a wrapped 5-12 section draws two segments.
-      **Parked — lilyJS `setRange`.** lilyJS now draws a range itself from its time map
-      (`binding.setRange(from, to)`, RG1, lilyJS 7a3f4f48a), including bounds inside a
-      bar. It is not in a release yet (Giusto pins ^0.60.0), and the release number is
-      Marc's to pick. Once released, decide whether the wash moves to `setRange` (needed
-      for part-bar ranges) while the handles stay Giusto divs.
+      **Moved to lilyJS `setRange` (2026-10-30, lilyJS 0.61).** lilyJS draws the wash
+      from its time map, one band per system behind the notation, coloured by
+      `--lily-range-fill` / `--lily-range-stroke`; Giusto places its handles on the
+      drawn bands' screen boxes. Bars are told apart by `data-lily-system-index`,
+      no longer by vertical overlap. `onTimeMap` is the re-render signal.
 - [x] **LR3 · Drag handles.** (2026-10-30: `rangeDrag.ts` snaps a handle to the
       nearest bar line — a start takes the bar it opens, an end the bar it closes —
       swaps handles dragged past each other, steps one bar per arrow key; 7 tests.

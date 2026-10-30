@@ -10,6 +10,7 @@ import {
   type MusicDocumentBlock,
   type Score,
   type SvgPlaybackBinding,
+  type SystemTimeMap,
 } from 'lilyjs'
 import LilyScore from './LilyScore'
 import RangeOverlay from './RangeOverlay'
@@ -217,6 +218,8 @@ export default function PracticePlayback({
   const bpmRef = useRef(bpm)
   bpmRef.current = bpm
   const scoreContainerRef = useRef<HTMLDivElement | null>(null)
+  /** The current render's time map (lilyjs `onTimeMap`). */
+  const timeMapRef = useRef<SystemTimeMap[]>([])
 
   // Note highlight state (see the lilyJS editor's useScorePlayback): a rAF
   // loop maps the audio clock to a fractional beat and stamps the sounding
@@ -307,16 +310,26 @@ export default function PracticePlayback({
     if (schedule?.bpm) setBpm(Math.min(208, Math.max(40, schedule.bpm)))
   }, [schedule])
 
+  /**
+   * The playback binding for the current SVG, created on first use after each
+   * render. It carries the render's time map, which is what `setRange` draws
+   * the loop range from.
+   */
+  const scoreBinding = useCallback((): SvgPlaybackBinding | null => {
+    const container = scoreContainerRef.current
+    if (!noteBindingRef.current && container) {
+      noteBindingRef.current = createSvgPlaybackBinding(container, { timeMap: timeMapRef.current })
+    }
+    return noteBindingRef.current
+  }, [])
+
   /** Stamp exactly `ids` as the active note events in the rendered SVG. */
   const applyNoteHighlight = useCallback((ids: string[]) => {
     const key = ids.join('\0')
     if (key === noteKeyRef.current) return
     noteKeyRef.current = key
-    const container = scoreContainerRef.current
-    if (!container) return
-    if (!noteBindingRef.current) noteBindingRef.current = createSvgPlaybackBinding(container)
-    noteBindingRef.current.setActiveEvents(ids)
-  }, [])
+    scoreBinding()?.setActiveEvents(ids)
+  }, [scoreBinding])
 
   // ── Transport ───────────────────────────────────────────────────────────────
   /**
@@ -374,12 +387,8 @@ export default function PracticePlayback({
    */
   const parkAtMeasure = useCallback((measure: number | null) => {
     setParkedMeasure(measure)
-    const container = scoreContainerRef.current
-    if (!noteBindingRef.current && container) {
-      noteBindingRef.current = createSvgPlaybackBinding(container)
-    }
-    noteBindingRef.current?.setActiveMeasure(measure)
-  }, [])
+    scoreBinding()?.setActiveMeasure(measure)
+  }, [scoreBinding])
 
   /**
    * The only writer of the section, so the ref the transport reads and the wash
@@ -875,6 +884,18 @@ export default function PracticePlayback({
   }, [])
 
   /**
+   * lilyjs reports the time map right after it puts each SVG in place — the
+   * first render AND the re-render once fonts load — so this is the reliable
+   * "the SVG changed" signal: drop the stale binding and redraw what we draw.
+   */
+  const handleTimeMap = useCallback((timeMap: SystemTimeMap[]) => {
+    timeMapRef.current = timeMap
+    noteBindingRef.current = null
+    noteKeyRef.current = ''
+    setScoreRenderNonce(n => n + 1)
+  }, [])
+
+  /**
    * Re-mark the parked bar after the SVG is rebuilt.
    *
    * The note-cursor loop only recreates the binding WHILE PLAYING, so a resize
@@ -883,12 +904,8 @@ export default function PracticePlayback({
    */
   useEffect(() => {
     if (parkedMeasure === null) return
-    const container = scoreContainerRef.current
-    if (!noteBindingRef.current && container) {
-      noteBindingRef.current = createSvgPlaybackBinding(container)
-    }
-    noteBindingRef.current?.setActiveMeasure(parkedMeasure)
-  }, [parkedMeasure, scoreRenderNonce])
+    scoreBinding()?.setActiveMeasure(parkedMeasure)
+  }, [parkedMeasure, scoreRenderNonce, scoreBinding])
 
   /**
    * What the transport reads before the tempo: the passage, then where inside
@@ -1047,12 +1064,14 @@ export default function PracticePlayback({
             title={exercise.title}
             transposeSemitones={transposeSemitones}
             onRendered={handleRendered}
+            onTimeMap={handleTimeMap}
           />
           {/* The selected passage, drawn over the score, with drag handles (LR2-LR3). */}
           <RangeOverlay
             container={scoreContainerRef.current}
             span={sectionSpan}
             renderNonce={scoreRenderNonce}
+            binding={scoreBinding}
             onChange={handleRangeChange}
           />
         </div>

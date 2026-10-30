@@ -6,7 +6,7 @@ import { dragRange, moveHandle, snapBar, stepHandle } from './rangeDrag'
 const rects: MeasureRect[] = []
 for (let m = 1; m <= 8; m++) {
   const row = Math.floor((m - 1) / 4), col = (m - 1) % 4
-  rects.push({ measure: m, left: 60 + col * 100, right: 160 + col * 100, top: 40 + row * 120, bottom: 90 + row * 120 })
+  rects.push({ measure: m, system: row, left: 60 + col * 100, right: 160 + col * 100, top: 40 + row * 120, bottom: 90 + row * 120 })
 }
 const boxes = measureBoxes(rects)
 

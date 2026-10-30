@@ -1,12 +1,13 @@
 /**
- * What the loop-range overlay draws for a section (PLAN_LOOP_RANGE.md, LR2):
- * one wash band per system the section touches, the start handle on the first
- * band's left edge and the end handle on the last band's right edge.
+ * The loop range's ends (PLAN_LOOP_RANGE.md, LR2): which bars a section spans,
+ * as lilyjs `setRange` bounds, and where its two handles sit on the bands
+ * lilyjs drew — the start handle on the first band's left edge, the end handle
+ * on the last band's right edge.
  *
- * Pure, so it is unit-tested without a DOM; `RangeOverlay.tsx` only positions
- * divs from it.
+ * Pure, so it is unit-tested without a DOM; `RangeOverlay.tsx` reads the drawn
+ * bands' screen boxes and positions divs from this.
  */
-import { rangeSegments, type MeasureBox, type RangeSegment } from './measureBoxes'
+import type { RangeBound } from 'lilyjs'
 
 /** A section as the player holds it: bars, 1-based; `end` is null while armed. */
 export interface SectionSpan {
@@ -14,32 +15,44 @@ export interface SectionSpan {
   end: number | null
 }
 
+/** One drawn band (`data-lily-element="range-band"`), in px relative to the score container. */
+export interface BandBox {
+  system: number
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
 /** A handle: a vertical grip at `x`, as tall as its band. */
 export interface RangeHandle {
   x: number
   top: number
   bottom: number
-  /** The bar line it sits on is this bar's opening (start) or closing (end) one. */
+  /** The bar it bounds: the first bar for the start handle, the last for the end. */
   measure: number
 }
 
-export interface RangeOverlayGeometry {
-  bands: RangeSegment[]
+export interface RangeHandles {
   start: RangeHandle
   /** None while the section is armed (its end not chosen yet). */
   end: RangeHandle | null
 }
 
-export function rangeOverlayGeometry(boxes: readonly MeasureBox[], span: SectionSpan | null): RangeOverlayGeometry | null {
-  if (span === null) return null
-  // An armed section shows its start bar, so a half-made selection still reads
-  // as "something is set" (the rule the old per-bar tint had).
-  const bands = rangeSegments(boxes, span.start, span.end ?? span.start)
-  if (bands.length === 0) return null
-  const first = bands[0]!, last = bands[bands.length - 1]!
+/**
+ * The `setRange` bounds for a section. An armed section shows its start bar,
+ * so a half-made selection still reads as "something is set".
+ */
+export function rangeBounds(span: SectionSpan): [RangeBound, RangeBound] {
+  return [{ measure: span.start }, { measure: span.end ?? span.start }]
+}
+
+export function rangeHandles(bands: readonly BandBox[], span: SectionSpan | null): RangeHandles | null {
+  if (span === null || bands.length === 0) return null
+  const sorted = [...bands].sort((a, b) => a.system - b.system)
+  const first = sorted[0]!, last = sorted[sorted.length - 1]!
   return {
-    bands,
-    start: { x: first.left, top: first.top, bottom: first.bottom, measure: first.firstMeasure },
-    end: span.end === null ? null : { x: last.right, top: last.top, bottom: last.bottom, measure: last.lastMeasure },
+    start: { x: first.left, top: first.top, bottom: first.bottom, measure: span.start },
+    end: span.end === null ? null : { x: last.right, top: last.top, bottom: last.bottom, measure: span.end },
   }
 }

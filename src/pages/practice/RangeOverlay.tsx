@@ -1,28 +1,32 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import type { SvgPlaybackBinding } from 'lilyjs'
 import { measureBoxes, readMeasureRects, type MeasureBox } from './measureBoxes'
 import { moveHandle, snapBar, stepHandle, type RangeEdge } from './rangeDrag'
-import { rangeOverlayGeometry, type SectionSpan } from './rangeOverlayGeometry'
+import { rangeBounds, rangeHandles, type BandBox, type RangeHandles, type SectionSpan } from './rangeOverlayGeometry'
 
 /**
- * The loop range drawn over the score (PLAN_LOOP_RANGE.md, LR2-LR3; after
- * Sightread's player): a fuchsia wash per system with a grip handle on each
- * end. Dragging a handle snaps it to the nearest bar line; a focused handle
- * moves one bar with Left/Right. The wash itself takes no pointer events, so
- * a click still reaches the bar underneath (`handleScoreClick`).
+ * The loop range on the score (PLAN_LOOP_RANGE.md, LR2-LR3; after Sightread's
+ * player). lilyjs draws the fuchsia wash itself, one band per system BEHIND
+ * the notation (`binding.setRange`, lilyjs 0.61, coloured by the
+ * `--lily-range-*` variables in index.css); this component adds the two grip
+ * handles on the drawn bands' ends. Dragging a handle snaps it to the nearest
+ * bar line; a focused handle moves one bar with Left/Right.
  *
- * Positioned absolutely in the score's wrapper, in px read from lilyjs's
- * `measure-area` rects. Re-read when the section changes, when the SVG is
- * rebuilt (`renderNonce`), and when the container resizes — the SVG rescales
- * with CSS, so a resize moves every bar without a re-render.
+ * Redrawn when the section changes and when the SVG is rebuilt
+ * (`renderNonce`); the handles are re-placed when the container resizes, since
+ * the SVG rescales with CSS and moves every band without a re-render.
  */
-export default function RangeOverlay({ container, span, renderNonce, onChange }: {
+export default function RangeOverlay({ container, span, renderNonce, binding, onChange }: {
   container: HTMLElement | null
   span: SectionSpan | null
   renderNonce: number
+  /** The score's playback binding, created with the render's time map. */
+  binding: () => SvgPlaybackBinding | null
   /** A handle moved the range. Called on every bar a drag crosses. */
   onChange: (span: SectionSpan) => void
 }) {
   const [boxes, setBoxes] = useState<MeasureBox[]>([])
+  const [handles, setHandles] = useState<RangeHandles | null>(null)
   // The latest span for pointer handlers, which outlive the render they were
   // made in while a drag crosses several bars.
   const spanRef = useRef(span)
@@ -32,13 +36,23 @@ export default function RangeOverlay({ container, span, renderNonce, onChange }:
   const focusAfterSwap = useRef<RangeEdge | null>(null)
 
   useEffect(() => {
-    if (!container) { setBoxes([]); return }
-    const update = () => setBoxes(measureBoxes(readMeasureRects(container)))
-    update()
-    const observer = new ResizeObserver(update)
+    if (!container) { setBoxes([]); setHandles(null); return }
+    const b = binding()
+    if (span) {
+      const [from, to] = rangeBounds(span)
+      b?.setRange(from, to)
+    } else {
+      b?.setRange(null)
+    }
+    const place = () => {
+      setBoxes(measureBoxes(readMeasureRects(container)))
+      setHandles(rangeHandles(readBandBoxes(container), span))
+    }
+    place()
+    const observer = new ResizeObserver(place)
     observer.observe(container)
     return () => observer.disconnect()
-  }, [container, renderNonce])
+  }, [container, span, renderNonce, binding])
 
   // A keyboard step that swapped the handles keeps the focus on the end that
   // moved, which is now the other handle.
@@ -47,8 +61,7 @@ export default function RangeOverlay({ container, span, renderNonce, onChange }:
     if (edge) { focusAfterSwap.current = null; handleRefs.current[edge]?.focus() }
   })
 
-  const geometry = rangeOverlayGeometry(boxes, span)
-  if (!geometry || !container) return null
+  if (!handles || !container) return null
   const lastBar = boxes.reduce((m, b) => Math.max(m, b.measure), 1)
 
   const apply = (next: { span: SectionSpan; edge: RangeEdge }) => {
@@ -85,16 +98,8 @@ export default function RangeOverlay({ container, span, renderNonce, onChange }:
 
   return (
     <div id="play-along-range" className="pointer-events-none absolute inset-0">
-      {geometry.bands.map((b) => (
-        <div
-          key={b.system}
-          className="giusto-range-band absolute"
-          aria-hidden="true"
-          style={{ left: b.left, top: b.top, width: b.right - b.left, height: b.bottom - b.top }}
-        />
-      ))}
       {(['start', 'end'] as const).map((edge) => {
-        const h = edge === 'start' ? geometry.start : geometry.end
+        const h = edge === 'start' ? handles.start : handles.end
         if (!h) return null
         return (
           <div
@@ -121,4 +126,17 @@ export default function RangeOverlay({ container, span, renderNonce, onChange }:
       })}
     </div>
   )
+}
+
+/** The bands lilyjs drew (`setRange`), in px relative to `container`. */
+function readBandBoxes(container: HTMLElement): BandBox[] {
+  const origin = container.getBoundingClientRect()
+  const out: BandBox[] = []
+  for (const el of container.querySelectorAll<SVGGraphicsElement>('[data-lily-element="range-band"]')) {
+    const r = el.getBoundingClientRect()
+    const system = Number(el.getAttribute('data-lily-system'))
+    if (!Number.isFinite(system) || r.width <= 0) continue
+    out.push({ system, left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })
+  }
+  return out
 }
