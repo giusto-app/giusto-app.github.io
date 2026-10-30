@@ -15,17 +15,19 @@ globalThis.requestAnimationFrame ??= (() => 0) as typeof requestAnimationFrame
 globalThis.cancelAnimationFrame ??= (() => {}) as typeof cancelAnimationFrame
 
 /** Beats the transport actually schedules when started from `fromBeat`. */
-function scheduledBeats(fromBeat: number | undefined): number[] {
+function scheduledBeats(fromBeat: number | undefined, options?: { countIn?: boolean }): number[] {
   const ctx = { currentTime: 0 } as unknown as AudioContext
   const clock = new PlaybackClock(ctx, {
     bpm: 120,
     beatsPerMeasure: 4,
     countInBeats: 4,
     totalBeats: 64,
+    // Schedule several beats at once, so a count-in and what follows it are seen.
+    lookaheadS: 4,
   })
   const beats: number[] = []
   clock.onBeat(e => beats.push(e.beat))
-  clock.start(fromBeat)
+  clock.start(fromBeat, options)
   clock.stop()
   return beats
 }
@@ -51,5 +53,23 @@ describe('PlaybackClock resume snaps to the beat grid', () => {
 
   test('omitting the resume point still starts at the count-in', () => {
     expect(scheduledBeats(undefined)[0]).toBe(-4)
+  })
+})
+
+describe('PlaybackClock counts in a take that starts at a section', () => {
+  test('a section start is counted in with negative beats, then plays from the section', () => {
+    // Bars 4-7 of a 4/4 tune: the take starts at beat 12. The count-in must
+    // stay negative, or the cursor and the timeline read it as bars 3 (USER
+    // 2026-10-30: "the measure tracker started moving while only the count-in
+    // was playing").
+    expect(scheduledBeats(12, { countIn: true }).slice(0, 6)).toEqual([-4, -3, -2, -1, 12, 13])
+  })
+
+  test('a section at bar 1 is counted in too', () => {
+    expect(scheduledBeats(0, { countIn: true }).slice(0, 5)).toEqual([-4, -3, -2, -1, 0])
+  })
+
+  test('a resume is not counted in', () => {
+    expect(scheduledBeats(12).slice(0, 2)).toEqual([12, 13])
   })
 })

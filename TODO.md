@@ -25,8 +25,8 @@ apply on the next pass, fuchsia).
       range box with its own handles, playhead; click/drag to seek.
 - [x] **LR6 · Time readout** (2026-10-30): elapsed / total at the transport tempo, plus the bar.
 - [x] **LR7 · Remember the range per exercise** (2026-10-30; `localStorage`, keyed by `exercise.id`, in bars).
-- [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo.
-- [ ] **LR9 · Part focus**: solo or mute the violin line or the backing.
+- [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo. *Kept for later (Marc, 2026-10-30).*
+- [x] **LR9 · Part focus** (2026-10-30): hear the backing, the violin line with it, or the violin line alone.
 - [ ] **LR10 · Wait mode**: hold on a note until the mic hears it in tune (own plan).
 - [ ] **LR11 · Long scores**: one SVG per system with `content-visibility: auto`
       (needs a lilyJS output option first).

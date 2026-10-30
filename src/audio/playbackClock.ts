@@ -43,6 +43,8 @@ export class PlaybackClock {
   private timer: ReturnType<typeof setInterval> | null = null
   private rafId: number | null = null
   private nextBeat = 0
+  /** Where a counted-in take jumps once its count-in (negative beats) is done. */
+  private resumeAt: number | null = null
   private nextBeatTime = 0
   private beatCallbacks = new Set<BeatCallback>()
   private visualCallbacks = new Set<VisualCallback>()
@@ -106,10 +108,14 @@ export class PlaybackClock {
   /**
    * Must be preceded by a resumed AudioContext (user gesture).
    *
-   * `fromBeat` resumes mid-piece (space-bar pause/resume) instead of restarting
-   * at the count-in; it skips the count-in, which belongs to starting a take.
+   * `fromBeat` starts mid-piece instead of at beat 0. A RESUME (space-bar
+   * pause/resume) skips the count-in, which belongs to starting a take; a take
+   * that starts at a section passes `countIn: true` and is counted in like one
+   * from the top. Count-in beats stay NEGATIVE either way — the transport tells
+   * the count-in from music by the sign — and the beat after the last of them
+   * is `fromBeat`.
    */
-  start(fromBeat?: number): void {
+  start(fromBeat?: number, options: { countIn?: boolean } = {}): void {
     if (this._isPlaying) return
     this._isPlaying = true
     // The beat grid is INTEGRAL: scheduleAhead() advances by whole beats, so a
@@ -119,9 +125,10 @@ export class PlaybackClock {
     // so the highlight shows exactly where you stopped — so it has to be
     // snapped here. Floor, not round: restart at the beginning of the beat you
     // paused inside, rather than skipping the rest of it.
-    this.nextBeat = fromBeat !== undefined
-      ? Math.floor(fromBeat)
-      : -this.opts.countInBeats || 0 // `|| 0` normalizes -0
+    const countIn = fromBeat === undefined || options.countIn === true
+    const startBeat = fromBeat !== undefined ? Math.floor(fromBeat) : 0
+    this.nextBeat = countIn && this.opts.countInBeats > 0 ? -this.opts.countInBeats : startBeat
+    this.resumeAt = this.nextBeat < 0 && startBeat !== 0 ? startBeat : null
     // Small offset so the first beat is comfortably schedulable.
     this.nextBeatTime = this.ctx.currentTime + 0.05
     this.visualQueue = []
@@ -162,6 +169,10 @@ export class PlaybackClock {
       this.visualQueue.push(event)
       this.nextBeatTime += secondsPerBeat(this._bpm)
       this.nextBeat += 1
+      if (this.nextBeat === 0 && this.resumeAt !== null) {
+        this.nextBeat = this.resumeAt
+        this.resumeAt = null
+      }
     }
   }
 

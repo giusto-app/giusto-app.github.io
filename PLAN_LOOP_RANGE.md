@@ -171,9 +171,13 @@ Ordered so every step lands alone and is useful on its own.
 Further ideas from the same page, not part of the loop work (one line each):
 
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo,
-      separate from the slider and the trainer.
-- [ ] **LR9 · Part focus**: solo or mute the violin line or the backing (Sightread's
-      both/left/right is the same idea for piano hands).
+      separate from the slider and the trainer. *Kept for later (Marc, 2026-10-30).*
+- [x] **LR9 · Part focus** (2026-10-30): a "Hear" row — Backing / Violin + backing /
+      Violin only. Giusto never sounded the violin line before, so this adds a guide
+      voice for it (`src/audio/melodySchedule.ts` + tests, from lilyjs's playback
+      timeline, which merges ties), played through the strings samples. Volume-gated
+      like the backing, so it switches mid-take. Default "Backing", today's sound.
+      (Sightread's both/left/right is the same idea for piano hands.)
 - [ ] **LR10 · Wait mode**: hold the cursor on a note until the mic hears it in tune
       (Giusto already has pitch detection). Biggest of the list; its own plan.
 - [ ] **LR11 · Long scores**: one SVG per system with `content-visibility: auto`.

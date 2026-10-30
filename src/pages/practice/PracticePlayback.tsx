@@ -33,6 +33,7 @@ import { PlaybackClock } from '../../audio/playbackClock'
 import { nextSection, resolveStartBeat, takeWindow, TakeTimeline, type Section } from '../../audio/section'
 import { playWoodblock } from '../../audio/woodblock'
 import { transportTime } from '../../audio/transportTime'
+import { melodyNotes, PART_FOCUS_OPTIONS, partGains, type PartFocus } from '../../audio/melodySchedule'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
 import {
@@ -74,6 +75,8 @@ interface PracticePlaybackProps {
 }
 
 const DEFAULT_BPM = 80
+/** The guide voice's level when part focus lets it sound (LR9). */
+const MELODY_VOL = 0.6
 
 function isScoreBlock(b: MusicDocumentBlock): b is { type: 'score'; score: Score } {
   return b.type === 'score' && 'score' in b
@@ -161,6 +164,10 @@ export default function PracticePlayback({
   // Backing: Off / the tuning drone / an ensemble, with a single volume.
   const [backingSelection, setBackingSelection] = useState<BackingSelection>('drone')
   const [backingVol, setBackingVol] = useState(0.65)
+  // Part focus (LR9): the backing alone (as before), the violin line with it, or alone.
+  const [partFocus, setPartFocus] = useState<PartFocus>('backing')
+  const partFocusRef = useRef(partFocus)
+  partFocusRef.current = partFocus
   // Transpose the exercise to a target key (0 = original).
   const [transposeSemitones, setTransposeSemitones] = useState(0)
   const [activeChordIndex, setActiveChordIndex] = useState<number>(-1)
@@ -176,6 +183,8 @@ export default function PracticePlayback({
   const [isCountingIn, setIsCountingIn] = useState(false)
   /** The beat being heard, for the time readout (LR6); refreshed ~4x a second, not per frame. */
   const [heardBeat, setHeardBeat] = useState<number | null>(null)
+  /** Where the running take began, so the readout holds there through the count-in. */
+  const takeStartBeatRef = useRef(0)
   const [shareStatus, setShareStatus] = useState('')
   const [sharedLinkError, setSharedLinkError] = useState<string | null>(null)
   const [trainerCompleted, setTrainerCompleted] = useState(false)
@@ -198,6 +207,9 @@ export default function PracticePlayback({
   const clockRef = useRef<PlaybackClock | null>(null)
   const droneRef = useRef<ChordDrone | null>(null)
   const instrumentsRef = useRef<Record<InstrumentId, SampledInstrument> | null>(null)
+  /** The violin line's guide voice (LR9), alive for a take like the backing. */
+  const melodyRef = useRef<SampledInstrument | null>(null)
+  const melodyNotesRef = useRef<ReturnType<typeof melodyNotes>>([])
   // Read live inside the clock's onBeat closure so switching backing takes
   // effect without restarting playback.
   const backingSelectionRef = useRef(backingSelection)
@@ -295,6 +307,9 @@ export default function PracticePlayback({
     [parsed],
   )
   printedOnsetsRef.current = printedOnsets
+  // The violin line, from the same (transposed) score the backing follows.
+  const melody = useMemo(() => (parsed?.score ? melodyNotes(parsed.score) : []), [parsed])
+  melodyNotesRef.current = melody
   noteEventsRef.current = noteEvents
 
   const backingArrangement = useMemo<BackingLayer[]>(
@@ -358,6 +373,8 @@ export default function PracticePlayback({
       for (const inst of Object.values(instrumentsRef.current)) inst.dispose()
       instrumentsRef.current = null
     }
+    melodyRef.current?.dispose()
+    melodyRef.current = null
     if (noteRafRef.current !== null) cancelAnimationFrame(noteRafRef.current)
     noteRafRef.current = null
     noteAnchorRef.current = null
@@ -461,7 +478,7 @@ export default function PracticePlayback({
     }
   }, [stopPlayback, applyNoteHighlight, parkAtMeasure, measureAtBeat])
 
-  const startPlayback = useCallback(async (resumeFromBeat?: number) => {
+  const startPlayback = useCallback(async (resumeFromBeat?: number, startOptions: { countIn?: boolean } = {}) => {
     if (!schedule || schedule.totalBeats === 0) return
     stopPlayback()
     setTrainerCompleted(false)
@@ -477,11 +494,12 @@ export default function PracticePlayback({
     const drone = new ChordDrone(ctx, {
       soundType: DRONE_SOUND,
       concertPitchHz: concertPitch,
-      volume: droneActive ? backingVol * 0.4 : 0,
+      volume: droneActive && partGains(partFocusRef.current).backing ? backingVol * 0.4 : 0,
       destination: out,
     })
     await drone.prepare(schedule.events.map(e => e.rootPc))
-    const instrumentVol = stringsActive ? backingVol : 0
+    const gains = partGains(partFocusRef.current)
+    const instrumentVol = stringsActive && gains.backing ? backingVol : 0
     const prep = prepareMidisRef.current
     const instruments: Record<InstrumentId, SampledInstrument> = {
       strings: new SampledInstrument(ctx, SAMPLE_SETS.strings, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
@@ -491,8 +509,11 @@ export default function PracticePlayback({
       guitarJazz: new SampledInstrument(ctx, SAMPLE_SETS.guitarJazz, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
       piano: new SampledInstrument(ctx, SAMPLE_SETS.piano, { concertPitchHz: concertPitch, volume: instrumentVol, destination: out }),
     }
+    // The violin line plays through the strings samples, gated by part focus.
+    const melodyVoice = new SampledInstrument(ctx, SAMPLE_SETS.strings, { concertPitchHz: concertPitch, volume: gains.melody ? MELODY_VOL : 0, destination: out })
     // Preload every instrument's notes so switching styles never falls back to synth.
     await Promise.all([
+      melodyVoice.prepare([...new Set(melodyNotesRef.current.map(n => n.midi))]),
       instruments.strings.prepare(prep.strings),
       instruments.bass.prepare(prep.bass),
       instruments.guitar.prepare(prep.guitar),
@@ -617,6 +638,15 @@ export default function PracticePlayback({
           }
         }
       }
+      // Always scheduled, gated by volume, so part focus switches mid-take.
+      for (const note of backingNotesInWindow(melodyNotesRef.current, beat, beat + 1)) {
+        melodyVoice.playNote(
+          note.midi,
+          e.time + (note.startBeat - beat) * secondsPer,
+          note.durationBeats * secondsPer,
+          note.velocity,
+        )
+      }
     })
 
     clock.onVisualBeat(rawBeat => {
@@ -653,6 +683,7 @@ export default function PracticePlayback({
     clock.onEnded(() => {
       drone.stop()
       for (const inst of Object.values(instruments)) inst.stop()
+      melodyVoice.stop()
       if (plan) setTrainerCompleted(true)
       stopPlayback()
       // stopPlayback leaves a clean score, but a section outlives the take —
@@ -665,9 +696,11 @@ export default function PracticePlayback({
     clockRef.current = clock
     droneRef.current = drone
     instrumentsRef.current = instruments
+    melodyRef.current = melodyVoice
     noteBindingRef.current?.setActiveMeasure(null)
     setParkedMeasure(null)
-    clock.start(resumeFromBeat)
+    takeStartBeatRef.current = resumeFromBeat ?? 0
+    clock.start(resumeFromBeat, startOptions)
     // Claimed here, not before the preload above: silence while samples fetch
     // is expected, and would otherwise read as a fault.
     claimPlayback('practice')
@@ -690,11 +723,14 @@ export default function PracticePlayback({
    * somewhere the music doesn't isn't training anything.
    */
   const playFromResumePoint = useCallback(() => {
+    // A resume continues where you paused; anything else STARTS a take — at
+    // its section or the top — and is counted in when Count-in is on.
+    const resuming = !trainerPlan && pauseBeatRef.current !== null
     const from = trainerPlan
       ? sectionRef.current?.startBeat
       : resolveStartBeat(pauseBeatRef.current, sectionRef.current)
     pauseBeatRef.current = null
-    void startPlayback(from)
+    void startPlayback(from, { countIn: !resuming })
   }, [startPlayback, trainerPlan])
 
   // Live control forwarding
@@ -702,10 +738,12 @@ export default function PracticePlayback({
   // Backing selection/volume are volume-gated (gapless): the inactive instrument
   // is silenced but keeps running, so switching needs no restart.
   useEffect(() => {
-    droneRef.current?.setVolume(backingSelection === 'drone' ? backingVol * 0.4 : 0)
-    const vol = isEnsemble(backingSelection) ? backingVol : 0
+    const gains = partGains(partFocus)
+    droneRef.current?.setVolume(backingSelection === 'drone' && gains.backing ? backingVol * 0.4 : 0)
+    const vol = isEnsemble(backingSelection) && gains.backing ? backingVol : 0
     if (instrumentsRef.current) for (const inst of Object.values(instrumentsRef.current)) inst.setVolume(vol)
-  }, [backingSelection, backingVol])
+    melodyRef.current?.setVolume(gains.melody ? MELODY_VOL : 0)
+  }, [backingSelection, backingVol, partFocus])
 
 
   // Gypsy jazz swings against the bass, not a click — default its metronome off.
@@ -980,7 +1018,8 @@ export default function PracticePlayback({
    * Refs are read here on purpose: every path that moves them also sets state.
    */
   const readoutBeat = isPlaying
-    ? (heardBeat ?? 0)
+    // Nothing heard yet (the count-in): hold at the beat the take starts on.
+    ? (heardBeat ?? takeStartBeatRef.current)
     : (resolveStartBeat(pauseBeatRef.current, sectionRef.current) ?? 0)
   const timeReadout = schedule && schedule.totalBeats > 0
     ? `${transportTime(readoutBeat, schedule.totalBeats, bpm)} · `
@@ -1320,6 +1359,11 @@ export default function PracticePlayback({
             })()}
           </>
         )}
+      </div>
+
+      {/* Part focus (LR9): what a take lets you hear. */}
+      <div id="play-along-part-focus" className="rounded-xl bg-gray-800/40 p-3">
+        <SegRow label="Hear" value={partFocus} onChange={setPartFocus} options={PART_FOCUS_OPTIONS} />
       </div>
 
       {/* Backing — the user picks WHO plays (or a tuning drone, or silence);
