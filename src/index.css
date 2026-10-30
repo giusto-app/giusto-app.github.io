@@ -135,7 +135,7 @@ body.light .text-emerald-400 { color: #059669 !important; }
 }
 
 /* ── Play-Along section (the bars a take drills) ─────────────────────────── */
-/* The loop range is an overlay of divs over the score (RangeOverlay.tsx, LR2),
+/* The loop range is an overlay of divs over the score (RangeOverlay.tsx, LR2-3),
    never a restyled SVG: one wash band per system, a grip handle on each end.
    Fuchsia (decision D3), so it reads apart from lilyjs's own blue parked-bar
    marker underneath, which the translucent wash leaves visible. */
@@ -147,6 +147,26 @@ body.light .text-emerald-400 { color: #059669 !important; }
 .giusto-range-handle {
   background: rgb(217, 70, 239);
   border-radius: 3px;
+  /* A drag must never scroll the score or select text (Sightread's player). */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.giusto-range-handle[data-range-handle='start'] { cursor: w-resize; }
+.giusto-range-handle[data-range-handle='end'] { cursor: e-resize; }
+.giusto-range-handle:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 2px;
+}
+/* A wider hit area than the 12 px grip, for fingers. */
+.giusto-range-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  right: -8px;
 }
 /* The grip line in the middle of each handle. */
 .giusto-range-handle::after {

@@ -70,26 +70,69 @@ export function takeWindow(section: Section | null, totalBeats: number): TakeWin
 }
 
 /**
- * Which pass of the take a beat falls in, counting from 0 at the take's start.
+ * Clock beats -> tune beats for one take, one PASS at a time.
  *
- * Floor division rather than testing the boundary for equality: in compound
- * meters a bar is a fractional number of quarter notes (9/8 = 4.5), so a
- * `(beat - start) % length === 0` test lands on nothing and a per-loop tempo
- * ramp never steps at all.
+ * Each pass of a looping take has its own window, read from `nextWindow` when
+ * the pass is first reached: moving the range while playing changes the NEXT
+ * pass and lets the current one finish (decision D2, PLAN_LOOP_RANGE.md). The
+ * clock's beats keep counting up across passes; a pass starts where the
+ * previous one ended.
+ *
+ * Passes are appended lazily by whoever reaches a new beat first. The audio
+ * scheduler runs ahead of the visual callbacks, so by the time the cursor asks
+ * about a beat, its pass already exists and both agree on the window.
+ *
+ * The first pass's clock beats ARE tune beats (`clock.start(resumeBeat)`), so a
+ * take resumed at bar 7 inside a 5-12 loop still wraps back to 5.
  */
-export function passIndex(beat: number, w: TakeWindow): number {
-  if (w.lengthBeats <= 0) return 0
-  return Math.floor((beat - w.startBeat) / w.lengthBeats)
-}
+export class TakeTimeline {
+  private readonly passes: { rawStart: number; window: TakeWindow }[]
 
-/**
- * Raw clock beat -> tune beat, wrapping inside the window while looping.
- *
- * The window is fixed by the SECTION, not by where this take happened to start:
- * resuming at bar 7 inside a 5–12 loop still wraps back to 5.
- */
-export function beatInTake(rawBeat: number, w: TakeWindow, looping: boolean): number {
-  if (!looping || w.lengthBeats <= 0) return rawBeat
-  const rel = (rawBeat - w.startBeat) % w.lengthBeats
-  return w.startBeat + (rel < 0 ? rel + w.lengthBeats : rel)
+  constructor(first: TakeWindow, private readonly looping: boolean, private readonly nextWindow: () => TakeWindow) {
+    this.passes = [{ rawStart: first.startBeat, window: first }]
+  }
+
+  /** The tune beat a clock beat plays. Not looping: the clock beat itself. */
+  tuneBeat(raw: number): number {
+    if (!this.looping) return raw
+    const first = this.passes[0]!
+    if (raw < first.rawStart) {
+      // Before the first pass's start: wrap into the first window, never
+      // divide by an empty one.
+      const len = first.window.lengthBeats
+      if (len <= 0) return raw
+      const rel = (raw - first.rawStart) % len
+      return first.window.startBeat + (rel < 0 ? rel + len : rel)
+    }
+    const pass = this.passAt(raw)
+    return pass.window.startBeat + (raw - pass.rawStart)
+  }
+
+  /**
+   * Which pass a clock beat falls in, 0 for the first. Found by the pass's
+   * span, never by an equality test on a boundary: a 9/8 bar is 4.5 quarter
+   * notes, so the clock's whole beats rarely land on one.
+   */
+  passIndex(raw: number): number {
+    if (!this.looping || raw < this.passes[0]!.rawStart) return 0
+    this.passAt(raw)
+    for (let i = this.passes.length - 1; i >= 0; i--) if (raw >= this.passes[i]!.rawStart) return i
+    return 0
+  }
+
+  /** The window of the pass a clock beat falls in. */
+  windowAt(raw: number): TakeWindow {
+    return !this.looping || raw < this.passes[0]!.rawStart ? this.passes[0]!.window : this.passAt(raw).window
+  }
+
+  private passAt(raw: number) {
+    let last = this.passes[this.passes.length - 1]!
+    // An empty window never ends, so it cannot divide time into passes.
+    while (last.window.lengthBeats > 0 && raw >= last.rawStart + last.window.lengthBeats) {
+      last = { rawStart: last.rawStart + last.window.lengthBeats, window: this.nextWindow() }
+      this.passes.push(last)
+    }
+    for (let i = this.passes.length - 1; i > 0; i--) if (raw >= this.passes[i]!.rawStart) return this.passes[i]!
+    return this.passes[0]!
+  }
 }

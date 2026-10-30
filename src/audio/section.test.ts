@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { beatInTake, nextSection, passIndex, resolveStartBeat, takeWindow, type Section } from './section'
+import { nextSection, resolveStartBeat, takeWindow, TakeTimeline, type Section } from './section'
 
 // 4/4 throughout: bar N spans beats [(N-1)*4, N*4).
 const bar = (n: number) => ({ start: (n - 1) * 4, end: n * 4 })
@@ -77,14 +77,14 @@ describe('takeWindow', () => {
   })
 })
 
-describe('passIndex', () => {
+describe('TakeTimeline', () => {
+  const whole = takeWindow(null, 64)
   const section = takeWindow({ startBeat: 16, endBeat: 48 }, 64)
+  const fixed = (w: typeof section, looping = true) => new TakeTimeline(w, looping, () => w)
 
   test('counts passes from zero at the take start', () => {
-    expect(passIndex(16, section)).toBe(0)
-    expect(passIndex(47, section)).toBe(0)
-    expect(passIndex(48, section)).toBe(1)
-    expect(passIndex(80, section)).toBe(2)
+    const t = fixed(section)
+    expect([16, 47, 48, 80].map((b) => t.passIndex(b))).toEqual([0, 0, 1, 2])
   })
 
   test('a 9/8 bar is 4.5 quarter notes — an equality test on the boundary would never fire', () => {
@@ -92,47 +92,59 @@ describe('passIndex', () => {
     // (beat - start) % 36 is never exactly 0 once the start is fractional.
     const jig = takeWindow({ startBeat: 18, endBeat: 54 }, 90) // bars 5-12 of a 9/8 tune
     expect(jig).toEqual({ startBeat: 18, lengthBeats: 36 })
-    expect(passIndex(53, jig)).toBe(0)
-    expect(passIndex(54, jig)).toBe(1)
+    const t = fixed(jig)
     // The beat the clock actually lands on after a wrap is not the boundary
     // itself, and the pass count still advances exactly once.
-    expect(passIndex(55, jig)).toBe(1)
-    expect(passIndex(90, jig)).toBe(2)
+    expect([53, 54, 55, 90].map((b) => t.passIndex(b))).toEqual([0, 1, 1, 2])
   })
-
-  test('a zero-length window cannot divide by zero', () => {
-    expect(passIndex(9, { startBeat: 4, lengthBeats: 0 })).toBe(0)
-  })
-})
-
-describe('beatInTake', () => {
-  const whole = takeWindow(null, 64)
-  const section = takeWindow({ startBeat: 16, endBeat: 48 }, 64)
 
   test('not looping passes the raw beat straight through', () => {
-    expect(beatInTake(70, whole, false)).toBe(70)
-    expect(beatInTake(70, section, false)).toBe(70)
+    expect(fixed(whole, false).tuneBeat(70)).toBe(70)
+    expect(fixed(section, false).tuneBeat(70)).toBe(70)
   })
 
   test('with no section it reduces to the old whole-tune modulo', () => {
-    expect(beatInTake(64, whole, true)).toBe(0)
-    expect(beatInTake(70, whole, true)).toBe(6)
+    const t = fixed(whole)
+    expect([64, 70].map((b) => t.tuneBeat(b))).toEqual([0, 6])
   })
 
   test('a section wraps back to its own start, not to the top of the tune', () => {
-    expect(beatInTake(16, section, true)).toBe(16)
-    expect(beatInTake(47.5, section, true)).toBe(47.5)
-    expect(beatInTake(48, section, true)).toBe(16)
-    expect(beatInTake(50, section, true)).toBe(18)
+    const t = fixed(section)
+    expect([16, 47.5, 48, 50].map((b) => t.tuneBeat(b))).toEqual([16, 47.5, 16, 18])
   })
 
   test('a take resumed mid-section still wraps to the section start', () => {
     // Paused at bar 7 (beat 24) inside a 5–12 loop: the window is fixed by the
     // SECTION, so the wrap goes to 16, never back to 24.
-    expect(beatInTake(80, section, true)).toBe(16)
+    expect(fixed(section).tuneBeat(80)).toBe(16)
   })
 
   test('a zero-length window cannot divide by zero', () => {
-    expect(beatInTake(9, { startBeat: 4, lengthBeats: 0 }, true)).toBe(9)
+    const t = fixed({ startBeat: 4, lengthBeats: 0 })
+    expect([t.tuneBeat(9), t.passIndex(9)]).toEqual([9, 0])
+  })
+
+  test('a range moved mid-pass takes effect on the NEXT pass', () => {
+    // Looping bars 5-12; during the first pass the range is dragged to 9-10.
+    let current = section
+    const t = new TakeTimeline(section, true, () => current)
+    expect(t.tuneBeat(40)).toBe(40)               // bar 11, first pass
+    current = takeWindow({ startBeat: 32, endBeat: 40 }, 64)
+    expect(t.tuneBeat(47)).toBe(47)               // the first pass finishes on 5-12
+    expect(t.tuneBeat(48)).toBe(32)               // the second starts at bar 9
+    expect(t.windowAt(48)).toEqual({ startBeat: 32, lengthBeats: 8 })
+    expect(t.tuneBeat(55)).toBe(39)
+    expect(t.tuneBeat(56)).toBe(32)               // and loops 9-10 from then on
+    expect(t.passIndex(56)).toBe(2)
+  })
+
+  test('the cursor, behind the scheduler, reads the window its pass was played with', () => {
+    let current = section
+    const t = new TakeTimeline(section, true, () => current)
+    current = takeWindow({ startBeat: 32, endBeat: 40 }, 64)
+    expect(t.tuneBeat(49)).toBe(33)               // the scheduler reaches pass 2
+    current = takeWindow({ startBeat: 0, endBeat: 8 }, 64)
+    expect(t.tuneBeat(46)).toBe(46)               // the cursor is still in pass 1
+    expect(t.tuneBeat(50)).toBe(34)               // pass 2 kept its window
   })
 })

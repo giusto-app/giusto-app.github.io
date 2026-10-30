@@ -16,8 +16,9 @@ apply on the next pass, fuchsia).
 - [x] **LR2 · Range overlay, display only** (2026-10-30): fuchsia wash bands + handles
       over the score, one band per system; the per-measure SVG tint is retired.
       `rangeOverlayGeometry.ts` (+ tests), `RangeOverlay.tsx`.
-- [ ] **LR3 · Drag handles**: pointer capture, snap to bar lines, write `Section`;
-      one-bar sections; keyboard Left/Right; live while playing, applied on the next pass.
+- [x] **LR3 · Drag handles** (2026-10-30): pointer capture, snap to the nearest bar
+      line, write `Section`; one-bar sections; keyboard Left/Right; live while playing,
+      applied on the next pass (`TakeTimeline`). `rangeDrag.ts` (+ tests).
 - [ ] **LR4 · Drag to create** a range in one gesture (click-click stays).
 - [ ] **LR5 · Timeline strip** under the score: bar ticks, elapsed fill, range box with
       handles, playhead; click/drag to seek.

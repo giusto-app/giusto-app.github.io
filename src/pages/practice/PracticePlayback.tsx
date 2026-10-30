@@ -27,7 +27,7 @@ import {
 import { getOutputNode, resumeAudioContext } from '../../audio/audioContext'
 import { claimPlayback, releasePlayback } from '../../audio/audibility'
 import { PlaybackClock } from '../../audio/playbackClock'
-import { beatInTake, nextSection, passIndex, resolveStartBeat, takeWindow, type Section } from '../../audio/section'
+import { nextSection, resolveStartBeat, takeWindow, TakeTimeline, type Section } from '../../audio/section'
 import { playWoodblock } from '../../audio/woodblock'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
@@ -482,6 +482,9 @@ export default function PracticePlayback({
     // case. `takeEnd` is absolute, matching PlaybackClock's totalBeats.
     const take = takeWindow(sectionRef.current, schedule.totalBeats)
     const takeEnd = take.startBeat + take.lengthBeats
+    // Each later pass reads the section afresh, so a range moved while playing
+    // applies from the next pass on (D2, PLAN_LOOP_RANGE.md).
+    const timeline = new TakeTimeline(take, shouldLoop, () => takeWindow(sectionRef.current, schedule.totalBeats))
     const clock = new PlaybackClock(ctx, {
       bpm: startBpm,
       beatsPerMeasure: schedule.beatsPerBar,
@@ -495,11 +498,11 @@ export default function PracticePlayback({
 
     // Trainer ramp state. Timed offset re-anchors the ramp after a manual
     // slider drag: the drag shifts the whole remaining ramp, it doesn't fight it.
-    // `lastPass` counts completed passes of the take by floor division rather
-    // than testing the boundary for equality: a bar is a fractional number of
-    // quarter notes in compound meters (9/8 = 4.5), so an exact `% === 0` test
-    // lands on nothing and the tempo never steps. Seeded from the first beat so
-    // it holds wherever the take begins.
+    // `lastPass` counts completed passes of the take by the timeline's pass
+    // spans rather than testing the boundary for equality: a bar is a
+    // fractional number of quarter notes in compound meters (9/8 = 4.5), so an
+    // exact `% === 0` test lands on nothing and the tempo never steps. Seeded
+    // from the first beat so it holds wherever the take begins.
     let lastPass: number | null = null
     let rampStartTime: number | null = null
     let timedOffset = 0
@@ -529,7 +532,7 @@ export default function PracticePlayback({
         if (plan.mode === 'perLoop') {
           // A "loop" is one pass of the TAKE, so drilling bars 5–12 steps the
           // tempo every eight bars, not every time the whole tune would end.
-          const pass = passIndex(e.beat, take)
+          const pass = timeline.passIndex(e.beat)
           if (lastPass === null) {
             lastPass = pass
           } else if (pass > lastPass) {
@@ -538,7 +541,7 @@ export default function PracticePlayback({
             next = bpmForLoop({ ...plan, startBpm: bpmRef.current }, 1)
             // Once the target tempo is set, play that repetition in full and
             // let the clock end naturally at its final boundary.
-            if (next === plan.endBpm) clock.setTotalBeats(e.beat + take.lengthBeats)
+            if (next === plan.endBpm) clock.setTotalBeats(e.beat + timeline.windowAt(e.beat).lengthBeats)
           }
         } else if (e.isDownbeat) {
           const raw = bpmAtElapsed(plan, e.time - rampStartTime)
@@ -562,7 +565,7 @@ export default function PracticePlayback({
         }
       }
 
-      const beat = beatInTake(e.beat, take, shouldLoop)
+      const beat = timeline.tuneBeat(e.beat)
       const secondsPer = 60 / clock.bpm
       const selection = backingSelectionRef.current
 
@@ -592,7 +595,7 @@ export default function PracticePlayback({
       // Anchor for the sub-beat note cursor: this beat became audible ~now.
       noteAnchorRef.current = { beat: rawBeat, time: ctx.currentTime }
       if (rawBeat < 0) return
-      const beat = beatInTake(rawBeat, take, shouldLoop)
+      const beat = timeline.tuneBeat(rawBeat)
       setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, beat))
     })
 
@@ -605,7 +608,7 @@ export default function PracticePlayback({
       } else {
         const secondsPer = 60 / clock.bpm
         const frac = Math.min(0.999, Math.max(0, (ctx.currentTime - anchor.time) / secondsPer))
-        const beat = beatInTake(anchor.beat, take, shouldLoop) + frac
+        const beat = timeline.tuneBeat(anchor.beat) + frac
         soundingBeatRef.current = beat
         applyNoteHighlight(noteEventIdsAtBeat(noteEvents, beat))
       }
@@ -844,6 +847,24 @@ export default function PracticePlayback({
       : -1)
   }, [isPlaying, beatAtMeasure, measureAtBeat, parkAtMeasure, applySection])
 
+  /**
+   * A range handle moved (LR3). Same effect as clicking the bars, but live
+   * while playing: the transport reads the section at each pass boundary, so
+   * the current pass finishes on the old range (D2). Stopped, the transport
+   * parks on the new start, as a click does.
+   */
+  const handleRangeChange = useCallback((span: { start: number; end: number | null }) => {
+    const section: Section = {
+      startBeat: beatAtMeasure(span.start),
+      endBeat: span.end === null ? null : beatAtMeasure(span.end + 1),
+    }
+    applySection(section)
+    if (isPlaying) return
+    pauseBeatRef.current = null
+    parkAtMeasure(span.start)
+    setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, section.startBeat))
+  }, [isPlaying, beatAtMeasure, parkAtMeasure, applySection])
+
   const handleRendered = useCallback((container: HTMLDivElement) => {
     scoreContainerRef.current = container
     // The SVG was rebuilt (font swap, resize) — the old binding holds dead
@@ -878,7 +899,9 @@ export default function PracticePlayback({
     if (sectionSpan === null) return parkedMeasure !== null ? `bar ${parkedMeasure} · ` : ''
     const span = sectionSpan.end === null
       ? `from bar ${sectionSpan.start}`          // armed, no end yet
-      : `bars ${sectionSpan.start}–${sectionSpan.end}`
+      : sectionSpan.end === sectionSpan.start
+        ? `bar ${sectionSpan.start}`              // a one-bar loop (LR3)
+        : `bars ${sectionSpan.start}–${sectionSpan.end}`
     // Only say "at N" when it adds something — parking on the section's own
     // first bar is where a take starts anyway.
     const inside = parkedMeasure !== null && parkedMeasure !== sectionSpan.start
@@ -1025,8 +1048,13 @@ export default function PracticePlayback({
             transposeSemitones={transposeSemitones}
             onRendered={handleRendered}
           />
-          {/* The selected passage, drawn over the score (LR2). */}
-          <RangeOverlay container={scoreContainerRef.current} span={sectionSpan} renderNonce={scoreRenderNonce} />
+          {/* The selected passage, drawn over the score, with drag handles (LR2-LR3). */}
+          <RangeOverlay
+            container={scoreContainerRef.current}
+            span={sectionSpan}
+            renderNonce={scoreRenderNonce}
+            onChange={handleRangeChange}
+          />
         </div>
       </div>
 

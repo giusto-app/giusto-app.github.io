@@ -1,6 +1,6 @@
 # Play-Along — drag a loop range over the score, and a timeline to scrub
 
-Status: **in progress — LR1 and LR2 done 2026-10-30.** Builds on the section model of
+Status: **in progress — LR1-LR3 done 2026-10-30.** Builds on the section model of
 `PLAN_PLAYBACK_START_POINT.md` (`src/audio/section.ts`, built), which already decides
 what a section *means* (sticky, Loop governs repetition, the trainer steps per pass).
 This plan changes how you **make and see** one, after studying Sightread's player
@@ -130,7 +130,15 @@ Ordered so every step lands alone and is useful on its own.
       bar. It is not in a release yet (Giusto pins ^0.60.0), and the release number is
       Marc's to pick. Once released, decide whether the wash moves to `setRange` (needed
       for part-bar ranges) while the handles stay Giusto divs.
-- [ ] **LR3 · Drag handles.** Pointer capture, snap to bar lines, write `Section`;
+- [x] **LR3 · Drag handles.** (2026-10-30: `rangeDrag.ts` snaps a handle to the
+      nearest bar line — a start takes the bar it opens, an end the bar it closes —
+      swaps handles dragged past each other, steps one bar per arrow key; 7 tests.
+      The transport now reads the section per pass through `TakeTimeline`
+      (`src/audio/section.ts`, replacing `beatInTake` / `passIndex`), so a range
+      moved while playing applies from the next pass; checked in the app on a 1-2
+      loop stepped to 1-3 mid-pass. `touch-action: none` is on the handles, not the
+      whole player, so the score still scrolls.)
+      Pointer capture, snap to bar lines, write `Section`;
       one-bar sections; keyboard: focusable handles, Left/Right move one bar.
       `touch-action: none` on the player. Disabled while playing (D2).
 - [ ] **LR4 · Drag to create.** Press on a bar and drag across others to make a
