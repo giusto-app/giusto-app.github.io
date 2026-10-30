@@ -34,6 +34,9 @@ import { nextSection, resolveStartBeat, takeWindow, TakeTimeline, type Section }
 import { playWoodblock } from '../../audio/woodblock'
 import { transportTime } from '../../audio/transportTime'
 import { melodyNotes, PART_FOCUS_OPTIONS, partGains, type PartFocus } from '../../audio/melodySchedule'
+import { WaitTracker, waitNotes, waitNotesInWindow, type WaitNote } from '../../audio/waitMode'
+import { usePitchDetection } from '../../hooks/usePitchDetection'
+import { midiNoteToInfo } from '../../utils/noteUtils'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
 import {
@@ -101,6 +104,12 @@ const BACKING_OPTIONS: Array<[BackingSelection, string]> = [
 
 const isEnsemble = (s: BackingSelection): s is BackingEnsemble => s !== 'off' && s !== 'drone'
 
+/** The transport readout in wait mode: which note it waits for, and whether it is being held. */
+function waitReadout(note: WaitNote, holding: boolean): string {
+  const names = note.midis.map(m => { const i = midiNoteToInfo(m); return `${i.noteName}${i.octave}` }).join(' or ')
+  return holding ? `hold ${names}…` : `waiting for ${names}`
+}
+
 // The play-along drone uses the sampled cello (steady, no wavy detune); the
 // tuning-voice choice lives in the Drone tab. Styles play through the strings.
 const DRONE_SOUND: ChordDroneSoundType = 'cello'
@@ -166,6 +175,13 @@ export default function PracticePlayback({
   const [backingVol, setBackingVol] = useState(0.65)
   // Part focus (LR9): the backing alone (as before), the violin line with it, or alone.
   const [partFocus, setPartFocus] = useState<PartFocus>('backing')
+  // Wait mode (LR10): the cursor waits on each note until the mic hears it.
+  const [waitMode, setWaitMode] = useState(false)
+  const [waitNote, setWaitNote] = useState<WaitNote | null>(null)
+  const [waitHolding, setWaitHolding] = useState(false)
+  const waitTrackerRef = useRef<WaitTracker | null>(null)
+  const lastHeardRef = useRef<{ midi: number; cents: number; at: number } | null>(null)
+  const pitch = usePitchDetection()
   const partFocusRef = useRef(partFocus)
   partFocusRef.current = partFocus
   // Transpose the exercise to a target key (0 = original).
@@ -733,6 +749,91 @@ export default function PracticePlayback({
     void startPlayback(from, { countIn: !resuming })
   }, [startPlayback, trainerPlan])
 
+  // ── Wait mode (LR10) ──────────────────────────────────────────────────────
+  const isWaiting = waitNote !== null
+  const { setConcertPitch: setDetectorPitch, start: startMic, stop: stopMic } = pitch
+  useEffect(() => { setDetectorPitch(concertPitch) }, [concertPitch, setDetectorPitch])
+
+  const stopWaiting = useCallback(() => {
+    waitTrackerRef.current = null
+    lastHeardRef.current = null
+    setWaitNote(null)
+    setWaitHolding(false)
+    stopMic()
+    applyNoteHighlight([])
+  }, [stopMic, applyNoteHighlight])
+
+  /** Show the note being waited for, and its bar. */
+  const showWaitNote = useCallback((note: WaitNote | null) => {
+    setWaitNote(note)
+    if (!note) return
+    applyNoteHighlight([note.eventId])
+    parkAtMeasure(measureAtBeat(note.startBeat))
+    setActiveChordIndex(printedChordIndexAtBeat(printedOnsetsRef.current, note.startBeat))
+  }, [applyNoteHighlight, parkAtMeasure, measureAtBeat])
+
+  /** Start waiting at the section (or the top): no clock, the player sets the pace. */
+  const startWaiting = useCallback(() => {
+    if (!parsed?.score) return
+    stopPlayback()
+    const section = sectionRef.current
+    const notes = waitNotesInWindow(waitNotes(parsed.score), section?.startBeat ?? 0, section?.endBeat ?? null)
+    if (notes.length === 0) return
+    waitTrackerRef.current = new WaitTracker(notes, { loop })
+    pauseBeatRef.current = null
+    showWaitNote(waitTrackerRef.current.current)
+    void startMic()
+  }, [parsed, loop, stopPlayback, showWaitNote, startMic])
+
+  // Every detection the mic makes, time-stamped: the hook only reports clear
+  // pitches, so silence shows up as detections that stop arriving.
+  useEffect(() => {
+    if (!isWaiting || !pitch.note) return
+    lastHeardRef.current = { midi: pitch.note.midiNote, cents: pitch.note.cents, at: performance.now() }
+  }, [isWaiting, pitch.note])
+
+  // Feed the tracker on a steady tick, so holding a note counts time even
+  // between detections and a pause in the sound reads as silence.
+  useEffect(() => {
+    if (!isWaiting) return
+    const id = window.setInterval(() => {
+      const tracker = waitTrackerRef.current
+      if (!tracker) return
+      const now = performance.now()
+      const heard = lastHeardRef.current && now - lastHeardRef.current.at < 150 ? lastHeardRef.current : null
+      const result = tracker.hear(heard?.midi ?? null, heard?.cents ?? 0, now)
+      setWaitHolding(result === 'holding')
+      if (result === 'advanced') showWaitNote(tracker.current)
+      else if (result === 'done') {
+        const section = sectionRef.current
+        stopWaiting()
+        parkAtMeasure(section ? measureAtBeat(section.startBeat) : null)
+      }
+    }, 50)
+    return () => window.clearInterval(id)
+  }, [isWaiting, showWaitNote, stopWaiting, parkAtMeasure, measureAtBeat])
+
+  // No microphone, no wait take: end it and leave the hook's message showing.
+  useEffect(() => {
+    if (isWaiting && pitch.listeningState === 'error') {
+      waitTrackerRef.current = null
+      setWaitNote(null)
+      setWaitHolding(false)
+      applyNoteHighlight([])
+    }
+  }, [isWaiting, pitch.listeningState, applyNoteHighlight])
+
+  // Leaving the exercise or the mode ends a wait take.
+  useEffect(() => { if (!waitMode) stopWaiting() }, [waitMode, stopWaiting])
+  useEffect(() => stopWaiting, [exercise.id, stopWaiting])
+
+  /** The play button and the space bar: a wait take in wait mode, else playback. */
+  const togglePlay = useCallback(() => {
+    if (waitMode) { if (isWaiting) stopWaiting(); else startWaiting(); return }
+    if (isPlaying) pausePlayback()
+    else playFromResumePoint()
+  }, [waitMode, isWaiting, isPlaying, stopWaiting, startWaiting, pausePlayback, playFromResumePoint])
+
   // Live control forwarding
   useEffect(() => { clockRef.current?.setBpm(bpm) }, [bpm])
   // Backing selection/volume are volume-gated (gapless): the inactive instrument
@@ -773,12 +874,11 @@ export default function PracticePlayback({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
           target?.isContentEditable) return
       e.preventDefault()
-      if (isPlaying) pausePlayback()
-      else playFromResumePoint()
+      togglePlay()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isPracticeTabActive, isPlaying, pausePlayback, playFromResumePoint])
+  }, [isPracticeTabActive, togglePlay])
 
   // Tear down audio when the view unmounts or the exercise changes
   useEffect(() => stopPlayback, [stopPlayback, exercise.id])
@@ -1017,7 +1117,7 @@ export default function PracticePlayback({
    * top — which is the same rule the play button follows (resolveStartBeat).
    * Refs are read here on purpose: every path that moves them also sets state.
    */
-  const readoutBeat = isPlaying
+  const readoutBeat = waitNote ? waitNote.startBeat : isPlaying
     // Nothing heard yet (the count-in): hold at the beat the take starts on.
     ? (heardBeat ?? takeStartBeatRef.current)
     : (resolveStartBeat(pauseBeatRef.current, sectionRef.current) ?? 0)
@@ -1061,17 +1161,17 @@ export default function PracticePlayback({
             <RewindIcon />
           </button>
           <button
-            onClick={() => (isPlaying ? pausePlayback() : playFromResumePoint())}
+            onClick={togglePlay}
             disabled={!schedule || schedule.totalBeats === 0}
             className={[
               'w-14 h-14 rounded-full flex items-center justify-center transition-colors shrink-0',
-              isPlaying ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white',
+              isPlaying || isWaiting ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white',
               !schedule ? 'opacity-40 cursor-not-allowed' : '',
             ].join(' ')}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-            title={isPlaying ? 'Pause (space)' : 'Play (space)'}
+            aria-label={isPlaying || isWaiting ? 'Pause' : 'Play'}
+            title={isPlaying || isWaiting ? 'Pause (space)' : waitMode ? 'Play, waiting for each note (space)' : 'Play (space)'}
           >
-            {isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+            {isPlaying || isWaiting ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
           </button>
 
           <button
@@ -1091,7 +1191,7 @@ export default function PracticePlayback({
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>Tempo</span>
               <span className="tabular-nums">
-                {isCountingIn ? 'count-in…' : `${timeReadout}${transportPosition}♩ = ${bpm}`}
+                {isCountingIn ? 'count-in…' : waitNote ? waitReadout(waitNote, waitHolding) : `${timeReadout}${transportPosition}♩ = ${bpm}`}
               </span>
             </div>
             <input
@@ -1221,6 +1321,18 @@ export default function PracticePlayback({
             className="accent-amber-400" />
           Loop
         </label>
+        <label className="flex items-center gap-2 text-gray-400" title="The cursor waits on each note until the microphone hears it in tune">
+          <input
+            type="checkbox"
+            checked={waitMode}
+            disabled={isPlaying}
+            onChange={e => setWaitMode(e.target.checked)}
+            className="accent-amber-400" />
+          Wait for each note (mic)
+        </label>
+        {pitch.errorMessage && waitMode && (
+          <div className="col-span-2 text-xs text-red-400">{pitch.errorMessage}</div>
+        )}
 
         <div>
           <label className="text-xs text-gray-500 mb-1 block">Key</label>

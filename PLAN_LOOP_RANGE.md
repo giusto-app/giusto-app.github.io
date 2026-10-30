@@ -178,8 +178,16 @@ Further ideas from the same page, not part of the loop work (one line each):
       timeline, which merges ties), played through the strings samples. Volume-gated
       like the backing, so it switches mid-take. Default "Backing", today's sound.
       (Sightread's both/left/right is the same idea for piano hands.)
-- [ ] **LR10 · Wait mode**: hold the cursor on a note until the mic hears it in tune
-      (Giusto already has pitch detection). Biggest of the list; its own plan.
+- [x] **LR10 · Wait mode** (2026-10-30): "Wait for each note (mic)" turns Play into a
+      take with no clock. The cursor sits on the next note of the violin line (inside the
+      range, when one is set) and moves on when the mic hears that pitch within 25 cents,
+      held 200 ms; rests are passed over, a double stop takes either pitch, a repeated
+      pitch needs a fresh attack, Loop starts over after the last note. Logic in
+      `src/audio/waitMode.ts` (+ 6 tests), fed by the Tuner's `usePitchDetection` on a
+      50 ms tick that reads 150 ms without a clear pitch as silence. A refused mic ends
+      the take with the hook's message. Checked in the app with a fake microphone; the
+      end-to-end advance could not run there (the automated tab is hidden, so the
+      detector's rAF loop is paused) and rests on the tracker's tests.
 - [ ] **LR11 · Long scores**: one SVG per system with `content-visibility: auto`.
       That is a lilyJS output option first (per-system SVGs), then a Giusto change.
 
