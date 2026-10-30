@@ -4,6 +4,18 @@ Goal: Help violinists and bowed string players improve their intonation.
 
 ---
 
+## ✅ Light mode follows the theme everywhere (done 2026-10-30)
+
+In light mode the score, the Key menu, the Tempo Trainer and Backing panels and the
+backing pills keep their dark colours. Plan: `PLAN_LIGHT_MODE.md`.
+
+- [x] **LM1 · Surfaces**: light overrides for the dark gray background / border / hover utilities.
+- [x] **LM2 · The score** renders in lilyjs's light theme when the app is light.
+- [x] **LM3 · Highlights** (chord symbol, loop range, handles, timeline) checked on light paper.
+- [x] **LM4 · Evidence**: Play-Along, Pitch Practice and Tuner in both themes.
+
+---
+
 ## 🔴 Next Up — Loop range on the score (planned 2026-10-30)
 
 Drag a loop range over the score and scrub a timeline, after Sightread's player.
@@ -28,7 +40,7 @@ apply on the next pass, fuchsia).
 - [ ] **LR8 · Playback speed** (50-120 %) as a multiplier over the score tempo. *Kept for later (Marc, 2026-10-30).*
 - [x] **LR9 · Part focus** (2026-10-30): hear the backing, the violin line with it, or the violin line alone.
 - [x] **LR10 · Wait mode** (2026-10-30): the cursor holds on each note until the mic hears it in tune.
-- [ ] **LR11 · Long scores**: one SVG per system with `content-visibility: auto`
+- [ ] **LR11 · Long scores** *(waits on a lilyJS per-system output option; prompt in the plan)*: one SVG per system with `content-visibility: auto`
       (needs a lilyJS output option first).
 
 ## 🔴 Next Up — Intonation practice (planned 2026-10-16)

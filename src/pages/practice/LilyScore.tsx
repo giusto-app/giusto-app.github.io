@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useLightTheme } from '../../hooks/useLightTheme'
 import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose, type SystemTimeMap } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
@@ -33,13 +34,15 @@ interface LilyScoreProps {
 
 export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered, onTimeMap }: LilyScoreProps) {
   const ref = useRef<HTMLDivElement>(null)
+  // The score is drawn in the app's theme, and redrawn when it switches.
+  const theme = useLightTheme() ? 'light' : 'dark'
 
   useEffect(() => {
     const el = ref.current
     if (!el || !source.trim()) return
     try {
-      // Match the lilyJS editor's dark mode: light ink on a dark score page
-      // (the container in PracticePlayback provides the dark page background).
+      // Ink in the app's theme: light on the dark page, dark on the light one
+      // (the containers provide the page; PLAN_LIGHT_MODE.md LM2).
       if (scoreIndex !== undefined) {
         const blocks = parseSource(source).document?.blocks.filter(b => b.type === 'score') ?? []
         const block = blocks[scoreIndex] as
@@ -52,9 +55,9 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
         }
         // The parsed doc is ours (fresh from parseSource) — safe to retitle.
         if (title) score.title = title
-        renderScore(el, score, { width, theme: 'dark', onTimeMap })
+        renderScore(el, score, { width, theme, onTimeMap })
       } else {
-        renderLily(el, source, { width, theme: 'dark', onTimeMap })
+        renderLily(el, source, { width, theme, onTimeMap })
       }
       onRendered?.(el)
       // lilyjs re-renders asynchronously once music fonts finish loading; run
@@ -65,7 +68,7 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
       console.error('lilyjs render failed', err)
       el.textContent = 'Score rendering failed'
     }
-  }, [source, scoreIndex, width, transposeSemitones, onRendered, onTimeMap])
+  }, [source, scoreIndex, width, transposeSemitones, onRendered, onTimeMap, theme])
 
   // [&_svg]: the fill-the-container scaling must survive lilyjs's async
   // font-ready re-render (which replaces the <svg>), so it lives in CSS

@@ -36,6 +36,7 @@ import { transportTime } from '../../audio/transportTime'
 import { melodyNotes, PART_FOCUS_OPTIONS, partGains, type PartFocus } from '../../audio/melodySchedule'
 import { WaitTracker, waitNotes, waitNotesInWindow, type WaitNote } from '../../audio/waitMode'
 import { usePitchDetection } from '../../hooks/usePitchDetection'
+import { useLightTheme } from '../../hooks/useLightTheme'
 import { midiNoteToInfo } from '../../utils/noteUtils'
 import { ChordDrone, type ChordDroneSoundType } from '../../audio/chordDrone'
 import { SampledInstrument, SAMPLE_SETS, type InstrumentId } from '../../audio/sampledInstrument'
@@ -159,6 +160,7 @@ export default function PracticePlayback({
   concertPitch = 440,
 }: PracticePlaybackProps) {
   const isPracticeTabActive = useIsActiveTab('practice')
+  const lightTheme = useLightTheme()
   const [source, setSource] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showPicker, setShowPicker] = useState(false)
@@ -1000,20 +1002,22 @@ export default function PracticePlayback({
     // matching on the label lit up all four "Gm" at once. Printed symbols and
     // printedChordOnsets are both in document order, so the index aligns.
     const symbols = [...container.querySelectorAll<SVGElement>('[data-lily-chord-label]')]
+    // Amber reads on the dark page; on light paper it needs the darker shade (LM3).
+    const highlight = lightTheme ? '#b45309' : '#fbbf24'
     symbols.forEach((el, i) => {
       const active = i === activeChordIndex
-      el.style.fill = active ? '#fbbf24' : ''
+      el.style.fill = active ? highlight : ''
       el.style.fontWeight = active ? 'bold' : ''
       // A maj7 chord draws its triangle as a SEPARATE element right after the
       // text, with no chord-label of its own, so it needs colouring too or the
       // "Bb" lights up while its triangle stays white.
       let sibling = el.nextElementSibling as SVGElement | null
       while (sibling && sibling.getAttribute('data-lily-chord-suffix')) {
-        sibling.style.fill = active ? '#fbbf24' : ''
+        sibling.style.fill = active ? highlight : ''
         sibling = sibling.nextElementSibling as SVGElement | null
       }
     })
-  }, [activeChordIndex])
+  }, [activeChordIndex, lightTheme, scoreRenderNonce])
 
   /**
    * Click a bar to select it as the start point.
@@ -1321,18 +1325,6 @@ export default function PracticePlayback({
             className="accent-amber-400" />
           Loop
         </label>
-        <label className="flex items-center gap-2 text-gray-400" title="The cursor waits on each note until the microphone hears it in tune">
-          <input
-            type="checkbox"
-            checked={waitMode}
-            disabled={isPlaying}
-            onChange={e => setWaitMode(e.target.checked)}
-            className="accent-amber-400" />
-          Wait for each note (mic)
-        </label>
-        {pitch.errorMessage && waitMode && (
-          <div className="col-span-2 text-xs text-red-400">{pitch.errorMessage}</div>
-        )}
 
         <div>
           <label className="text-xs text-gray-500 mb-1 block">Key</label>
@@ -1363,6 +1355,18 @@ export default function PracticePlayback({
             className="w-full accent-amber-400 disabled:opacity-40"
           />
         </div>
+        <label className="col-span-2 flex items-center gap-2 text-gray-400" title="The cursor waits on each note until the microphone hears it in tune">
+          <input
+            type="checkbox"
+            checked={waitMode}
+            disabled={isPlaying}
+            onChange={e => setWaitMode(e.target.checked)}
+            className="accent-amber-400" />
+          Wait for each note (mic)
+        </label>
+        {pitch.errorMessage && waitMode && (
+          <div className="col-span-2 text-xs text-red-400">{pitch.errorMessage}</div>
+        )}
         {/* Drone volume lives in the Backing section below. */}
       </div>
 

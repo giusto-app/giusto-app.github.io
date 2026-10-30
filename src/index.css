@@ -93,6 +93,15 @@ body.light .neu-pill-active {
 /* Catch text-white, text-white/30, text-white/40, text-white/50, text-white/60, etc. */
 body.light [class*="text-white"]   { color: var(--neu-fg)  !important; }
 
+/* ...except white text ON a saturated button (play, pause, record): there it
+   stays white, or the icon goes dark on green and the label dark on red. */
+body.light [class*="text-white"][class*="bg-red-"],
+body.light [class*="text-white"][class*="bg-emerald-"],
+body.light [class*="text-white"][class*="bg-green-"],
+body.light [class*="text-white"][class*="bg-blue-"],
+body.light [class*="text-white"][class*="bg-violet-"],
+body.light [class*="text-white"][class*="bg-rose-"] { color: #ffffff !important; }
+
 /* Standard gray text */
 body.light .text-gray-200 { color: var(--neu-fg)  !important; }
 body.light .text-gray-300 { color: var(--neu-fg)  !important; }
@@ -116,6 +125,27 @@ body.light .text-red-400     { color: #dc2626 !important; }
 body.light .text-blue-400    { color: #2563eb !important; }
 body.light .text-blue-500    { color: #2563eb !important; }
 body.light .text-emerald-400 { color: #059669 !important; }
+
+/* ── Light-mode surface overrides (PLAN_LIGHT_MODE.md, LM1) ──────────────────
+   The text overrides above turn dark-theme text dark; these turn the dark gray
+   SURFACES light to match — panels, menus, inputs, pills and their borders —
+   or the panel stays dark and the now-dark text on it disappears. A selected
+   chip (`bg-gray-700 text-gray-100`) stays dark on purpose: it reads as
+   selected on either page. */
+body.light .bg-gray-950\/60,
+body.light .bg-gray-900,
+body.light .bg-gray-900\/40 { background-color: #f7f9fc !important; }
+body.light .bg-gray-800,
+body.light .bg-gray-800\/70,
+body.light .bg-gray-800\/60 { background-color: rgba(255, 255, 255, 0.75) !important; }
+body.light .bg-gray-800\/40 { background-color: rgba(255, 255, 255, 0.5) !important; }
+body.light .hover\:bg-gray-700:hover,
+body.light .hover\:bg-gray-800:hover { background-color: rgba(148, 163, 184, 0.3) !important; }
+body.light .border-gray-700,
+body.light .border-gray-700\/70,
+body.light .border-gray-700\/60,
+body.light .border-gray-500,
+body.light .border-gray-500\/60 { border-color: rgba(148, 163, 184, 0.7) !important; }
 
 /* ── Sheet music ─────────────────────────────────────────────────────────────
    Tune SVGs draw every notehead, stem, staff line and text with
