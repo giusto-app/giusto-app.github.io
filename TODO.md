@@ -19,7 +19,8 @@ apply on the next pass, fuchsia).
 - [x] **LR3 · Drag handles** (2026-10-30): pointer capture, snap to the nearest bar
       line, write `Section`; one-bar sections; keyboard Left/Right; live while playing,
       applied on the next pass (`TakeTimeline`). `rangeDrag.ts` (+ tests).
-- [ ] **LR4 · Drag to create** a range in one gesture (click-click stays).
+- [x] **LR4 · Drag to create** a range in one gesture (2026-10-30; click-click stays;
+      mouse and pen, while touch keeps scrolling the score).
 - [ ] **LR5 · Timeline strip** under the score: bar ticks, elapsed fill, range box with
       handles, playhead; click/drag to seek.
 - [ ] **LR6 · Time readout**: elapsed / total from the conductor map, plus the bar.

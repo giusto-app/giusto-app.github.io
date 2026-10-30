@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { measureBoxes, type MeasureRect } from './measureBoxes'
-import { dragRange, moveHandle, snapBar, stepHandle } from './rangeDrag'
+import { dragCreateSpan, dragRange, moveHandle, snapBar, stepHandle } from './rangeDrag'
 
 /** Two systems of four bars: 1-4 at y 40..90, 5-8 at y 160..210; bars 100 px wide from x 60. */
 const rects: MeasureRect[] = []
@@ -51,5 +51,13 @@ describe('moveHandle and stepHandle', () => {
     expect(stepHandle({ start: 1, end: 6 }, 'start', -1, 8)).toEqual({ span: { start: 1, end: 6 }, edge: 'start' })
     expect(stepHandle({ start: 3, end: 8 }, 'end', 1, 8)).toEqual({ span: { start: 3, end: 8 }, edge: 'end' })
     expect(stepHandle({ start: 3, end: 3 }, 'start', 1, 8)).toEqual({ span: { start: 3, end: 4 }, edge: 'end' })
+  })
+})
+
+describe('dragCreateSpan', () => {
+  it('spans from the pressed bar to the bar under the pointer, either way, one bar included', () => {
+    expect(dragCreateSpan(3, 6)).toEqual({ start: 3, end: 6 })
+    expect(dragCreateSpan(6, 3)).toEqual({ start: 3, end: 6 })
+    expect(dragCreateSpan(4, 4)).toEqual({ start: 4, end: 4 })
   })
 })

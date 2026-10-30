@@ -1,6 +1,6 @@
 # Play-Along — drag a loop range over the score, and a timeline to scrub
 
-Status: **in progress — LR1-LR3 done 2026-10-30.** Builds on the section model of
+Status: **in progress — LR1-LR4 done 2026-10-30.** Builds on the section model of
 `PLAN_PLAYBACK_START_POINT.md` (`src/audio/section.ts`, built), which already decides
 what a section *means* (sticky, Loop governs repetition, the trainer steps per pass).
 This plan changes how you **make and see** one, after studying Sightread's player
@@ -141,7 +141,11 @@ Ordered so every step lands alone and is useful on its own.
       Pointer capture, snap to bar lines, write `Section`;
       one-bar sections; keyboard: focusable handles, Left/Right move one bar.
       `touch-action: none` on the player. Disabled while playing (D2).
-- [ ] **LR4 · Drag to create.** Press on a bar and drag across others to make a
+- [x] **LR4 · Drag to create.** (2026-10-30: native pointer listeners on the score
+      in `RangeOverlay`; a press turns into a drag past 6 px, and the click that ends
+      the drag is swallowed so `nextSection` never sees it; `dragCreateSpan` tested.
+      Mouse and pen only: on touch the same gesture scrolls the score, and the
+      handles and click-click still work.) Press on a bar and drag across others to make a
       section in one gesture (click-click stays).
 - [ ] **LR5 · Timeline strip.** Ticks, elapsed fill, section box with handles,
       playhead; click/drag to seek (stopped: pause point; playing: restart there).

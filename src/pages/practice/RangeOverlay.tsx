@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import type { SvgPlaybackBinding } from 'lilyjs'
-import { measureBoxes, readMeasureRects, type MeasureBox } from './measureBoxes'
-import { moveHandle, snapBar, stepHandle, type RangeEdge } from './rangeDrag'
+import { measureAtPoint, measureBoxes, readMeasureRects, type MeasureBox } from './measureBoxes'
+import { DRAG_CREATE_THRESHOLD_PX, dragCreateSpan, moveHandle, snapBar, stepHandle, type RangeEdge } from './rangeDrag'
 import { rangeBounds, rangeHandles, type BandBox, type RangeHandles, type SectionSpan } from './rangeOverlayGeometry'
 
 /**
@@ -10,7 +10,11 @@ import { rangeBounds, rangeHandles, type BandBox, type RangeHandles, type Sectio
  * the notation (`binding.setRange`, lilyjs 0.61, coloured by the
  * `--lily-range-*` variables in index.css); this component adds the two grip
  * handles on the drawn bands' ends. Dragging a handle snaps it to the nearest
- * bar line; a focused handle moves one bar with Left/Right.
+ * bar line; a focused handle moves one bar with Left/Right. Pressing on a bar
+ * and dragging across others makes a range in one gesture (LR4); a press that
+ * does not move stays a click, which `handleScoreClick` folds into the
+ * click-click selection. Mouse and pen only: on touch the same drag scrolls
+ * the score, and the handles still work.
  *
  * Redrawn when the section changes and when the SVG is rebuilt
  * (`renderNonce`); the handles are re-placed when the container resizes, since
@@ -53,6 +57,64 @@ export default function RangeOverlay({ container, span, renderNonce, binding, on
     observer.observe(container)
     return () => observer.disconnect()
   }, [container, span, renderNonce, binding])
+
+  // Drag to create (LR4), on the score itself. Native listeners on the
+  // container, so the overlay can stay transparent to pointer events.
+  const boxesRef = useRef(boxes)
+  boxesRef.current = boxes
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  useEffect(() => {
+    if (!container) return
+    let press: { x: number; y: number; anchor: number; dragging: boolean } | null = null
+    const local = (e: globalThis.PointerEvent) => {
+      const origin = container.getBoundingClientRect()
+      return { x: e.clientX - origin.left, y: e.clientY - origin.top }
+    }
+    const down = (e: globalThis.PointerEvent) => {
+      if (e.pointerType === 'touch' || e.button !== 0) return
+      const p = local(e)
+      const anchor = measureAtPoint(boxesRef.current, p.x, p.y)
+      press = anchor === null ? null : { ...p, anchor, dragging: false }
+    }
+    const move = (e: globalThis.PointerEvent) => {
+      if (!press) return
+      const p = local(e)
+      if (!press.dragging) {
+        if (Math.hypot(p.x - press.x, p.y - press.y) < DRAG_CREATE_THRESHOLD_PX) return
+        press.dragging = true
+        // Best-effort: capture throws if the pointer was released meanwhile.
+        try { container.setPointerCapture(e.pointerId) } catch { /* keep dragging uncaptured */ }
+      }
+      const bar = measureAtPoint(boxesRef.current, p.x, p.y)
+      if (bar === null) return
+      const next = dragCreateSpan(press.anchor, bar)
+      const cur = spanRef.current
+      if (cur && cur.start === next.start && cur.end === next.end) return
+      spanRef.current = next
+      onChangeRef.current(next)
+    }
+    const up = () => {
+      // A drag ends with a click on the bar it ended on; swallow that one, or
+      // the click-click model would read it as a fresh selection.
+      if (press?.dragging) {
+        const swallow = (c: MouseEvent) => { c.stopPropagation(); c.preventDefault() }
+        window.addEventListener('click', swallow, { capture: true, once: true })
+        setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0)
+      }
+      press = null
+    }
+    container.addEventListener('pointerdown', down)
+    container.addEventListener('pointermove', move)
+    container.addEventListener('pointerup', up)
+    container.addEventListener('pointercancel', up)
+    return () => {
+      container.removeEventListener('pointerdown', down)
+      container.removeEventListener('pointermove', move)
+      container.removeEventListener('pointerup', up)
+      container.removeEventListener('pointercancel', up)
+    }
+  }, [container])
 
   // A keyboard step that swapped the handles keeps the focus on the end that
   // moved, which is now the other handle.

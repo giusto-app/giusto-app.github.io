@@ -66,3 +66,14 @@ export function stepHandle(span: SectionSpan, edge: RangeEdge, delta: -1 | 1, la
   const at = edge === 'end' && span.end !== null ? span.end : span.start
   return moveHandle(span, edge, Math.min(lastBar, Math.max(1, at + delta)))
 }
+
+/**
+ * Drag to create (LR4): the range a press on bar `anchor` makes once the
+ * pointer has reached bar `bar`, in either direction.
+ */
+export function dragCreateSpan(anchor: number, bar: number): SectionSpan {
+  return { start: Math.min(anchor, bar), end: Math.max(anchor, bar) }
+}
+
+/** A press becomes a drag only past this many px, so a click stays a click. */
+export const DRAG_CREATE_THRESHOLD_PX = 6

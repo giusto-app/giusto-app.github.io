@@ -1054,7 +1054,7 @@ export default function PracticePlayback({
       {/* Score */}
       <div
         id="play-along-score"
-        className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto"
+        className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto select-none"
         onClick={handleScoreClick}
       >
         <div className="relative">
