@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLightTheme } from '../../hooks/useLightTheme'
 import { viewBoxAspectRatio } from './longScore'
-import { createRenderWorker, renderLilyAsync, type LilyRenderWorker, type SystemTimeMap } from 'lilyjs'
+import { createRenderWorker, renderMusicAsync, type LilyRenderWorker, type SystemTimeMap } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
 // Renders with the current lilyJS engraving engine, so titles, chord symbols,
@@ -58,7 +58,7 @@ function wrapSystems(el: HTMLElement): void {
 
 /** The app's one lilyjs render worker, started on first use. It is copied from
  *  the package into public/lilyjs/ by scripts/syncLilyjsFonts.ts. Null where
- *  workers are unavailable: renderLilyAsync then renders on the main thread. */
+ *  workers are unavailable: renderMusicAsync then renders on the main thread. */
 let sharedWorker: LilyRenderWorker | null | undefined
 function renderWorker(): LilyRenderWorker | null {
   if (sharedWorker === undefined) {
@@ -86,15 +86,15 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
       : onTimeMap
     const options = { width, theme, onTimeMap: timeMapped, ...(split ? { split: 'system' as const } : {}) }
     // Drawn in lilyjs's worker, so the page keeps responding while a long score
-    // renders; it mounts exactly what renderLily / renderScore mount. One score
+    // renders; it mounts exactly what renderMusic / renderScore mount. One score
     // block (scoreIndex) is selected, transposed and retitled in the worker.
     let cancelled = false
-    renderLilyAsync(el, source, {
+    renderMusicAsync(el, source, {
       ...options,
       worker: renderWorker(),
       ...(scoreIndex !== undefined
         ? { scoreSelection: { index: scoreIndex, ...(transposeSemitones ? { transposeSemitones } : {}), ...(title ? { title } : {}) } }
-        : { format: 'lilypond' as const }),
+        : {}),
     })
       .then((svg) => { if (!cancelled && svg) onRendered?.(el) })
       .catch((err) => {
