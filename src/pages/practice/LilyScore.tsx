@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLightTheme } from '../../hooks/useLightTheme'
 import { viewBoxAspectRatio } from './longScore'
-import { measureRange, parseSource, renderLily, renderScore, resolveSelection, transpose, type SystemTimeMap } from 'lilyjs'
+import { createRenderWorker, renderLilyAsync, type LilyRenderWorker, type SystemTimeMap } from 'lilyjs'
 
 // Thin React wrapper around the modern lilyjs renderer (vendored bundle).
 // Renders with the current lilyJS engraving engine, so titles, chord symbols,
@@ -56,6 +56,21 @@ function wrapSystems(el: HTMLElement): void {
   }
 }
 
+/** The app's one lilyjs render worker, started on first use. It is copied from
+ *  the package into public/lilyjs/ by scripts/syncLilyjsFonts.ts. Null where
+ *  workers are unavailable: renderLilyAsync then renders on the main thread. */
+let sharedWorker: LilyRenderWorker | null | undefined
+function renderWorker(): LilyRenderWorker | null {
+  if (sharedWorker === undefined) {
+    try {
+      sharedWorker = typeof Worker === 'undefined' ? null : createRenderWorker('/lilyjs/lilyjs.worker.js')
+    } catch {
+      sharedWorker = null
+    }
+  }
+  return sharedWorker
+}
+
 export default function LilyScore({ source, scoreIndex, title, width = 720, transposeSemitones = 0, className, onRendered, onTimeMap, split = false }: LilyScoreProps) {
   const ref = useRef<HTMLDivElement>(null)
   // The score is drawn in the app's theme, and redrawn when it switches.
@@ -70,34 +85,24 @@ export default function LilyScore({ source, scoreIndex, title, width = 720, tran
       ? (m: SystemTimeMap[]) => { wrapSystems(el); onTimeMap?.(m) }
       : onTimeMap
     const options = { width, theme, onTimeMap: timeMapped, ...(split ? { split: 'system' as const } : {}) }
-    try {
-      // Ink in the app's theme: light on the dark page, dark on the light one
-      // (the containers provide the page; PLAN_LIGHT_MODE.md LM2).
-      if (scoreIndex !== undefined) {
-        const blocks = parseSource(source).document?.blocks.filter(b => b.type === 'score') ?? []
-        const block = blocks[scoreIndex] as
-          | { score: Parameters<typeof renderScore>[1] & { title?: string } }
-          | undefined
-        if (!block) throw new Error(`score block ${scoreIndex} not found (${blocks.length} scores)`)
-        let score = block.score
-        if (transposeSemitones) {
-          score = transpose(score, resolveSelection(score, measureRange('start', 'end')), transposeSemitones).score as typeof score
-        }
-        // The parsed doc is ours (fresh from parseSource) — safe to retitle.
-        if (title) score.title = title
-        renderScore(el, score, options)
-      } else {
-        renderLily(el, source, options)
-      }
-      onRendered?.(el)
-      // lilyjs re-renders asynchronously once music fonts finish loading; run
-      // the overlay hook again after the swap.
-      const timer = setTimeout(() => onRendered?.(el), 600)
-      return () => clearTimeout(timer)
-    } catch (err) {
-      console.error('lilyjs render failed', err)
-      el.textContent = 'Score rendering failed'
-    }
+    // Drawn in lilyjs's worker, so the page keeps responding while a long score
+    // renders; it mounts exactly what renderLily / renderScore mount. One score
+    // block (scoreIndex) is selected, transposed and retitled in the worker.
+    let cancelled = false
+    renderLilyAsync(el, source, {
+      ...options,
+      worker: renderWorker(),
+      ...(scoreIndex !== undefined
+        ? { scoreSelection: { index: scoreIndex, ...(transposeSemitones ? { transposeSemitones } : {}), ...(title ? { title } : {}) } }
+        : { format: 'lilypond' as const }),
+    })
+      .then((svg) => { if (!cancelled && svg) onRendered?.(el) })
+      .catch((err) => {
+        if (cancelled) return
+        console.error('lilyjs render failed', err)
+        el.textContent = 'Score rendering failed'
+      })
+    return () => { cancelled = true }
   }, [source, scoreIndex, width, transposeSemitones, onRendered, onTimeMap, theme, split])
 
   // [&_svg]: the fill-the-container scaling must survive lilyjs's async

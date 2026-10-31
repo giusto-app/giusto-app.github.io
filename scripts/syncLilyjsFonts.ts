@@ -40,3 +40,13 @@ for (const face of FACES) {
   await copyFile(from, `${DEST}/${face}`)
 }
 console.log(`Synced ${FACES.length} lilyJS fonts into ${DEST}/`)
+
+// The render worker LilyScore draws through (lilyjs >= 0.71, `renderLilyAsync`):
+// served beside the fonts, as public/lilyjs/lilyjs.worker.js.
+const WORKER = 'node_modules/lilyjs/dist/lilyjs.worker.js'
+if (!existsSync(WORKER)) {
+  console.error(`${WORKER} missing from the lilyjs package — is it older than 0.71?`)
+  process.exit(1)
+}
+await copyFile(WORKER, 'public/lilyjs/lilyjs.worker.js')
+console.log('Synced the lilyJS render worker into public/lilyjs/')
