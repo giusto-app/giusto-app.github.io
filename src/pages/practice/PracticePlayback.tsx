@@ -13,6 +13,7 @@ import {
   type SystemTimeMap,
 } from 'lilyjs'
 import LilyScore from './LilyScore'
+import OpenStringStudy from './OpenStringStudy'
 import RangeOverlay from './RangeOverlay'
 import TimelineStrip from './TimelineStrip'
 import { splitsSystems } from './longScore'
@@ -1305,6 +1306,9 @@ export default function PracticePlayback({
           />
         </div>
       </div>
+
+      {/* The selected bars on open strings: the string crossings alone. */}
+      {parsed && <OpenStringStudy score={parsed.score} span={sectionSpan} />}
 
       {/* The whole tune: seek, and the range's second pair of handles (LR5). */}
       {schedule && schedule.totalBeats > 0 && (
