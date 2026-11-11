@@ -14,7 +14,7 @@ describe('openStringPassage', () => {
   const score = scoreOf(SOURCE)
 
   test('answers the selected bars over their open strings', () => {
-    const passage = openStringPassage(score, { start: 1, end: 2 }, { position: 1, followFingerings: false })
+    const passage = openStringPassage(score, { start: 1, end: 2 })
     expect(passage?.label).toBe('Open strings, m.1–2')
     // Two staves: the bars as written, then d' a' e''; c'' and d'' are both on the
     // A string under one slur, so they are tied (one bow), and a' is the open A again.
@@ -25,14 +25,14 @@ describe('openStringPassage', () => {
   })
 
   test('takes a range with no end as its first bar, and no range as nothing', () => {
-    expect(openStringPassage(score, { start: 3, end: null }, { position: 1, followFingerings: false })?.label).toBe('Open strings, m.3–3')
-    expect(openStringPassage(score, null, { position: 1, followFingerings: false })).toBeNull()
+    expect(openStringPassage(score, { start: 3, end: null })?.label).toBe('Open strings, m.3–3')
+    expect(openStringPassage(score, null)).toBeNull()
   })
 
-  test('reads the passage in another position', () => {
-    // Third position: c'' is the D string's fourth finger, d'' the A string's first,
-    // and a' the D string's second: the slur now crosses a string.
-    const third = openStringPassage(score, { start: 2, end: 2 }, { position: 3, followFingerings: false })
-    expect(third?.source).toContain("d'8( a'8) d'4")
+  test('takes the position from the score\'s fingerings', () => {
+    // c''-4 is the D string's fourth finger only in third position, so the hand
+    // is there: d'' is the A string's first finger and a' the D string's second.
+    const fingered = scoreOf(SOURCE.replace("c''8( d'')", "c''8-4( d'')"))
+    expect(openStringPassage(fingered, { start: 2, end: 2 })?.source).toContain("d'8( a'8) d'4")
   })
 })

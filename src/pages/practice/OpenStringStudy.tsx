@@ -3,8 +3,6 @@ import type { Score } from 'lilyjs'
 import LilyScore from './LilyScore'
 import { openStringPassage } from './openStringPassage'
 
-const POSITIONS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th']
-
 interface Props {
   score: Score
   /** The selected passage in bar numbers; null when nothing is selected. */
@@ -12,18 +10,15 @@ interface Props {
 }
 
 /**
- * "Open strings" for the selected passage: a toggle, the position the player
- * is in, and the passage drawn over its open strings right under the score.
- * It follows the selection, so dragging the range redraws it.
+ * "Open strings" for the selected passage: a toggle, and the passage drawn over
+ * its open strings right under the score, in the position the score's
+ * fingerings put the player in. When the score does not say enough (no
+ * fingering sets the position), an alert says so. It follows the selection,
+ * so dragging the range redraws it.
  */
 export default function OpenStringStudy({ score, span }: Props) {
   const [shown, setShown] = useState(false)
-  const [position, setPosition] = useState(1)
-  const [followFingerings, setFollowFingerings] = useState(false)
-  const passage = useMemo(
-    () => (shown ? openStringPassage(score, span, { position, followFingerings }) : null),
-    [shown, score, span, position, followFingerings],
-  )
+  const passage = useMemo(() => (shown ? openStringPassage(score, span) : null), [shown, score, span])
 
   return (
     <div className="space-y-2">
@@ -38,23 +33,15 @@ export default function OpenStringStudy({ score, span }: Props) {
         >
           Open strings
         </button>
-        <select
-          aria-label="Position"
-          value={followFingerings ? 'fingerings' : String(position)}
-          onChange={(e) => {
-            const fingerings = e.target.value === 'fingerings'
-            setFollowFingerings(fingerings)
-            if (!fingerings) setPosition(Number(e.target.value))
-          }}
-          className="rounded-lg border border-gray-600 bg-gray-900 px-2 py-1"
-        >
-          {POSITIONS.map((name, i) => <option key={name} value={i + 1}>{name} position</option>)}
-          <option value="fingerings">From fingerings</option>
-        </select>
       </div>
       {shown && passage && (
         <div className="rounded-xl bg-gray-900 border border-gray-700 p-2 overflow-x-auto" data-testid="open-string-study">
           <div className="px-1 pb-1 text-xs text-gray-400">{passage.label}</div>
+          {passage.alerts.length > 0 && (
+            <div role="alert" className="mx-1 mb-2 rounded-lg border border-amber-500/60 bg-amber-500/15 px-3 py-2 text-sm text-amber-200">
+              {passage.alerts.map((a) => <div key={a}>{a}</div>)}
+            </div>
+          )}
           <LilyScore source={passage.source} />
           {passage.warnings.map((w) => <div key={w} className="px-1 text-xs text-amber-400">{w}</div>)}
         </div>
