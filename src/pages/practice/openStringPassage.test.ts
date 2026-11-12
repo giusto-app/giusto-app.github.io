@@ -15,7 +15,7 @@ describe('openStringPassage', () => {
 
   test('answers the selected bars over their open strings', () => {
     const passage = openStringPassage(score, { start: 1, end: 2 })
-    expect(passage?.label).toBe('Open strings, m.1–2')
+    expect(passage?.label).toBe('Open strings, m.1–2, Position 1st')
     // Two staves: the bars as written, then d' a' e''; c'' and d'' are both on the
     // A string under one slur, so they are tied (one bow), and a' is the open A again.
     expect(passage?.source.match(/\\new Staff/g)).toHaveLength(2)
@@ -25,7 +25,7 @@ describe('openStringPassage', () => {
   })
 
   test('takes a range with no end as its first bar, and no range as nothing', () => {
-    expect(openStringPassage(score, { start: 3, end: null })?.label).toBe('Open strings, m.3–3')
+    expect(openStringPassage(score, { start: 3, end: null })?.label).toBe('Open strings, m.3–3, Position 1st')
     expect(openStringPassage(score, null)).toBeNull()
   })
 

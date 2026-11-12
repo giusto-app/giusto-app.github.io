@@ -14,6 +14,7 @@ import {
 } from 'lilyjs'
 import LilyScore from './LilyScore'
 import OpenStringStudy from './OpenStringStudy'
+import RhythmStudy from './RhythmStudy'
 import RangeOverlay from './RangeOverlay'
 import TimelineStrip from './TimelineStrip'
 import { splitsSystems } from './longScore'
@@ -1309,6 +1310,9 @@ export default function PracticePlayback({
 
       {/* The selected bars on open strings: the string crossings alone. */}
       {parsed && <OpenStringStudy score={parsed.score} span={sectionSpan} />}
+
+      {/* The selected bars in a practice rhythm (dotted, two fast one slow, regrouped). */}
+      {parsed && <RhythmStudy score={parsed.score} span={sectionSpan} />}
 
       {/* The whole tune: seek, and the range's second pair of handles (LR5). */}
       {schedule && schedule.totalBeats > 0 && (
