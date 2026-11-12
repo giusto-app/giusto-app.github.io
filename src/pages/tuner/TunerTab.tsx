@@ -4,7 +4,7 @@ import TunerMeter from '../../components/TunerMeter'
 import NoteDisplay from '../../components/NoteDisplay'
 import CentsDisplay from '../../components/CentsDisplay'
 import FrequencyDisplay from '../../components/FrequencyDisplay'
-import StartButton from '../../components/StartButton'
+import { useIsActiveTab } from '../../activeTab'
 import { TEMPERAMENTS, type TemperamentKey } from '../../utils/temperaments'
 import { type ConcertPitchHz } from '../../utils/concertPitch'
 import { getResonanceString } from '../../utils/noteUtils'
@@ -25,6 +25,15 @@ export default function TunerTab({ temperamentKey, concertPitch, onTemperamentCh
   const [instrumentKey, setInstrumentKey] = useState<InstrumentKey>(loadInstrument)
   const [mode, setMode] = useState<TunerMode>('strings')
   const instrument = INSTRUMENTS[instrumentKey]
+
+  // The tuner listens while its tab is shown and stops when the user leaves it
+  // (every tab stays mounted, activeTab.ts), so there is no Start button.
+  const active = useIsActiveTab('tuner')
+  useEffect(() => {
+    if (!active) return
+    start()
+    return stop
+  }, [active, start, stop])
 
   function chooseInstrument(key: InstrumentKey) {
     setInstrumentKey(key)
@@ -127,7 +136,7 @@ export default function TunerTab({ temperamentKey, concertPitch, onTemperamentCh
           {note
             ? <NoteDisplay noteName={note.noteName} octave={note.octave} status={note.status} />
             : listeningState === 'idle'
-              ? <span className="text-sm text-gray-600">Tap Start Listening to begin</span>
+              ? <span className="text-sm text-gray-600">Starting the microphone…</span>
               : <span className="text-8xl font-bold text-gray-700">—</span>}
         </div>
 
@@ -175,9 +184,12 @@ export default function TunerTab({ temperamentKey, concertPitch, onTemperamentCh
       </main>
       )}
 
-      <footer className="w-full flex justify-center pb-2">
-        <StartButton listeningState={listeningState} onStart={start} onStop={stop} />
-      </footer>
+      {/* Only after a failure: the browser asks for the microphone again. */}
+      {listeningState === 'error' && (
+        <footer className="w-full flex justify-center pb-2">
+          <button onClick={start} className="px-8 py-4 neu-btn text-[color:var(--neu-fg)] rounded-full">Try again</button>
+        </footer>
+      )}
     </div>
   )
 }

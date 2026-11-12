@@ -103,7 +103,7 @@ export default function OpenStringsPanel({ instrument, concertPitch, frequency, 
       {/* Guidance */}
       <div className="h-6 text-sm text-gray-400 text-center">
         {!listening
-          ? 'Tap Start Listening, then bow each open string'
+          ? 'Starting the microphone… then bow each open string'
           : allTuned
             ? 'All strings tuned'
             : current

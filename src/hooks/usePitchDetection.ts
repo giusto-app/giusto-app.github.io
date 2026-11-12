@@ -30,6 +30,9 @@ export function usePitchDetection() {
   const temperamentOffsetsRef = useRef<readonly number[]>(TEMPERAMENTS.equal.offsets)
   const concertPitchRef = useRef<number>(440)
   const micSessionRef = useRef(false)
+  // Bumped by every start and stop: a start still awaiting the microphone
+  // when the user leaves the tab must not keep what it opens.
+  const sessionRef = useRef(0)
 
   const setTemperament = useCallback((offsets: readonly number[]) => {
     temperamentOffsetsRef.current = offsets
@@ -42,6 +45,7 @@ export function usePitchDetection() {
   }, [])
 
   const stop = useCallback(() => {
+    sessionRef.current++
     if (micSessionRef.current) {
       micSessionRef.current = false
       releaseMicSession()
@@ -62,6 +66,8 @@ export function usePitchDetection() {
   }, [])
 
   const start = useCallback(async () => {
+    const session = ++sessionRef.current
+    const superseded = () => session !== sessionRef.current
     try {
       setState({ note: null, listeningState: 'listening', errorMessage: null })
 
@@ -76,10 +82,12 @@ export function usePitchDetection() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
+      if (superseded()) { stream.getTracks().forEach(t => t.stop()); return }
       streamRef.current = stream
 
       const audioContext = new AudioContext()
       await audioContext.resume()
+      if (superseded()) { audioContext.close(); return }
       audioContextRef.current = audioContext
 
       const source = audioContext.createMediaStreamSource(stream)
@@ -117,6 +125,7 @@ export function usePitchDetection() {
 
       rafRef.current = requestAnimationFrame(detect)
     } catch (err) {
+      if (superseded()) return
       if (micSessionRef.current) {
         micSessionRef.current = false
         releaseMicSession()
